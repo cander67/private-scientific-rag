@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Source Viewer — Private Scientific RAG</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="nav-scrim" data-action="close-nav"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark"></span>
+          <div>mml-rag<small>local scientific RAG</small></div>
+        </div>
+        <nav class="nav">
+          <a href="index.html">Home</a>
+          <span class="nav-label">Workspace</span>
+          <a href="repository-dashboard.html">Repository Dashboard</a>
+          <a href="document-manager.html">Document Manager</a>
+          <a href="ingestion-source-viewer.html">Source Viewer</a>
+          <a href="search-lab.html">Search Lab</a>
+          <a href="prompt-sandbox.html">Prompt Sandbox</a>
+          <a href="chat-workspace.html">Chat Workspace</a>
+          <span class="nav-label">Manage</span>
+          <a href="settings-model-manager.html">Settings / Models</a>
+          <a href="recreate-repository.html">Recreate Repository</a>
+          <a href="export-center.html">Export Center</a>
+        </nav>
+        <div class="sidebar-foot"><span class="status ok">Local-only mode</span></div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="row">
+            <button class="hamburger" data-action="toggle-nav" aria-label="Open navigation">
+              <span></span>
+            </button>
+            <div class="titles">
+              <h1>Source Viewer</h1>
+              <p>
+                <a href="document-manager.html">Documents</a> ·
+                Kosinov_2018_zeolite_membranes.pdf
+              </p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <span class="badge badge-accent">structured-pdf v1.2</span>
+            <button class="theme-toggle" data-action="toggle-theme">
+              <span data-theme-label>Dark</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page">
+          <div class="banner banner-accent" style="font-size: 0.85rem">
+            <div>
+              This is exactly what retrieval sees: parsed text, chunk boundaries, and the metadata
+              attached to each chunk, table, and figure.
+            </div>
+          </div>
+
+          <div class="viewer">
+            <!-- structure tree -->
+            <aside class="card card-pad-sm tree">
+              <div class="eyebrow">Structure</div>
+              <details open>
+                <summary>Sections (9)</summary>
+                <span class="leaf">1 · Abstract</span>
+                <span class="leaf">2 · Introduction</span>
+                <span class="leaf active">3 · Methods</span>
+                <span class="leaf">4 · Results</span>
+                <span class="leaf">5 · Discussion</span>
+              </details>
+              <details>
+                <summary>Pages (24)</summary>
+                <span class="leaf">p. 1–4</span>
+                <span class="leaf">p. 5–8</span>
+                <span class="leaf">p. 9–12</span>
+              </details>
+              <details open>
+                <summary>Tables (3)</summary>
+                <span class="leaf">Table 1 · synthesis conditions</span>
+                <span class="leaf">Table 2 · permeance results</span>
+                <span class="leaf">Table 3 · selectivity</span>
+              </details>
+              <details>
+                <summary>Figures (5)</summary>
+                <span class="leaf">Figure 1 · SEM image</span>
+                <span class="leaf">Figure 2 · XRD pattern</span>
+              </details>
+              <details>
+                <summary>Chunks (86)</summary>
+                <span class="leaf active">chunk 12 · p.4 Methods</span>
+                <span class="leaf">chunk 13 · p.4 Methods</span>
+                <span class="leaf">chunk 14 · p.5 Methods</span>
+              </details>
+            </aside>
+
+            <!-- content viewer -->
+            <section class="card doc-text">
+              <div class="page-break">Page 4 · Section 3 — Methods</div>
+              <p>
+                Zeolite membranes were synthesized by secondary (seeded) growth on porous α-Al₂O₃
+                supports. Seed crystals were prepared and deposited prior to hydrothermal treatment.
+              </p>
+              <div class="chunk-mark">
+                <div class="muted num" style="font-size: 0.72rem; margin-bottom: 6px">
+                  chunk 12 · p.4 · Methods · offsets 4120–4498
+                </div>
+                The synthesis solution had a molar composition of 100 SiO₂ : 5 Al₂O₃ : 50 Na₂O :
+                4000 H₂O. Hydrothermal crystallization was carried out at 448 K for 24 h. After
+                synthesis, membranes were calcined at 773 K to remove the structure-directing agent.
+              </div>
+              <p>
+                Permeance and separation factors were measured using a Wicke–Kallenbach setup with
+                an equimolar CO₂/CH₄ feed at 308 K, as summarized in Table 2.
+              </p>
+              <div class="source-card" style="margin-top: var(--s4)">
+                <div class="meta">Table 2 · p.7 · asset_id tbl_0007_2</div>
+                <table style="font-size: 0.8rem">
+                  <thead>
+                    <tr><th>Membrane</th><th>CO₂ permeance</th><th>CO₂/CH₄</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr><td>SSZ-13 (a)</td><td class="num">1.4e-7</td><td class="num">42</td></tr>
+                    <tr><td>SSZ-13 (b)</td><td class="num">1.1e-7</td><td class="num">58</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <!-- provenance / details -->
+            <aside class="card card-pad-sm">
+              <div class="eyebrow">Selected chunk</div>
+              <h2 style="font-size: 0.95rem; margin-bottom: var(--s3)">chunk 12</h2>
+              <dl class="kv">
+                <dt>repository</dt>
+                <dd>zeolite_membranes_2026</dd>
+                <dt>document</dt>
+                <dd>doc_0041</dd>
+                <dt>version</dt>
+                <dd>v3</dd>
+                <dt>page</dt>
+                <dd>4</dd>
+                <dt>section</dt>
+                <dd>3 · Methods</dd>
+                <dt>chunk index</dt>
+                <dd>12 / 86</dd>
+                <dt>offsets</dt>
+                <dd>4120–4498</dd>
+                <dt>tokens</dt>
+                <dd>327</dd>
+                <dt>parser</dt>
+                <dd>structured-pdf v1.2</dd>
+                <dt>asset</dt>
+                <dd>—</dd>
+              </dl>
+              <hr class="divider" />
+              <div class="row">
+                <a class="btn btn-sm" href="search-lab.html">Find similar</a>
+                <button class="btn btn-sm btn-ghost">Copy citation</button>
+              </div>
+              <p class="hint" style="margin-top: var(--s3)">
+                Citation: [Kosinov_2018_zeolite_membranes.pdf, p. 4, Methods, chunk 12]
+              </p>
+            </aside>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
