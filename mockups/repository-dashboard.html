@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Repository Dashboard — Private Scientific RAG</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="nav-scrim" data-action="close-nav"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark"></span>
+          <div>mml-rag<small>local scientific RAG</small></div>
+        </div>
+        <nav class="nav">
+          <a href="index.html">Home</a>
+          <span class="nav-label">Workspace</span>
+          <a href="repository-dashboard.html">Repository Dashboard</a>
+          <a href="document-manager.html">Document Manager</a>
+          <a href="ingestion-source-viewer.html">Source Viewer</a>
+          <a href="search-lab.html">Search Lab</a>
+          <a href="prompt-sandbox.html">Prompt Sandbox</a>
+          <a href="chat-workspace.html">Chat Workspace</a>
+          <span class="nav-label">Manage</span>
+          <a href="settings-model-manager.html">Settings / Models</a>
+          <a href="recreate-repository.html">Recreate Repository</a>
+          <a href="export-center.html">Export Center</a>
+        </nav>
+        <div class="sidebar-foot"><span class="status ok">Local-only mode</span></div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="row">
+            <button class="hamburger" data-action="toggle-nav" aria-label="Open navigation">
+              <span></span>
+            </button>
+            <div class="titles">
+              <h1>Repository Dashboard</h1>
+              <p>zeolite_membranes_2026 · 42 documents</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <select aria-label="Active repository" style="width: auto">
+              <option>zeolite_membranes_2026</option>
+              <option>adhesives_patents</option>
+              <option>default</option>
+            </select>
+            <button class="btn">Reindex</button>
+            <button class="btn btn-primary">Export</button>
+            <button class="theme-toggle" data-action="toggle-theme">
+              <span data-theme-label>Dark</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page">
+          <div class="grid grid-4">
+            <div class="metric">
+              <span class="label">Documents</span>
+              <div class="value num">42</div>
+              <div class="sub">3 added this week</div>
+            </div>
+            <div class="metric">
+              <span class="label">Chunks</span>
+              <div class="value num">1,204</div>
+              <div class="sub">section-aware · 380w avg</div>
+            </div>
+            <div class="metric">
+              <span class="label">Vectors indexed</span>
+              <div class="value num">1,204</div>
+              <div class="sub"><span class="status ok">Qdrant reachable</span></div>
+            </div>
+            <div class="metric">
+              <span class="label">Last indexed</span>
+              <div class="value" style="font-size: 1.2rem">2h ago</div>
+              <div class="sub">2026-06-30 11:14</div>
+            </div>
+          </div>
+
+          <div class="grid grid-2">
+            <div class="card">
+              <div class="card-head">
+                <h2>Active configuration</h2>
+                <a href="settings-model-manager.html" class="btn btn-sm btn-ghost">Edit settings</a>
+              </div>
+              <dl class="kv">
+                <dt>Chat model</dt>
+                <dd>gemma3:4b</dd>
+                <dt>Embedding</dt>
+                <dd>all-MiniLM-L6-v2 (384d)</dd>
+                <dt>Reranker</dt>
+                <dd>cross-encoder/ms-marco-MiniLM-L6-v2</dd>
+                <dt>Search mode</dt>
+                <dd>Hybrid + cross-encoder</dd>
+                <dt>System prompt</dt>
+                <dd>scientific-grounded · v4</dd>
+                <dt>Chunking</dt>
+                <dd>section-aware · 400w · 15% overlap</dd>
+              </dl>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <h2>Index health</h2>
+                <span class="badge badge-ok"><span class="dot"></span>Healthy</span>
+              </div>
+              <div class="stack">
+                <div>
+                  <div class="row row-between">
+                    <span>Full-text (FTS5)</span><span class="muted num">1,204 / 1,204</span>
+                  </div>
+                  <div class="progress"><span style="width: 100%"></span></div>
+                </div>
+                <div>
+                  <div class="row row-between">
+                    <span>Vector (Qdrant)</span><span class="muted num">1,204 / 1,204</span>
+                  </div>
+                  <div class="progress"><span style="width: 100%"></span></div>
+                </div>
+                <div>
+                  <div class="row row-between">
+                    <span>Embeddings (last run)</span><span class="muted num">1,204 / 1,204</span>
+                  </div>
+                  <div class="progress"><span style="width: 100%"></span></div>
+                </div>
+                <hr class="divider" />
+                <div class="row row-between">
+                  <span class="muted">Snapshot</span>
+                  <code>snap_2026-06-30_a91f</code>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Quick actions</h2>
+            <div class="row">
+              <a class="btn" href="document-manager.html">Manage documents</a>
+              <a class="btn" href="search-lab.html">Open Search Lab</a>
+              <a class="btn" href="prompt-sandbox.html">Prompt Sandbox</a>
+              <a class="btn btn-primary" href="chat-workspace.html">Start chat</a>
+            </div>
+          </div>
+
+          <details class="card">
+            <summary class="muted" style="cursor: pointer">Show empty / loading states</summary>
+            <div class="grid grid-2" style="margin-top: var(--s4)">
+              <div class="empty">
+                <h3>No repositories yet</h3>
+                <p>Create a repository or recreate one from an exported bundle.</p>
+                <div class="row" style="justify-content: center">
+                  <button class="btn btn-primary">Create repository</button>
+                  <a class="btn" href="recreate-repository.html">Recreate from bundle</a>
+                </div>
+              </div>
+              <div class="card card-pad-sm">
+                <div class="eyebrow">Indexing…</div>
+                <div class="stack">
+                  <div class="skeleton" style="width: 60%"></div>
+                  <div class="skeleton" style="width: 90%"></div>
+                  <div class="skeleton" style="width: 40%"></div>
+                  <div class="skeleton" style="width: 75%"></div>
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
