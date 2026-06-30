@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Prompt Sandbox — Private Scientific RAG</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="nav-scrim" data-action="close-nav"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark"></span>
+          <div>mml-rag<small>local scientific RAG</small></div>
+        </div>
+        <nav class="nav">
+          <a href="index.html">Home</a>
+          <span class="nav-label">Workspace</span>
+          <a href="repository-dashboard.html">Repository Dashboard</a>
+          <a href="document-manager.html">Document Manager</a>
+          <a href="ingestion-source-viewer.html">Source Viewer</a>
+          <a href="search-lab.html">Search Lab</a>
+          <a href="prompt-sandbox.html">Prompt Sandbox</a>
+          <a href="chat-workspace.html">Chat Workspace</a>
+          <span class="nav-label">Manage</span>
+          <a href="settings-model-manager.html">Settings / Models</a>
+          <a href="recreate-repository.html">Recreate Repository</a>
+          <a href="export-center.html">Export Center</a>
+        </nav>
+        <div class="sidebar-foot"><span class="status ok">Local-only mode</span></div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="row">
+            <button class="hamburger" data-action="toggle-nav" aria-label="Open navigation">
+              <span></span>
+            </button>
+            <div class="titles">
+              <h1>Prompt Sandbox</h1>
+              <p>Experiment with prompts and settings — never changes chat defaults</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn">Save prompt version</button>
+            <button class="theme-toggle" data-action="toggle-theme">
+              <span data-theme-label>Dark</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page">
+          <div class="grid grid-2">
+            <div class="card">
+              <div class="card-head">
+                <h2>System prompt</h2>
+                <select style="width: auto">
+                  <option>scientific-grounded · v4</option>
+                  <option>scientific-grounded · v3</option>
+                  <option>terse-citations · v1</option>
+                </select>
+              </div>
+              <textarea rows="6">You are a scientific research assistant. Answer only from the retrieved repository context. Cite every factual claim with [file, page, section, chunk]. Separate evidence from inference. If the repository lacks evidence, say so. Do not invent citations.</textarea>
+            </div>
+            <div class="card">
+              <div class="card-head">
+                <h2>User prompt</h2>
+                <select style="width: auto">
+                  <option>Custom query</option>
+                  <option>Golden set · factual_lookup</option>
+                  <option>Golden set · table_lookup</option>
+                  <option>Golden set · patent_claim</option>
+                </select>
+              </div>
+              <textarea rows="6">What CO2/CH4 selectivity has been reported for SSZ-13 membranes, and under what conditions?</textarea>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="row" style="gap: var(--s2)">
+              <span class="muted">Run config:</span>
+              <span class="badge badge-accent">Hybrid</span>
+              <span class="badge badge-accent">Cross-encoder + metadata</span>
+              <span class="badge">gemma3:4b</span>
+              <span class="badge">top-k 6</span>
+            </div>
+            <div class="spacer"></div>
+            <button class="btn">Add comparison run</button>
+            <button class="btn btn-primary">Run both</button>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>Retrieved context preview</h2>
+              <span class="muted">6 chunks · before generation</span>
+            </div>
+            <div class="stack">
+              <div class="source-card">
+                <div class="meta">[Kosinov_2018.pdf, p.7, Results, chunk 31] · rerank 6.71</div>
+                SSZ-13 membranes exhibited a CO₂/CH₄ separation factor of 58 at 308 K…
+              </div>
+              <div class="source-card">
+                <div class="meta">[US10934172B2.pdf, p.18, Table 3, chunk 45] · rerank 6.38</div>
+                Example 4 reports selectivity above 50 under mixed-gas conditions…
+              </div>
+            </div>
+          </div>
+
+          <div class="compare">
+            <div class="card">
+              <div class="card-head">
+                <h2 style="font-size: 0.95rem">Run A · v4 · cross-encoder+meta</h2>
+                <span class="badge badge-ok">baseline</span>
+              </div>
+              <p>
+                Reported CO₂/CH₄ separation factors for SSZ-13 membranes range from about
+                <strong>42 to 58</strong> at 308 K
+                <button class="cite">[1]</button>, with CO₂ permeance near 1.1 × 10⁻⁷
+                mol·m⁻²·s⁻¹·Pa⁻¹ <button class="cite">[1]</button>. A patent example reports
+                selectivity above 50 under mixed-gas feed <button class="cite">[2]</button>.
+              </p>
+              <dl class="kv" style="margin-top: var(--s3)">
+                <dt>latency</dt><dd>2.1 s</dd>
+                <dt>context chunks</dt><dd>6</dd>
+                <dt>grounded</dt><dd>yes (2/2 claims cited)</dd>
+              </dl>
+            </div>
+            <div class="card">
+              <div class="card-head">
+                <h2 style="font-size: 0.95rem">Run B · v3 · no rerank</h2>
+                <span class="badge badge-warn">missed Table 3</span>
+              </div>
+              <p>
+                SSZ-13 membranes show high CO₂/CH₄ selectivity
+                <button class="cite">[1]</button>, generally above 40. Exact values depend on
+                synthesis and temperature.
+              </p>
+              <dl class="kv" style="margin-top: var(--s3)">
+                <dt>latency</dt><dd>1.8 s</dd>
+                <dt>context chunks</dt><dd>6</dd>
+                <dt>grounded</dt><dd>partial (1/1 cited, less specific)</dd>
+              </dl>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>Golden set evaluation</h2>
+              <button class="btn btn-sm">Run on golden set (12 queries)</button>
+            </div>
+            <div class="grid grid-4">
+              <div class="metric">
+                <span class="label">Recall@5</span><div class="value num">0.83</div>
+                <div class="sub">+0.17 vs no rerank</div>
+              </div>
+              <div class="metric">
+                <span class="label">Recall@10</span><div class="value num">0.92</div>
+              </div>
+              <div class="metric">
+                <span class="label">MRR</span><div class="value num">0.71</div>
+              </div>
+              <div class="metric">
+                <span class="label">Reranker win/loss</span><div class="value num">8 / 1</div>
+                <div class="sub">3 ties</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
