@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Export Center — Private Scientific RAG</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="nav-scrim" data-action="close-nav"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark"></span>
+          <div>mml-rag<small>local scientific RAG</small></div>
+        </div>
+        <nav class="nav">
+          <a href="index.html">Home</a>
+          <span class="nav-label">Workspace</span>
+          <a href="repository-dashboard.html">Repository Dashboard</a>
+          <a href="document-manager.html">Document Manager</a>
+          <a href="ingestion-source-viewer.html">Source Viewer</a>
+          <a href="search-lab.html">Search Lab</a>
+          <a href="prompt-sandbox.html">Prompt Sandbox</a>
+          <a href="chat-workspace.html">Chat Workspace</a>
+          <span class="nav-label">Manage</span>
+          <a href="settings-model-manager.html">Settings / Models</a>
+          <a href="recreate-repository.html">Recreate Repository</a>
+          <a href="export-center.html">Export Center</a>
+        </nav>
+        <div class="sidebar-foot"><span class="status ok">Local-only mode</span></div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="row">
+            <button class="hamburger" data-action="toggle-nav" aria-label="Open navigation">
+              <span></span>
+            </button>
+            <div class="titles">
+              <h1>Export Center</h1>
+              <p>Bundle a portable ZIP that can recreate this repository elsewhere</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button class="theme-toggle" data-action="toggle-theme">
+              <span data-theme-label>Dark</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page">
+          <div class="grid grid-side">
+            <div class="stack">
+              <div class="card">
+                <h2>Contents</h2>
+                <div class="grid grid-2" style="margin-top: var(--s3)">
+                  <label class="check"><input type="checkbox" checked /><span>Chat sessions <small>3 sessions · 22 messages</small></span></label>
+                  <label class="check"><input type="checkbox" checked /><span>Repository settings <small>chunking, search, models</small></span></label>
+                  <label class="check"><input type="checkbox" checked /><span>Prompt versions <small>4 versions</small></span></label>
+                  <label class="check"><input type="checkbox" checked /><span>Retrieval runs <small>18 runs</small></span></label>
+                  <label class="check"><input type="checkbox" checked /><span>Chunks <small>1,204 (CSV)</small></span></label>
+                  <label class="check"><input type="checkbox" checked /><span>Citations <small>linked to chats &amp; runs</small></span></label>
+                  <label class="check"><input type="checkbox" /><span>Cited source files only <small>5 documents</small></span></label>
+                  <label class="check"><input type="checkbox" /><span>All repository documents <small>42 documents · large</small></span></label>
+                  <label class="check"><input type="checkbox" /><span>Table &amp; figure assets <small>images, CSVs</small></span></label>
+                </div>
+                <hr class="divider" />
+                <div class="grid grid-2">
+                  <label class="check"><input type="checkbox" checked /><span>Machine-readable JSON</span></label>
+                  <label class="check"><input type="checkbox" checked /><span>Human-readable Markdown</span></label>
+                </div>
+                <div class="hint">
+                  Excluding source files reduces the bundle by ~80%. A repository can only be fully
+                  recreated when its source files are included or available separately.
+                </div>
+              </div>
+
+              <div class="card">
+                <h2>Bundle preview</h2>
+                <pre class="mono" style="background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--s4); overflow-x: auto; font-size: 0.78rem; line-height: 1.5">rag-export-2026-06-30-a91f.zip
+├── manifest.json
+├── chat.md / chat.json
+├── settings.json
+├── repository_snapshot.json
+├── prompts/        system_prompt.md · prompt_template.json
+├── retrieval_runs/ retrieval_run_*.json · sources_*.json
+├── sources/        chunks.csv · citations.csv
+└── README.md</pre>
+              </div>
+            </div>
+
+            <aside class="card" style="align-self: start">
+              <div class="eyebrow">Summary</div>
+              <dl class="kv">
+                <dt>Estimated size</dt>
+                <dd>3.2 MB</dd>
+                <dt>Files</dt>
+                <dd>38</dd>
+                <dt>Chats</dt>
+                <dd>3</dd>
+                <dt>Runs</dt>
+                <dd>18</dd>
+                <dt>Source files</dt>
+                <dd>excluded</dd>
+              </dl>
+              <hr class="divider" />
+              <button class="btn btn-primary" style="width: 100%" data-action="open-modal" data-target="export-modal">
+                Export ZIP
+              </button>
+              <p class="hint" style="margin-top: var(--s3)">
+                Export runs locally. Nothing leaves this machine.
+              </p>
+            </aside>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="overlay" id="export-modal">
+      <div class="modal">
+        <div class="modal-head">
+          <h2>Exporting bundle</h2>
+          <button class="close-x" data-action="close-modal" aria-label="Close">×</button>
+        </div>
+        <div class="stack">
+          <div>
+            <div class="row row-between"><span>Collecting files…</span><span class="muted">72%</span></div>
+            <div class="progress"><span style="width: 72%"></span></div>
+          </div>
+          <div class="banner banner-ok" style="display: none"></div>
+          <p class="muted">manifest.json · settings.json · 1,204 chunks · 18 runs · 3 chats</p>
+        </div>
+        <hr class="divider" />
+        <div class="row row-between">
+          <span class="status ok">Download will start automatically</span>
+          <button class="btn btn-primary" data-action="close-modal">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
