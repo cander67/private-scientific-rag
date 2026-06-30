@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Settings / Model Manager — Private Scientific RAG</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="nav-scrim" data-action="close-nav"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark"></span>
+          <div>mml-rag<small>local scientific RAG</small></div>
+        </div>
+        <nav class="nav">
+          <a href="index.html">Home</a>
+          <span class="nav-label">Workspace</span>
+          <a href="repository-dashboard.html">Repository Dashboard</a>
+          <a href="document-manager.html">Document Manager</a>
+          <a href="ingestion-source-viewer.html">Source Viewer</a>
+          <a href="search-lab.html">Search Lab</a>
+          <a href="prompt-sandbox.html">Prompt Sandbox</a>
+          <a href="chat-workspace.html">Chat Workspace</a>
+          <span class="nav-label">Manage</span>
+          <a href="settings-model-manager.html">Settings / Models</a>
+          <a href="recreate-repository.html">Recreate Repository</a>
+          <a href="export-center.html">Export Center</a>
+        </nav>
+        <div class="sidebar-foot"><span class="status ok">Local-only mode</span></div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="row">
+            <button class="hamburger" data-action="toggle-nav" aria-label="Open navigation">
+              <span></span>
+            </button>
+            <div class="titles">
+              <h1>Settings / Model Manager</h1>
+              <p>zeolite_membranes_2026 · repository defaults</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <span class="badge badge-ok"><span class="dot"></span>Local-only · telemetry off</span>
+            <button class="btn">Cancel</button>
+            <button class="btn btn-primary">Save changes</button>
+            <button class="theme-toggle" data-action="toggle-theme">
+              <span data-theme-label>Dark</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page">
+          <div class="banner banner-warn">
+            <div>
+              <div class="b-title">Qdrant not reachable on http://localhost:6333</div>
+              Vector search and reindexing will fail until the Qdrant service is running
+              (<code>docker compose up qdrant</code>).
+            </div>
+          </div>
+
+          <div class="card tabbed">
+            <div class="tabs">
+              <button data-action="tab" data-target="t-chunk" aria-selected="true">Chunking</button>
+              <button data-action="tab" data-target="t-fts">Full-text</button>
+              <button data-action="tab" data-target="t-vec">Vector</button>
+              <button data-action="tab" data-target="t-rerank">Reranking</button>
+              <button data-action="tab" data-target="t-llm">Chat / LLM</button>
+              <button data-action="tab" data-target="t-prompt">Prompts</button>
+              <button data-action="tab" data-target="t-export">Export</button>
+            </div>
+
+            <div class="tab-panel active" id="t-chunk">
+              <div class="grid grid-3">
+                <div>
+                  <label class="field">Chunking mode</label>
+                  <select>
+                    <option selected>Section-aware</option>
+                    <option>Page-aware</option>
+                    <option>Asset-aware</option>
+                    <option>Fixed word/token</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field">Chunk size (words)</label>
+                  <input type="number" value="400" />
+                </div>
+                <div>
+                  <label class="field">Overlap</label>
+                  <input type="number" value="15" />
+                  <div class="hint">percent of chunk size</div>
+                </div>
+                <div>
+                  <label class="field">Structured parser</label>
+                  <select><option selected>structured-pdf v1.2</option></select>
+                </div>
+                <div>
+                  <label class="field">Fallback parser</label>
+                  <select><option selected>pypdf</option></select>
+                </div>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="t-fts">
+              <p class="muted">Field weights for SQLite FTS5 (BM25).</p>
+              <div class="grid grid-4">
+                <div><label class="field">Title</label><input type="number" value="3.0" /></div>
+                <div><label class="field">Headings</label><input type="number" value="2.0" /></div>
+                <div><label class="field">Body</label><input type="number" value="1.0" /></div>
+                <div><label class="field">Captions</label><input type="number" value="1.5" /></div>
+                <div><label class="field">Tables</label><input type="number" value="1.5" /></div>
+                <div><label class="field">Claims</label><input type="number" value="2.0" /></div>
+              </div>
+              <div class="row" style="margin-top: var(--s4)">
+                <select style="width: auto"><option>Tokenizer: unicode61</option></select>
+                <label class="check"><input type="checkbox" checked /><span>Remove stopwords</span></label>
+                <button class="btn">Rebuild full-text index</button>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="t-vec">
+              <div class="grid grid-2">
+                <div>
+                  <label class="field">Embedding provider</label>
+                  <select>
+                    <option selected>SentenceTransformers</option>
+                    <option>Ollama embeddings</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field">Embedding model</label>
+                  <select>
+                    <option selected>all-MiniLM-L6-v2 (384d)</option>
+                    <option>all-mpnet-base-v2 (768d)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field">Distance metric</label>
+                  <select><option selected>cosine</option><option>dot</option></select>
+                </div>
+                <div>
+                  <label class="field">Device</label>
+                  <select><option selected>auto</option><option>cpu</option><option>gpu</option></select>
+                </div>
+              </div>
+              <div class="row" style="margin-top: var(--s4)">
+                <span class="status danger">Qdrant unreachable · localhost:6333</span>
+                <button class="btn">Test connection</button>
+                <button class="btn" disabled>Rebuild vector index</button>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="t-rerank">
+              <div class="grid grid-2">
+                <div>
+                  <label class="field">Default reranking strategy</label>
+                  <select>
+                    <option>None</option>
+                    <option>Cross-encoder</option>
+                    <option>Metadata boost</option>
+                    <option selected>Cross-encoder + metadata boost</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field">Reranker model</label>
+                  <select><option selected>cross-encoder/ms-marco-MiniLM-L6-v2</option></select>
+                </div>
+                <div>
+                  <label class="field">Candidate pool</label><input type="number" value="30" />
+                </div>
+                <div>
+                  <label class="field">Final top-k</label><input type="number" value="6" />
+                </div>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="t-llm">
+              <div class="grid grid-2">
+                <div>
+                  <label class="field">Chat model</label>
+                  <select>
+                    <option selected>gemma3:4b</option>
+                    <option>gemma4:12b (not installed)</option>
+                    <option>qwen3.5:9b (not installed)</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="field">Context chunks</label><input type="number" value="6" />
+                </div>
+              </div>
+              <div class="row" style="margin-top: var(--s4)">
+                <span class="status ok">gemma3:4b ready</span>
+                <button class="btn">Run smoke test</button>
+              </div>
+            </div>
+
+            <div class="tab-panel" id="t-prompt">
+              <div class="card-head">
+                <select style="width: auto">
+                  <option>scientific-grounded · v4 (active)</option>
+                  <option>scientific-grounded · v3</option>
+                </select>
+                <button class="btn btn-sm">Save as new version</button>
+              </div>
+              <textarea rows="5">You are a scientific research assistant. Answer only from the retrieved repository context. Cite every factual claim with [file, page, section, chunk]. Separate evidence from inference. If the repository lacks evidence, say so.</textarea>
+            </div>
+
+            <div class="tab-panel" id="t-export">
+              <label class="check"><input type="checkbox" checked /><span>Include source documents by default</span></label>
+              <label class="check"><input type="checkbox" checked /><span>Include settings snapshot</span></label>
+              <label class="check"><input type="checkbox" checked /><span>Include machine-readable JSON</span></label>
+              <label class="check"><input type="checkbox" /><span>Include all repository documents</span></label>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>Model registry</h2>
+              <button class="btn btn-sm">Refresh</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr><th>Model</th><th>Type</th><th>Status</th><th>Last tested</th><th></th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="name">gemma3:4b</td><td>Chat (Ollama)</td>
+                    <td><span class="badge badge-ok"><span class="dot"></span>Ready</span></td>
+                    <td class="muted">2h ago</td>
+                    <td><button class="btn btn-sm btn-ghost">Test</button></td>
+                  </tr>
+                  <tr>
+                    <td class="name">all-MiniLM-L6-v2</td><td>Embedding</td>
+                    <td><span class="badge badge-ok"><span class="dot"></span>Ready</span></td>
+                    <td class="muted">2h ago</td>
+                    <td><button class="btn btn-sm btn-ghost">Test</button></td>
+                  </tr>
+                  <tr>
+                    <td class="name">ms-marco-MiniLM-L6-v2</td><td>Reranker</td>
+                    <td><span class="badge badge-ok"><span class="dot"></span>Ready</span></td>
+                    <td class="muted">2h ago</td>
+                    <td><button class="btn btn-sm btn-ghost">Test</button></td>
+                  </tr>
+                  <tr>
+                    <td class="name">gemma4:12b</td><td>Chat (Ollama)</td>
+                    <td><span class="badge badge-warn"><span class="dot"></span>Not installed</span></td>
+                    <td class="muted">—</td>
+                    <td><button class="btn btn-sm">Download</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
