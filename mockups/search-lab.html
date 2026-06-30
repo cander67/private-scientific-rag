@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Search Lab — Private Scientific RAG</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="nav-scrim" data-action="close-nav"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark"></span>
+          <div>mml-rag<small>local scientific RAG</small></div>
+        </div>
+        <nav class="nav">
+          <a href="index.html">Home</a>
+          <span class="nav-label">Workspace</span>
+          <a href="repository-dashboard.html">Repository Dashboard</a>
+          <a href="document-manager.html">Document Manager</a>
+          <a href="ingestion-source-viewer.html">Source Viewer</a>
+          <a href="search-lab.html">Search Lab</a>
+          <a href="prompt-sandbox.html">Prompt Sandbox</a>
+          <a href="chat-workspace.html">Chat Workspace</a>
+          <span class="nav-label">Manage</span>
+          <a href="settings-model-manager.html">Settings / Models</a>
+          <a href="recreate-repository.html">Recreate Repository</a>
+          <a href="export-center.html">Export Center</a>
+        </nav>
+        <div class="sidebar-foot"><span class="status ok">Local-only mode</span></div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="row">
+            <button class="hamburger" data-action="toggle-nav" aria-label="Open navigation">
+              <span></span>
+            </button>
+            <div class="titles">
+              <h1>Search Lab</h1>
+              <p>Inspect and compare retrieval — full-text, vector, hybrid, reranking</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button class="theme-toggle" data-action="toggle-theme">
+              <span data-theme-label>Dark</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page">
+          <div class="card">
+            <label class="field" for="q">Query</label>
+            <div class="row" style="flex-wrap: nowrap">
+              <input
+                id="q"
+                type="search"
+                value="CO2/CH4 selectivity of SSZ-13 membranes"
+              />
+              <button class="btn btn-primary">Run search</button>
+            </div>
+
+            <div class="grid grid-2" style="margin-top: var(--s4)">
+              <div>
+                <label class="field">Search mode</label>
+                <div class="segmented">
+                  <button>Full-text</button>
+                  <button>Vector</button>
+                  <button aria-pressed="true">Hybrid</button>
+                </div>
+              </div>
+              <div>
+                <label class="field" for="rerank">Reranking strategy</label>
+                <select id="rerank">
+                  <option>None</option>
+                  <option>Cross-encoder</option>
+                  <option>Metadata boost</option>
+                  <option selected>Cross-encoder + metadata boost</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="accordion" style="margin-top: var(--s4)">
+              <button class="acc-head" data-action="accordion" aria-expanded="false">
+                Filters &amp; candidate settings
+                <span class="chev">›</span>
+              </button>
+              <div class="acc-body">
+                <div class="grid grid-3">
+                  <div>
+                    <label class="field">Top-k (final)</label>
+                    <input type="range" min="1" max="50" value="10" />
+                    <div class="hint">10 results shown</div>
+                  </div>
+                  <div>
+                    <label class="field">Full-text candidates</label>
+                    <input type="number" value="50" />
+                  </div>
+                  <div>
+                    <label class="field">Vector candidates</label>
+                    <input type="number" value="50" />
+                  </div>
+                  <div>
+                    <label class="field">RRF constant</label>
+                    <input type="number" value="60" />
+                  </div>
+                  <div>
+                    <label class="field">Rerank pool</label>
+                    <input type="number" value="30" />
+                  </div>
+                  <div>
+                    <label class="field">Document type</label>
+                    <select>
+                      <option>Any</option>
+                      <option>Journal article</option>
+                      <option>Patent</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="row" style="margin-top: var(--s3)">
+                  <span class="badge badge-accent">section: Methods, Results ×</span>
+                  <span class="badge badge-accent">has table ×</span>
+                  <span class="badge badge-accent">chemistry: SSZ-13 ×</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row row-between">
+            <span class="muted">10 results · merged from 50 full-text + 50 vector candidates</span>
+            <div class="row">
+              <span class="badge"><span class="dot"></span>latency 184 ms</span>
+              <button class="btn btn-sm">Compare runs</button>
+            </div>
+          </div>
+
+          <!-- result 1 -->
+          <div class="result">
+            <div class="row row-between">
+              <div>
+                <span class="rank">#1</span>
+                <strong> Kosinov_2018_zeolite_membranes.pdf</strong>
+                <span class="muted">· p.7 · Results · chunk 31</span>
+              </div>
+              <a class="btn btn-sm btn-ghost" href="ingestion-source-viewer.html">View source</a>
+            </div>
+            <p style="margin: var(--s3) 0 0">
+              SSZ-13 membranes exhibited a CO₂/CH₄ separation factor of 58 at 308 K with a CO₂
+              permeance of 1.1 × 10⁻⁷ mol·m⁻²·s⁻¹·Pa⁻¹, attributed to the narrow 8-ring pore window…
+            </p>
+            <div class="scores">
+              <div class="score"><span>Dense</span><b>0.841</b></div>
+              <div class="score"><span>BM25</span><b>11.92</b></div>
+              <div class="score"><span>RRF</span><b>0.0312</b></div>
+              <div class="score"><span>Rerank</span><b>6.71</b></div>
+              <div class="score"><span>Final rank</span><b>1</b></div>
+            </div>
+          </div>
+
+          <!-- result 2 -->
+          <div class="result">
+            <div class="row row-between">
+              <div>
+                <span class="rank">#2</span>
+                <strong> US10934172B2_membrane_patent.pdf</strong>
+                <span class="muted">· p.18 · Table 3 · chunk 45</span>
+              </div>
+              <a class="btn btn-sm btn-ghost" href="ingestion-source-viewer.html">View source</a>
+            </div>
+            <p style="margin: var(--s3) 0 0">
+              Example 4 reports a chabazite-type membrane with CO₂/CH₄ selectivity above 50 measured
+              under mixed-gas conditions; see Table 3 for permeance values across temperatures…
+            </p>
+            <div class="scores">
+              <div class="score"><span>Dense</span><b>0.802</b></div>
+              <div class="score"><span>BM25</span><b>14.07</b></div>
+              <div class="score"><span>RRF</span><b>0.0301</b></div>
+              <div class="score"><span>Rerank</span><b>6.38</b></div>
+              <div class="score"><span>Final rank</span><b>2</b></div>
+            </div>
+          </div>
+
+          <!-- result 3 -->
+          <div class="result">
+            <div class="row row-between">
+              <div>
+                <span class="rank">#3</span>
+                <strong> review_MOF_separation_2024.pdf</strong>
+                <span class="muted">· p.3 · Introduction · chunk 8</span>
+              </div>
+              <a class="btn btn-sm btn-ghost" href="ingestion-source-viewer.html">View source</a>
+            </div>
+            <p style="margin: var(--s3) 0 0">
+              Among small-pore zeolites, SSZ-13 and SAPO-34 are the most studied for CO₂ separation
+              owing to molecular-sieving effects at the 0.38 nm pore aperture…
+            </p>
+            <div class="scores">
+              <div class="score"><span>Dense</span><b>0.788</b></div>
+              <div class="score"><span>BM25</span><b>6.41</b></div>
+              <div class="score"><span>RRF</span><b>0.0288</b></div>
+              <div class="score"><span>Rerank</span><b>5.12</b></div>
+              <div class="score"><span>Final rank</span><b>3</b></div>
+            </div>
+          </div>
+
+          <details class="card">
+            <summary class="muted" style="cursor: pointer">
+              Show compare / empty / loading states
+            </summary>
+            <div style="margin-top: var(--s4)">
+              <div class="compare">
+                <div class="card card-pad-sm">
+                  <div class="row row-between">
+                    <strong>Hybrid + cross-encoder</strong>
+                    <span class="badge badge-ok">baseline</span>
+                  </div>
+                  <ol class="num" style="padding-left: 1.2em; font-size: 0.85rem">
+                    <li>Kosinov_2018 · chunk 31</li>
+                    <li>US10934172B2 · chunk 45</li>
+                    <li>review_MOF · chunk 8</li>
+                  </ol>
+                </div>
+                <div class="card card-pad-sm">
+                  <div class="row row-between">
+                    <strong>Hybrid · no rerank</strong>
+                    <span class="badge badge-warn">−2 positions on #1</span>
+                  </div>
+                  <ol class="num" style="padding-left: 1.2em; font-size: 0.85rem">
+                    <li>review_MOF · chunk 8</li>
+                    <li>Kosinov_2018 · chunk 31</li>
+                    <li>US10934172B2 · chunk 45</li>
+                  </ol>
+                </div>
+              </div>
+              <div class="grid grid-2" style="margin-top: var(--s4)">
+                <div class="empty">
+                  <h3>Enter a query to begin</h3>
+                  <p>Pick a mode and reranking strategy, then run a search.</p>
+                </div>
+                <div class="card card-pad-sm">
+                  <div class="eyebrow">Searching…</div>
+                  <div class="stack">
+                    <div class="skeleton" style="width: 80%"></div>
+                    <div class="skeleton" style="width: 95%"></div>
+                    <div class="skeleton" style="width: 55%"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </details>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
