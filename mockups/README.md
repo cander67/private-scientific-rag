@@ -1,0 +1,44 @@
+# Workbench mockups
+
+Static HTML/CSS mockups for the private scientific RAG workbench. They validate layout,
+terminology, and information hierarchy **before** backend implementation begins
+(see `../.plans/private_scientific_rag_revised_plan.md` §12.3).
+
+No build step and no backend. Open any file in a browser, or serve the folder.
+
+## Screens
+
+`index.html` links all nine: Repository Dashboard, Document Manager, Source Viewer, Search Lab,
+Prompt Sandbox, Chat Workspace, Settings / Model Manager, Recreate Repository, Export Center.
+
+Shared across every page:
+
+- `styles.css` — design system (light/dark CSS variables, layout primitives). Light tokens are
+  seeded from `../frontend/src/styles.css` so the eventual React UI inherits the same look.
+- `app.js` — theme toggle (persisted, respects `prefers-color-scheme`), active nav, tabs,
+  accordions, citation popovers, and modals. Pages still render without it.
+
+## View locally
+
+```bash
+# either open mockups/index.html directly, or:
+cd mockups
+npm run serve      # http://127.0.0.1:4173
+```
+
+Toggle light/dark from the control in the top-right of any page. Resize below ~900px to see the
+sidebar collapse into a hamburger menu.
+
+## Tests &amp; screenshots (Playwright, optional)
+
+```bash
+cd mockups
+npm install
+npx playwright install --with-deps
+npm test                 # smoke: every page loads, no console errors, theme toggle works
+npm run screenshots      # writes screenshots/<desktop|mobile>/<page>-<light|dark>.png
+```
+
+The smoke test and the screenshot matrix (desktop + mobile × light + dark) are the review
+artifacts. `screenshots/`, `node_modules/`, `test-results/`, and `playwright-report/` are
+gitignored.
