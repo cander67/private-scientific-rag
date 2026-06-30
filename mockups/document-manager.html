@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Document Manager — Private Scientific RAG</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="nav-scrim" data-action="close-nav"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark"></span>
+          <div>mml-rag<small>local scientific RAG</small></div>
+        </div>
+        <nav class="nav">
+          <a href="index.html">Home</a>
+          <span class="nav-label">Workspace</span>
+          <a href="repository-dashboard.html">Repository Dashboard</a>
+          <a href="document-manager.html">Document Manager</a>
+          <a href="ingestion-source-viewer.html">Source Viewer</a>
+          <a href="search-lab.html">Search Lab</a>
+          <a href="prompt-sandbox.html">Prompt Sandbox</a>
+          <a href="chat-workspace.html">Chat Workspace</a>
+          <span class="nav-label">Manage</span>
+          <a href="settings-model-manager.html">Settings / Models</a>
+          <a href="recreate-repository.html">Recreate Repository</a>
+          <a href="export-center.html">Export Center</a>
+        </nav>
+        <div class="sidebar-foot"><span class="status ok">Local-only mode</span></div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="row">
+            <button class="hamburger" data-action="toggle-nav" aria-label="Open navigation">
+              <span></span>
+            </button>
+            <div class="titles">
+              <h1>Document Manager</h1>
+              <p>zeolite_membranes_2026</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button class="btn btn-primary" data-action="open-modal" data-target="upload-modal">
+              Upload documents
+            </button>
+            <button class="theme-toggle" data-action="toggle-theme">
+              <span data-theme-label>Dark</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page">
+          <div class="dropzone">
+            <p><strong>Drag PDF, TXT, or Markdown files here</strong></p>
+            <p class="muted">or use the Upload button. Duplicate files are skipped by hash.</p>
+          </div>
+
+          <div class="row row-between">
+            <div class="row">
+              <input type="search" placeholder="Filter by name…" style="width: 220px" />
+              <select style="width: auto">
+                <option>All statuses</option>
+                <option>Embedded</option>
+                <option>Parsing</option>
+                <option>Failed</option>
+                <option>Skipped</option>
+              </select>
+            </div>
+            <span class="muted">42 documents · 1,204 chunks</span>
+          </div>
+
+          <div class="grid grid-side">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Document</th>
+                    <th>Status</th>
+                    <th>Pages</th>
+                    <th>Chunks</th>
+                    <th>Uploaded</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <div class="name">Kosinov_2018_zeolite_membranes.pdf</div>
+                      <div class="muted num" style="font-size: 0.74rem">2.4 MB · sha256 9f2a…c1</div>
+                    </td>
+                    <td><span class="badge badge-ok"><span class="dot"></span>Embedded</span></td>
+                    <td class="num">24</td>
+                    <td class="num">86</td>
+                    <td class="muted">Jun 28</td>
+                    <td>
+                      <a href="ingestion-source-viewer.html" class="btn btn-sm btn-ghost">Inspect</a>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="name">US10934172B2_membrane_patent.pdf</div>
+                      <div class="muted num" style="font-size: 0.74rem">5.1 MB · sha256 41b8…7d</div>
+                    </td>
+                    <td><span class="badge badge-ok"><span class="dot"></span>Embedded</span></td>
+                    <td class="num">31</td>
+                    <td class="num">142</td>
+                    <td class="muted">Jun 28</td>
+                    <td>
+                      <a href="ingestion-source-viewer.html" class="btn btn-sm btn-ghost">Inspect</a>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="name">review_MOF_separation_2024.pdf</div>
+                      <div class="muted num" style="font-size: 0.74rem">3.8 MB · parsing pages…</div>
+                    </td>
+                    <td><span class="badge badge-warn"><span class="dot"></span>Chunking</span></td>
+                    <td class="num">18</td>
+                    <td class="muted">—</td>
+                    <td class="muted">Jun 30</td>
+                    <td><button class="btn btn-sm btn-ghost" disabled>Inspect</button></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="name">scanned_thesis_ch3.pdf</div>
+                      <div class="muted num" style="font-size: 0.74rem">12.0 MB · no text layer</div>
+                    </td>
+                    <td><span class="badge badge-danger"><span class="dot"></span>Failed</span></td>
+                    <td class="muted">—</td>
+                    <td class="muted">—</td>
+                    <td class="muted">Jun 30</td>
+                    <td><button class="btn btn-sm btn-ghost">Reprocess</button></td>
+                  </tr>
+                  <tr>
+                    <td>
+                      <div class="name">notes_synthesis_conditions.md</div>
+                      <div class="muted num" style="font-size: 0.74rem">14 KB · duplicate of v1</div>
+                    </td>
+                    <td><span class="badge"><span class="dot"></span>Skipped</span></td>
+                    <td class="muted">—</td>
+                    <td class="muted">—</td>
+                    <td class="muted">Jun 29</td>
+                    <td><button class="btn btn-sm btn-ghost">Details</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="card card-pad-sm">
+              <div class="eyebrow">Selected document</div>
+              <h2 style="font-size: 0.95rem; margin-bottom: var(--s3)">
+                Kosinov_2018_zeolite_membranes.pdf
+              </h2>
+              <dl class="kv">
+                <dt>Status</dt>
+                <dd>Embedded</dd>
+                <dt>Pages</dt>
+                <dd>24</dd>
+                <dt>Sections</dt>
+                <dd>9</dd>
+                <dt>Chunks</dt>
+                <dd>86</dd>
+                <dt>Parser</dt>
+                <dd>structured-pdf v1.2</dd>
+                <dt>Hash</dt>
+                <dd>9f2a…c1</dd>
+              </dl>
+              <hr class="divider" />
+              <div class="banner banner-warn" style="font-size: 0.8rem">
+                2 pages used the pypdf fallback (low-confidence layout).
+              </div>
+              <div class="stack" style="margin-top: var(--s3)">
+                <a href="ingestion-source-viewer.html" class="btn btn-primary">Open in Source Viewer</a>
+                <button class="btn">Reprocess</button>
+                <button class="btn btn-ghost" style="color: var(--danger)">Delete</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div class="overlay" id="upload-modal">
+      <div class="modal">
+        <div class="modal-head">
+          <h2>Upload documents</h2>
+          <button class="close-x" data-action="close-modal" aria-label="Close">×</button>
+        </div>
+        <div class="dropzone" style="margin-bottom: var(--s4)">
+          <p><strong>Drop files</strong> or click to browse</p>
+          <p class="muted">PDF, TXT, Markdown · max 50 MB each</p>
+        </div>
+        <div class="stack">
+          <div>
+            <div class="row row-between">
+              <span class="num">Kosinov_2018_zeolite_membranes.pdf</span><span class="muted">100%</span>
+            </div>
+            <div class="progress"><span style="width: 100%"></span></div>
+          </div>
+          <div>
+            <div class="row row-between">
+              <span class="num">review_MOF_separation_2024.pdf</span><span class="muted">62%</span>
+            </div>
+            <div class="progress"><span style="width: 62%"></span></div>
+          </div>
+        </div>
+        <hr class="divider" />
+        <div class="row row-between">
+          <span class="muted">Unchanged files are skipped by hash.</span>
+          <button class="btn btn-primary" data-action="close-modal">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
