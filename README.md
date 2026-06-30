@@ -8,11 +8,12 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 foundation is in progress. The current scaffold provides:
+PRD1 foundation is complete, and PRD2 repository settings work has started. The current scaffold provides:
 
 - FastAPI backend shell with `/health`.
+- Repository settings API for default repository creation, settings updates, manifest export, and recreate validation.
 - React/Vite frontend shell.
-- SQLAlchemy/Alembic migration wiring.
+- SQLAlchemy/Alembic migration wiring with the first repository/settings tables.
 - Qdrant Docker Compose service.
 - Pytest, Ruff, Mypy, and CI configuration.
 - Public-repo safety defaults.
@@ -33,6 +34,12 @@ Install backend dependencies:
 
 ```bash
 uv sync --all-extras --dev
+```
+
+Apply database migrations:
+
+```bash
+uv run alembic upgrade head
 ```
 
 Start Qdrant:
