@@ -55,6 +55,8 @@ documents/
 !documents/README.md
 
 # Frontend dependency/build outputs.
+/node_modules/
+/package-lock.json
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
