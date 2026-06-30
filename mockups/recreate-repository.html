@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Recreate Repository — Private Scientific RAG</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="nav-scrim" data-action="close-nav"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark"></span>
+          <div>mml-rag<small>local scientific RAG</small></div>
+        </div>
+        <nav class="nav">
+          <a href="index.html">Home</a>
+          <span class="nav-label">Workspace</span>
+          <a href="repository-dashboard.html">Repository Dashboard</a>
+          <a href="document-manager.html">Document Manager</a>
+          <a href="ingestion-source-viewer.html">Source Viewer</a>
+          <a href="search-lab.html">Search Lab</a>
+          <a href="prompt-sandbox.html">Prompt Sandbox</a>
+          <a href="chat-workspace.html">Chat Workspace</a>
+          <span class="nav-label">Manage</span>
+          <a href="settings-model-manager.html">Settings / Models</a>
+          <a href="recreate-repository.html">Recreate Repository</a>
+          <a href="export-center.html">Export Center</a>
+        </nav>
+        <div class="sidebar-foot"><span class="status ok">Local-only mode</span></div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="row">
+            <button class="hamburger" data-action="toggle-nav" aria-label="Open navigation">
+              <span></span>
+            </button>
+            <div class="titles">
+              <h1>Recreate Repository</h1>
+              <p>Rebuild a repository from an exported bundle and its manifest</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button class="theme-toggle" data-action="toggle-theme">
+              <span data-theme-label>Dark</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page">
+          <div class="grid grid-2">
+            <div class="card">
+              <h2>1 · Source</h2>
+              <div class="dropzone" style="margin: var(--s4) 0">
+                <p><strong>Drop an export ZIP</strong> or browse</p>
+                <p class="muted">.zip bundle containing manifest.json and sources/</p>
+              </div>
+              <dl class="kv">
+                <dt>Bundle</dt>
+                <dd>rag-export-2026-06-21-c4f1.zip</dd>
+                <dt>Repository</dt>
+                <dd>zeolite_membranes_2026</dd>
+                <dt>Created</dt>
+                <dd>2026-06-21 on macOS</dd>
+                <dt>Snapshot</dt>
+                <dd>snap_2026-06-21_77ab</dd>
+              </dl>
+            </div>
+
+            <div class="card">
+              <h2>2 · Validation</h2>
+              <ul class="checklist" style="margin-top: var(--s3)">
+                <li>
+                  <span class="mk ok">✓</span>
+                  <div>Manifest present and valid <small>schema v2 · 42 documents listed</small></div>
+                </li>
+                <li>
+                  <span class="mk ok">✓</span>
+                  <div>Source files present &amp; hash-verified <small>41 of 42 match</small></div>
+                </li>
+                <li>
+                  <span class="mk err">×</span>
+                  <div>
+                    Missing source file
+                    <small>scanned_thesis_ch3.pdf not found in bundle</small>
+                  </div>
+                </li>
+                <li>
+                  <span class="mk ok">✓</span>
+                  <div>Embedding model available <small>all-MiniLM-L6-v2</small></div>
+                </li>
+                <li>
+                  <span class="mk warn">!</span>
+                  <div>
+                    Parser version changed
+                    <small>manifest v1.1 → installed v1.2 · chunk counts may differ</small>
+                  </div>
+                </li>
+                <li>
+                  <span class="mk err">×</span>
+                  <div>Chat model missing <small>gemma4:12b not installed locally</small></div>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="banner banner-warn">
+            <div>
+              <div class="b-title">Recreate with warnings</div>
+              The repository can be rebuilt without the missing source and chat model — affected
+              documents and chat will be flagged. Resolve blockers below for a full match.
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>3 · Rebuild</h2>
+              <div class="row">
+                <label class="check" style="padding: 0">
+                  <input type="checkbox" /><span>Skip validation (advanced)</span>
+                </label>
+                <button class="btn btn-primary">Recreate repository</button>
+              </div>
+            </div>
+            <div class="steps">
+              <div class="step done"><span class="ico">✓</span> Load manifest</div>
+              <div class="step done"><span class="ico">✓</span> Validate sources (41/42)</div>
+              <div class="step done"><span class="ico">✓</span> Restore settings &amp; prompts</div>
+              <div class="step active">
+                <span class="ico">●</span>
+                Rebuild full-text index
+                <span class="spacer"></span>
+                <span class="progress" style="width: 160px"><span style="width: 64%"></span></span>
+              </div>
+              <div class="step"><span class="ico">4</span> Rebuild vector index (Qdrant)</div>
+              <div class="step"><span class="ico">5</span> Produce recreate report</div>
+            </div>
+          </div>
+
+          <details class="card">
+            <summary class="muted" style="cursor: pointer">Show completed recreate report</summary>
+            <div style="margin-top: var(--s4)">
+              <div class="banner banner-ok" style="margin-bottom: var(--s4)">
+                <div>
+                  <div class="b-title">Repository recreated with warnings</div>
+                  41 documents · 1,180 chunks · vectors rebuilt · FTS5 enabled
+                </div>
+              </div>
+              <dl class="kv">
+                <dt>Chunk count</dt>
+                <dd>1,180 (manifest: 1,204 · −24, parser change)</dd>
+                <dt>Skipped documents</dt>
+                <dd>1 (missing source)</dd>
+                <dt>Chat model</dt>
+                <dd>gemma4:12b unavailable → fell back to gemma3:4b</dd>
+                <dt>Index versions</dt>
+                <dd>fts5 v3 · qdrant collection zm2026_run7</dd>
+              </dl>
+            </div>
+          </details>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
