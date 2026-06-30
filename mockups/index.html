@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Private Scientific RAG — Mockups</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="nav-scrim" data-action="close-nav"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark"></span>
+          <div>mml-rag<small>local scientific RAG</small></div>
+        </div>
+        <nav class="nav">
+          <a href="index.html">Home</a>
+          <span class="nav-label">Workspace</span>
+          <a href="repository-dashboard.html">Repository Dashboard</a>
+          <a href="document-manager.html">Document Manager</a>
+          <a href="ingestion-source-viewer.html">Source Viewer</a>
+          <a href="search-lab.html">Search Lab</a>
+          <a href="prompt-sandbox.html">Prompt Sandbox</a>
+          <a href="chat-workspace.html">Chat Workspace</a>
+          <span class="nav-label">Manage</span>
+          <a href="settings-model-manager.html">Settings / Models</a>
+          <a href="recreate-repository.html">Recreate Repository</a>
+          <a href="export-center.html">Export Center</a>
+        </nav>
+        <div class="sidebar-foot"><span class="status ok">Local-only mode</span></div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="row">
+            <button class="hamburger" data-action="toggle-nav" aria-label="Open navigation">
+              <span></span>
+            </button>
+            <div class="titles">
+              <h1>Mockup Index</h1>
+              <p>Static workflow mockups for review — no backend required</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button class="theme-toggle" data-action="toggle-theme">
+              <span data-theme-label>Dark</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page">
+          <div class="banner banner-accent">
+            <div>
+              <div class="b-title">Approval gate</div>
+              These nine screens define the research workbench. Review layout, terminology, and
+              information hierarchy here before backend implementation begins.
+            </div>
+          </div>
+
+          <div class="grid grid-3">
+            <a class="card" href="repository-dashboard.html">
+              <div class="eyebrow">01</div>
+              <h2>Repository Dashboard</h2>
+              <p class="muted">Repository state, metrics, active models, and quick actions.</p>
+            </a>
+            <a class="card" href="document-manager.html">
+              <div class="eyebrow">02</div>
+              <h2>Document Manager</h2>
+              <p class="muted">Upload, track ingestion status, inspect, reprocess, delete.</p>
+            </a>
+            <a class="card" href="ingestion-source-viewer.html">
+              <div class="eyebrow">03</div>
+              <h2>Source Viewer</h2>
+              <p class="muted">Pages, sections, chunks, tables, figures, and provenance.</p>
+            </a>
+            <a class="card" href="search-lab.html">
+              <div class="eyebrow">04</div>
+              <h2>Search Lab</h2>
+              <p class="muted">Full-text / vector / hybrid, reranking menu, score breakdowns.</p>
+            </a>
+            <a class="card" href="prompt-sandbox.html">
+              <div class="eyebrow">05</div>
+              <h2>Prompt Sandbox</h2>
+              <p class="muted">Prompt editing, context preview, side-by-side evaluation.</p>
+            </a>
+            <a class="card" href="chat-workspace.html">
+              <div class="eyebrow">06</div>
+              <h2>Chat Workspace</h2>
+              <p class="muted">Grounded chat, inline citations, source cards.</p>
+            </a>
+            <a class="card" href="settings-model-manager.html">
+              <div class="eyebrow">07</div>
+              <h2>Settings / Model Manager</h2>
+              <p class="muted">Chunking, search, models, prompts, exports, registry.</p>
+            </a>
+            <a class="card" href="recreate-repository.html">
+              <div class="eyebrow">08</div>
+              <h2>Recreate Repository</h2>
+              <p class="muted">Validate a bundle and rebuild indexes from a manifest.</p>
+            </a>
+            <a class="card" href="export-center.html">
+              <div class="eyebrow">09</div>
+              <h2>Export Center</h2>
+              <p class="muted">Bundle chats, settings, runs, citations, and sources as ZIP.</p>
+            </a>
+          </div>
+        </div>
+      </main>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>
