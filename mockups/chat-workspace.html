@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chat Workspace — Private Scientific RAG</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="nav-scrim" data-action="close-nav"></div>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="mark"></span>
+          <div>mml-rag<small>local scientific RAG</small></div>
+        </div>
+        <nav class="nav">
+          <a href="index.html">Home</a>
+          <span class="nav-label">Workspace</span>
+          <a href="repository-dashboard.html">Repository Dashboard</a>
+          <a href="document-manager.html">Document Manager</a>
+          <a href="ingestion-source-viewer.html">Source Viewer</a>
+          <a href="search-lab.html">Search Lab</a>
+          <a href="prompt-sandbox.html">Prompt Sandbox</a>
+          <a href="chat-workspace.html">Chat Workspace</a>
+          <span class="nav-label">Manage</span>
+          <a href="settings-model-manager.html">Settings / Models</a>
+          <a href="recreate-repository.html">Recreate Repository</a>
+          <a href="export-center.html">Export Center</a>
+        </nav>
+        <div class="sidebar-foot"><span class="status ok">Local-only mode</span></div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div class="row">
+            <button class="hamburger" data-action="toggle-nav" aria-label="Open navigation">
+              <span></span>
+            </button>
+            <div class="titles">
+              <h1>Chat Workspace</h1>
+              <p>zeolite_membranes_2026 · gemma3:4b · Hybrid + cross-encoder</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <a class="btn" href="export-center.html">Export chat</a>
+            <button class="theme-toggle" data-action="toggle-theme">
+              <span data-theme-label>Dark</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="page">
+          <div class="chat-layout">
+            <!-- sessions -->
+            <aside class="card card-pad-sm session-list">
+              <div class="row row-between" style="margin-bottom: var(--s3)">
+                <div class="eyebrow" style="margin: 0">Sessions</div>
+                <button class="btn btn-sm btn-ghost">New</button>
+              </div>
+              <a class="active">
+                CO₂/CH₄ selectivity review
+                <span class="when">today · 6 msgs</span>
+              </a>
+              <a>
+                SSZ-13 synthesis conditions
+                <span class="when">yesterday · 12 msgs</span>
+              </a>
+              <a>
+                Patent novelty — chabazite
+                <span class="when">Jun 27 · 4 msgs</span>
+              </a>
+            </aside>
+
+            <!-- thread -->
+            <section>
+              <div class="banner banner-accent" style="margin-bottom: var(--s4); font-size: 0.82rem">
+                <div>
+                  <span class="b-title">Retrieval snapshot</span> — Hybrid · cross-encoder+metadata ·
+                  top-k 6 · snapshot snap_2026-06-30_a91f
+                </div>
+              </div>
+
+              <div class="chat-thread">
+                <div class="msg user">
+                  What CO₂/CH₄ selectivity has been reported for SSZ-13 membranes?
+                </div>
+                <div class="msg assistant">
+                  Reported CO₂/CH₄ separation factors for SSZ-13 membranes range from roughly
+                  <strong>42 to 58</strong> at 308 K
+                  <button class="cite" data-action="open-modal" data-target="cite-1">[1]</button>,
+                  with CO₂ permeance near 1.1 × 10⁻⁷ mol·m⁻²·s⁻¹·Pa⁻¹
+                  <button class="cite" data-action="open-modal" data-target="cite-1">[1]</button>. A
+                  related patent example reports selectivity above 50 under mixed-gas feed
+                  <button class="cite" data-action="open-modal" data-target="cite-2">[2]</button>.
+                  <br /><br />
+                  <span class="muted"
+                    >The repository does not contain long-term stability data for these membranes.</span
+                  >
+                </div>
+                <div class="msg user">How was selectivity measured?</div>
+                <div class="msg assistant">
+                  Measurements used a Wicke–Kallenbach setup with an equimolar CO₂/CH₄ feed at 308 K
+                  <button class="cite" data-action="open-modal" data-target="cite-1">[1]</button>.
+                </div>
+              </div>
+
+              <hr class="divider" />
+              <div class="chat-input">
+                <textarea rows="1" placeholder="Ask a question grounded in this repository…"></textarea>
+                <button class="btn btn-primary">Send</button>
+              </div>
+              <p class="hint">
+                Answers use the repository's fixed system prompt and only cite retrieved context.
+              </p>
+
+              <details class="card" style="margin-top: var(--s4)">
+                <summary class="muted" style="cursor: pointer">Show model-unavailable state</summary>
+                <div class="banner banner-danger" style="margin-top: var(--s4)">
+                  <div>
+                    <div class="b-title">Ollama not reachable</div>
+                    Start the local model runtime (<code>ollama serve</code>) and confirm
+                    <code>gemma3:4b</code> is installed in Settings → Models.
+                  </div>
+                </div>
+              </details>
+            </section>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- citation cards -->
+    <div class="overlay" id="cite-1">
+      <div class="modal">
+        <div class="modal-head">
+          <div>
+            <div class="eyebrow">Citation [1]</div>
+            <h2 style="font-size: 1rem">Kosinov_2018_zeolite_membranes.pdf</h2>
+          </div>
+          <button class="close-x" data-action="close-modal" aria-label="Close">×</button>
+        </div>
+        <div class="source-card">
+          <div class="meta">p. 7 · Results · chunk 31 · rerank 6.71</div>
+          SSZ-13 membranes exhibited a CO₂/CH₄ separation factor of 58 at 308 K with a CO₂ permeance
+          of 1.1 × 10⁻⁷ mol·m⁻²·s⁻¹·Pa⁻¹, attributed to the narrow 8-ring pore window.
+        </div>
+        <div class="row" style="margin-top: var(--s4)">
+          <a class="btn btn-primary" href="ingestion-source-viewer.html">Open in Source Viewer</a>
+          <button class="btn btn-ghost" data-action="close-modal">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="cite-2">
+      <div class="modal">
+        <div class="modal-head">
+          <div>
+            <div class="eyebrow">Citation [2]</div>
+            <h2 style="font-size: 1rem">US10934172B2_membrane_patent.pdf</h2>
+          </div>
+          <button class="close-x" data-action="close-modal" aria-label="Close">×</button>
+        </div>
+        <div class="source-card">
+          <div class="meta">p. 18 · Table 3 · chunk 45 · rerank 6.38</div>
+          Example 4 reports a chabazite-type membrane with CO₂/CH₄ selectivity above 50 measured
+          under mixed-gas conditions; see Table 3 for permeance values across temperatures.
+        </div>
+        <div class="row" style="margin-top: var(--s4)">
+          <a class="btn btn-primary" href="ingestion-source-viewer.html">Open in Source Viewer</a>
+          <button class="btn btn-ghost" data-action="close-modal">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
