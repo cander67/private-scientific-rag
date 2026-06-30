@@ -49,3 +49,27 @@ jobs:
     - name: Build frontend
       run: npm run build
       working-directory: frontend
+
+  mockups:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+
+    - name: Set up Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+
+    - name: Install mockup tooling
+      run: npm install
+      working-directory: mockups
+
+    - name: Install Playwright browsers
+      run: npx playwright install --with-deps chromium
+      working-directory: mockups
+
+    - name: Run mockup smoke tests
+      run: npm test
+      working-directory: mockups
