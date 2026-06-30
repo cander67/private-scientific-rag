@@ -65,5 +65,12 @@ frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
 
+# Mockup tooling outputs (Playwright). Screenshots are regenerated, not committed.
+mockups/node_modules/
+mockups/package-lock.json
+mockups/screenshots/
+mockups/test-results/
+mockups/playwright-report/
+
 # Local planning drafts that are not part of the public repo.
 .plans/
