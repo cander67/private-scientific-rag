@@ -35,8 +35,9 @@ coverage.xml
 .DS_Store
 Thumbs.db
 
-# Local Codex/agent configuration and generated metadata.
+# Local agent configuration and generated metadata.
 .codex/
+.claude/
 
 # Project-specific
 # Inspiration/prototype code. Keep locally, do not commit.
