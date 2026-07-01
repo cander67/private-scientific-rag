@@ -14,7 +14,7 @@ The current scaffold provides:
 
 - FastAPI backend shell with `/health`.
 - Repository settings API for default repository creation, settings updates, manifest export, and recreate validation.
-- Document upload, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
+- Document upload, PDF parser fallback chain, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
 - React/Vite frontend document manager and source inspector.
 - SQLAlchemy/Alembic migration wiring with the first repository/settings tables.
 - Qdrant Docker Compose service.
