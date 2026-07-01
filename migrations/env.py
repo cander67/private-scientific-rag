@@ -7,6 +7,7 @@ from sqlalchemy import engine_from_config, pool
 
 from private_rag.db.base import Base
 from private_rag.db.session import ensure_sqlite_parent
+from private_rag.ingestion import models as ingestion_models  # noqa: F401
 from private_rag.repositories import models as repository_models  # noqa: F401
 
 config = context.config
