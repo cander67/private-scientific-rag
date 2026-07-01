@@ -51,9 +51,27 @@ logs/
 cache/
 .qdrant/
 
-# Private document corpora. Keep sample fixtures under tests/ instead.
-documents/
+# Private document corpora. Keep source documents out of Git, but allow
+# public-safe golden corpus manifests, checks, notes, and structure markers.
+documents/*
 !documents/README.md
+!documents/golden_corpus/
+documents/golden_corpus/*
+!documents/golden_corpus/golden_corpus_manifest.md
+!documents/golden_corpus/golden_corpus_manifest_v*.md
+!documents/golden_corpus/checks/
+!documents/golden_corpus/checks/*.yaml
+!documents/golden_corpus/checks/*.md
+!documents/golden_corpus/markdown/
+!documents/golden_corpus/markdown/*.md
+!documents/golden_corpus/notes/
+!documents/golden_corpus/notes/*.md
+!documents/golden_corpus/patents_uploaded/
+!documents/golden_corpus/patents_uploaded/README.md
+!documents/golden_corpus/source_bundles/
+!documents/golden_corpus/source_bundles/.gitkeep
+!documents/golden_corpus/text/
+!documents/golden_corpus/text/.gitkeep
 
 # Frontend dependency/build outputs.
 /node_modules/
