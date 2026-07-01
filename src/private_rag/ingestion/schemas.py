@@ -24,6 +24,7 @@ class DocumentChunkRead(BaseModel):
     char_start: int | None = None
     char_end: int | None = None
     parser_version: str
+    source_hash: str
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -88,6 +89,8 @@ class ParsedSegment(BaseModel):
 class ParsedDocument(BaseModel):
     source_type: SourceType
     text: str
+    parser_name: str = "private-rag-built-in"
+    parser_version: str = "prd3-v1"
     segments: list[ParsedSegment] = Field(default_factory=list)
     page_count: int | None = None
     line_count: int | None = None
