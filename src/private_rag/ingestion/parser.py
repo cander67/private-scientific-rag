@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from typing import Any
 
 from private_rag.ingestion.schemas import ParsedDocument, ParsedSegment, SourceType
 
-PARSER_NAME = "private-rag-built-in"
-PARSER_VERSION = "prd3-v1"
+BUILT_IN_PARSER_NAME = "private-rag-built-in"
+BUILT_IN_PARSER_VERSION = "prd3-v1"
+PDF_MIN_TEXT_LENGTH = 80
 
 _PATENT_SECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("abstract", re.compile(r"\babstract\b", re.IGNORECASE)),
@@ -45,22 +50,26 @@ def parse_source(filename: str, content_type: str | None, data: bytes) -> Parsed
 
 
 def _parse_pdf(data: bytes) -> ParsedDocument:
-    text = _extract_printable_text(data)
+    result = _extract_pdf_with_parser_chain(data)
+    text = result.text
     page_count = max(1, len(re.findall(rb"/Type\s*/Page\b", data)))
-    warnings: list[str] = []
+    if result.page_count is not None:
+        page_count = result.page_count
+    warnings: list[str] = [*result.warnings]
     ocr_required = False
-    if len(text.strip()) < 80:
+    if len(text.strip()) < PDF_MIN_TEXT_LENGTH:
         ocr_required = True
         warnings.append(
             "PDF has little extractable text and should be inspected with OCR/page images."
         )
 
-    segments = _segments_from_lines(text, page_count=page_count)
+    segments = result.segments or _segments_from_lines(text, page_count=page_count)
     sections = _unique_sections(segments)
     patent_sections = _detect_patent_sections(text)
     metadata: dict[str, object] = {
         "page_images_available": True,
         "patent_section_hints": patent_sections,
+        "parser_chain": result.parser_chain,
     }
     if patent_sections:
         metadata["document_kind"] = "patent_pdf"
@@ -68,6 +77,8 @@ def _parse_pdf(data: bytes) -> ParsedDocument:
     return ParsedDocument(
         source_type="pdf",
         text=text,
+        parser_name=result.parser_name,
+        parser_version=result.parser_version,
         segments=segments,
         page_count=page_count,
         line_count=len(text.splitlines()),
@@ -84,6 +95,8 @@ def _parse_markdown(data: bytes) -> ParsedDocument:
     return ParsedDocument(
         source_type="markdown",
         text=text,
+        parser_name=BUILT_IN_PARSER_NAME,
+        parser_version=BUILT_IN_PARSER_VERSION,
         segments=segments,
         line_count=len(text.splitlines()),
         sections=_unique_sections(segments),
@@ -93,23 +106,27 @@ def _parse_markdown(data: bytes) -> ParsedDocument:
 
 def _parse_annotation(data: bytes) -> ParsedDocument:
     text = _decode(data)
-    lines = text.splitlines()
+    line_records = _line_records(text)
     segments = [
         ParsedSegment(
-            text=line,
+            text=stripped,
             section="annotations",
             line_start=index,
             line_end=index,
+            char_start=char_start,
+            char_end=char_end,
             metadata={"annotation_format": "brat_standoff"},
         )
-        for index, line in enumerate(lines, start=1)
-        if line.strip()
+        for index, stripped, char_start, char_end in line_records
+        if stripped
     ]
     return ParsedDocument(
         source_type="annotation",
         text=text,
+        parser_name=BUILT_IN_PARSER_NAME,
+        parser_version=BUILT_IN_PARSER_VERSION,
         segments=segments,
-        line_count=len(lines),
+        line_count=len(line_records),
         sections=["annotations"] if segments else [],
         metadata={
             "annotation_format": "brat_standoff",
@@ -124,6 +141,8 @@ def _parse_text(data: bytes) -> ParsedDocument:
     return ParsedDocument(
         source_type="text",
         text=text,
+        parser_name=BUILT_IN_PARSER_NAME,
+        parser_version=BUILT_IN_PARSER_VERSION,
         segments=segments,
         line_count=len(text.splitlines()),
         sections=_unique_sections(segments),
@@ -131,8 +150,215 @@ def _parse_text(data: bytes) -> ParsedDocument:
     )
 
 
+@dataclass
+class PdfExtractionResult:
+    text: str
+    parser_name: str
+    parser_version: str
+    parser_chain: list[str]
+    page_count: int | None = None
+    segments: list[ParsedSegment] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
 def _decode(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
+
+
+def _extract_pdf_with_parser_chain(data: bytes) -> PdfExtractionResult:
+    attempts = (
+        _extract_with_pypdf,
+        _extract_with_pymupdf,
+        _extract_with_docling,
+        _extract_with_built_in_pdf_fallback,
+    )
+    failures: list[str] = []
+    for attempt in attempts:
+        result = attempt(data)
+        if result.text.strip():
+            return result
+        failures.extend(result.warnings)
+
+    return PdfExtractionResult(
+        text="",
+        parser_name=BUILT_IN_PARSER_NAME,
+        parser_version=BUILT_IN_PARSER_VERSION,
+        parser_chain=["pypdf", "pymupdf", "docling", "built_in_fallback"],
+        warnings=failures,
+    )
+
+
+def _extract_with_docling(data: bytes) -> PdfExtractionResult:
+    parser_name = "docling"
+    parser_version = _package_version("docling")
+    try:
+        from docling.document_converter import DocumentConverter
+    except Exception as exc:
+        return _pdf_parser_failure(parser_name, parser_version, exc)
+
+    try:
+        with NamedTemporaryFile(suffix=".pdf") as temp_file:
+            temp_file.write(data)
+            temp_file.flush()
+            result = DocumentConverter().convert(temp_file.name)
+        document = result.document
+        text = _docling_document_to_text(document)
+        segments = _segments_from_lines(text, page_count=None)
+        return PdfExtractionResult(
+            text=text,
+            parser_name=parser_name,
+            parser_version=parser_version,
+            parser_chain=["pypdf", "pymupdf", parser_name],
+            page_count=_page_count_from_docling_document(document),
+            segments=segments,
+        )
+    except Exception as exc:
+        return _pdf_parser_failure(parser_name, parser_version, exc)
+
+
+def _docling_document_to_text(document: Any) -> str:
+    for method_name in ("export_to_markdown", "export_to_text"):
+        method = getattr(document, method_name, None)
+        if callable(method):
+            text = method()
+            if isinstance(text, str):
+                return text
+    return str(document)
+
+
+def _page_count_from_docling_document(document: Any) -> int | None:
+    pages = getattr(document, "pages", None)
+    if pages is None:
+        return None
+    try:
+        return len(pages)
+    except TypeError:
+        return None
+
+
+def _extract_with_pymupdf(data: bytes) -> PdfExtractionResult:
+    parser_name = "pymupdf"
+    parser_version = _package_version("pymupdf")
+    try:
+        import fitz
+    except Exception as exc:
+        return _pdf_parser_failure(parser_name, parser_version, exc)
+
+    try:
+        document = fitz.open(stream=data, filetype="pdf")
+        pages: list[tuple[int, str]] = []
+        for page_index, page in enumerate(document, start=1):
+            page_text = page.get_text("text")
+            if page_text.strip():
+                pages.append((page_index, page_text))
+        segments = _segments_from_page_text(pages)
+        return PdfExtractionResult(
+            text="\n".join(page_text.strip() for _, page_text in pages),
+            parser_name=parser_name,
+            parser_version=parser_version,
+            parser_chain=["pypdf", parser_name],
+            page_count=document.page_count,
+            segments=segments,
+        )
+    except Exception as exc:
+        return _pdf_parser_failure(parser_name, parser_version, exc)
+
+
+def _extract_with_pypdf(data: bytes) -> PdfExtractionResult:
+    parser_name = "pypdf"
+    parser_version = _package_version("pypdf")
+    try:
+        from pypdf import PdfReader
+    except Exception as exc:
+        return _pdf_parser_failure(parser_name, parser_version, exc)
+
+    try:
+        reader = PdfReader(BytesIO(data))
+        pages: list[tuple[int, str]] = []
+        for page_index, page in enumerate(reader.pages, start=1):
+            page_text = page.extract_text() or ""
+            if page_text.strip():
+                pages.append((page_index, page_text))
+        segments = _segments_from_page_text(pages)
+        return PdfExtractionResult(
+            text="\n".join(page_text.strip() for _, page_text in pages),
+            parser_name=parser_name,
+            parser_version=parser_version,
+            parser_chain=[parser_name],
+            page_count=len(reader.pages),
+            segments=segments,
+        )
+    except Exception as exc:
+        return _pdf_parser_failure(parser_name, parser_version, exc)
+
+
+def _extract_with_built_in_pdf_fallback(data: bytes) -> PdfExtractionResult:
+    text = _extract_pdf_text(data)
+    return PdfExtractionResult(
+        text=text,
+        parser_name=BUILT_IN_PARSER_NAME,
+        parser_version=BUILT_IN_PARSER_VERSION,
+        parser_chain=["pypdf", "pymupdf", "docling", "built_in_fallback"],
+    )
+
+
+def _segments_from_page_text(pages: list[tuple[int, str]]) -> list[ParsedSegment]:
+    segments: list[ParsedSegment] = []
+    current_section: str | None = None
+    for page_number, page_text in pages:
+        page_segments = _segments_from_lines(page_text, page_count=None)
+        for segment in page_segments:
+            if segment.section is not None:
+                current_section = segment.section
+            segments.append(
+                ParsedSegment(
+                    text=segment.text,
+                    section=segment.section or current_section,
+                    page_start=page_number,
+                    page_end=page_number,
+                )
+            )
+    return segments
+
+
+def _pdf_parser_failure(
+    parser_name: str,
+    parser_version: str,
+    exc: Exception,
+) -> PdfExtractionResult:
+    return PdfExtractionResult(
+        text="",
+        parser_name=parser_name,
+        parser_version=parser_version,
+        parser_chain=[parser_name],
+        warnings=[f"{parser_name} unavailable or failed: {type(exc).__name__}"],
+    )
+
+
+def _package_version(package_name: str) -> str:
+    try:
+        from importlib.metadata import PackageNotFoundError, version
+    except ImportError:
+        return "unknown"
+    try:
+        return version(package_name)
+    except PackageNotFoundError:
+        return "not-installed"
+
+
+def _extract_pdf_text(data: bytes) -> str:
+    metadata_bytes = _remove_pdf_stream_bodies(data)
+    printable = _extract_printable_text(metadata_bytes)
+    lines = [
+        line
+        for line in printable.splitlines()
+        if _looks_like_human_pdf_text(line) and not _looks_like_pdf_syntax(line)
+    ]
+    return "\n".join(lines)
+
+
+def _remove_pdf_stream_bodies(data: bytes) -> bytes:
+    return re.sub(rb"\bstream\r?\n?.*?\r?\n?endstream\b", b"\n", data, flags=re.DOTALL)
 
 
 def _extract_printable_text(data: bytes) -> str:
@@ -144,21 +370,57 @@ def _extract_printable_text(data: bytes) -> str:
     return "\n".join(line.strip() for line in cleaned.splitlines() if line.strip())
 
 
+def _looks_like_human_pdf_text(line: str) -> bool:
+    if len(line) < 3:
+        return False
+    letters = sum(character.isalpha() for character in line)
+    if letters < 3:
+        return False
+    visible = sum(not character.isspace() for character in line)
+    if visible == 0:
+        return False
+    punctuation = sum(not character.isalnum() and not character.isspace() for character in line)
+    words = re.findall(r"[A-Za-z]{3,}", line)
+    return punctuation / visible < 0.35 and (len(words) >= 2 or visible < 40)
+
+
+def _looks_like_pdf_syntax(line: str) -> bool:
+    stripped = line.strip()
+    lowered = stripped.lower()
+    if stripped.startswith("%PDF") or stripped in {"<<", ">>"}:
+        return True
+    if lowered in {"stream", "endstream", "endobj", "xref", "trailer", "startxref"}:
+        return True
+    if re.match(r"^\d+\s+\d+\s+obj\b", stripped):
+        return True
+    if re.search(r"\b(obj|endobj|stream|endstream)\b", stripped):
+        return True
+    if stripped.startswith("/") and re.search(
+        r"/(Type|Subtype|Filter|Length|Resources)\b", stripped
+    ):
+        return True
+    pdf_operator_count = len(
+        re.findall(r"/(?:Type|Subtype|Filter|FlateDecode|Length|Matrix|Resources|BBox)\b", stripped)
+    )
+    return pdf_operator_count >= 2
+
+
 def _segments_from_markdown(text: str) -> list[ParsedSegment]:
     segments: list[ParsedSegment] = []
     current_heading: str | None = None
-    for index, line in enumerate(text.splitlines(), start=1):
-        stripped = line.strip()
+    for index, stripped, char_start, char_end in _line_records(text):
         heading_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
         if heading_match:
             current_heading = heading_match.group(2).strip()
         if stripped:
             segments.append(
                 ParsedSegment(
-                    text=line,
+                    text=stripped,
                     section=current_heading,
                     line_start=index,
                     line_end=index,
+                    char_start=char_start,
+                    char_end=char_end,
                 )
             )
     return segments
@@ -167,15 +429,15 @@ def _segments_from_markdown(text: str) -> list[ParsedSegment]:
 def _segments_from_lines(text: str, page_count: int | None) -> list[ParsedSegment]:
     segments: list[ParsedSegment] = []
     current_section: str | None = None
-    lines = text.splitlines()
-    for index, line in enumerate(lines, start=1):
-        stripped = line.strip()
+    line_records = _line_records(text)
+    line_count = len(line_records)
+    for index, stripped, char_start, char_end in line_records:
         if not stripped:
             continue
         detected_heading = _detect_heading(stripped)
         if detected_heading is not None:
             current_section = detected_heading
-        page_number = _line_to_page(index, len(lines), page_count)
+        page_number = _line_to_page(index, line_count, page_count)
         segments.append(
             ParsedSegment(
                 text=stripped,
@@ -184,9 +446,29 @@ def _segments_from_lines(text: str, page_count: int | None) -> list[ParsedSegmen
                 page_end=page_number,
                 line_start=index if page_count is None else None,
                 line_end=index if page_count is None else None,
+                char_start=char_start,
+                char_end=char_end,
             )
         )
     return segments
+
+
+def _line_records(text: str) -> list[tuple[int, str, int, int]]:
+    records: list[tuple[int, str, int, int]] = []
+    offset = 0
+    for index, raw_line in enumerate(text.splitlines(keepends=True), start=1):
+        line_without_break = raw_line.rstrip("\r\n")
+        stripped = line_without_break.strip()
+        leading = len(line_without_break) - len(line_without_break.lstrip())
+        char_start = offset + leading
+        char_end = char_start + len(stripped)
+        records.append((index, stripped, char_start, char_end))
+        offset += len(raw_line)
+    if text and not records:
+        stripped = text.strip()
+        leading = len(text) - len(text.lstrip())
+        records.append((1, stripped, leading, leading + len(stripped)))
+    return records
 
 
 def _detect_heading(line: str) -> str | None:
