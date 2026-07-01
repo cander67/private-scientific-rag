@@ -9,7 +9,7 @@ Module boundaries:
 - `db/`: SQLAlchemy base, engine, and session wiring.
 - `repositories/`: repository SQLAlchemy models, Pydantic settings/manifest schemas, and reproducibility service logic.
 - `services/`: local service checks and future domain services.
-- `ingestion/`: document upload models, parser/chunker service, source file storage, and provenance schemas.
+- `ingestion/`: document upload models, PDF parser fallback chain, parser/chunker service, source file storage, and provenance schemas.
 - Ingestion keeps original source files, parsed artifacts, chunks, and provenance metadata distinct.
 
 Current API surface:
@@ -26,4 +26,4 @@ Current API surface:
 - `POST /repositories/{repository_id}/documents/{document_id}/reprocess`: reparses the stored source file.
 - `DELETE /repositories/{repository_id}/documents/{document_id}`: deletes a document and derived chunks.
 
-PRD2 owns repository-aware settings and reproducibility. PRD3 adds local document ingestion and source inspection for PDFs, text, markdown, annotations, and user-uploaded patent PDFs. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.
+PRD2 owns repository-aware settings and reproducibility. PRD3 adds local document ingestion and source inspection for PDFs, text, markdown, annotations, and user-uploaded patent PDFs. PDF parsing tries `pypdf`, then PyMuPDF, then Docling, then a conservative built-in fallback that marks low-text PDFs as OCR-needed instead of chunking binary streams. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.
