@@ -8,13 +8,14 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 foundation is complete, PRD2 repository settings work has started, and the next planned implementation slice is PRD3 document ingestion/source inspection. PRD3 now assumes users can upload patent PDFs of interest, while bulk patent downloads and raw patent-data feeds are deferred to PRD12.
+PRD1 foundation is complete, PRD2 repository settings work has started, and the first PRD3 document ingestion/source inspection slice is implemented. PRD3 assumes users can upload patent PDFs of interest, while bulk patent downloads and raw patent-data feeds are deferred to PRD12.
 
 The current scaffold provides:
 
 - FastAPI backend shell with `/health`.
 - Repository settings API for default repository creation, settings updates, manifest export, and recreate validation.
-- React/Vite frontend shell.
+- Document upload, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
+- React/Vite frontend document manager and source inspector.
 - SQLAlchemy/Alembic migration wiring with the first repository/settings tables.
 - Qdrant Docker Compose service.
 - Pytest, Ruff, Mypy, and CI configuration.
