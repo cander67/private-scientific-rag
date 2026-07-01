@@ -1,0 +1,33 @@
+version: 1
+status: scaffold
+fixtures:
+  - fixture_name: pdf/patent-drawings.pdf
+    source_type: pdf
+    expected_features: [patent, drawings, claims, abstract]
+  - fixture_name: pdf/patent-chemistry.pdf
+    source_type: pdf
+    expected_features: [patent, chemistry, claims, examples]
+  - fixture_name: pdf/patent-ocr-stress.pdf
+    source_type: pdf
+    expected_features: [patent, page_images, needs_ocr]
+  - fixture_name: pdf/chemistry-heavy-si.pdf
+    source_type: pdf
+    expected_features: [chemistry, supporting_information, figures, analytical_data]
+  - fixture_name: pdf/sectioned-paper.pdf
+    source_type: pdf
+    expected_features: [sections, figures, captions]
+  - fixture_name: pdf/table-heavy.pdf
+    source_type: pdf
+    expected_features: [tables, sections, materials_database]
+  - fixture_name: pdf/figure-caption.pdf
+    source_type: pdf
+    expected_features: [figures, captions, materials_chemistry]
+  - fixture_name: text/materials-synthesis-procedure.txt
+    source_type: text
+    expected_features: [line_provenance, synthesis]
+  - fixture_name: text/materials-synthesis-annotation.ann
+    source_type: annotation
+    expected_features: [paired_text_offsets]
+  - fixture_name: markdown/dataset-readme.md
+    source_type: markdown
+    expected_features: [headings, links, line_provenance]
