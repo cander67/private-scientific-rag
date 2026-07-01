@@ -48,6 +48,7 @@ type Chunk = {
   char_start: number | null;
   char_end: number | null;
   parser_version: string;
+  source_hash: string;
   metadata: Record<string, unknown>;
 };
 
@@ -103,6 +104,13 @@ function App() {
     () => inspection?.chunks.find((chunk) => chunk.id === selectedChunkId) ?? inspection?.chunks[0] ?? null,
     [inspection, selectedChunkId],
   );
+
+  const contextChunks = useMemo(() => {
+    if (!inspection || !selectedChunk) {
+      return [];
+    }
+    return chunkContextWindow(inspection.chunks, selectedChunk.id);
+  }, [inspection, selectedChunk]);
 
   const filteredDocuments = useMemo(
     () =>
@@ -461,7 +469,7 @@ function App() {
                       {provenanceLabel(selectedChunk)}
                       {selectedChunk.section ? ` · ${selectedChunk.section}` : ""}
                     </div>
-                    {inspection.chunks.slice(0, 3).map((chunk) =>
+                    {contextChunks.map((chunk) =>
                       chunk.id === selectedChunk.id ? (
                         <div className="chunk-mark" key={chunk.id}>
                           <div className="muted num chunk-label">
@@ -476,8 +484,11 @@ function App() {
                         <p key={chunk.id}>{chunk.text}</p>
                       ),
                     )}
-                    {inspection.chunks.length > 3 && (
-                      <p className="hint">Select another chunk in the structure pane to inspect it.</p>
+                    {inspection.chunks.length > contextChunks.length && (
+                      <p className="hint">
+                        Showing surrounding chunk context. Select another chunk in the structure pane
+                        to move this window.
+                      </p>
                     )}
                   </section>
 
@@ -501,6 +512,10 @@ function App() {
                       </dd>
                       <dt>parser</dt>
                       <dd>{inspection.version.parser_version}</dd>
+                      <dt>source hash</dt>
+                      <dd>{shortHash(selectedChunk.source_hash)}</dd>
+                      <dt>offsets</dt>
+                      <dd>{offsetLabel(selectedChunk)}</dd>
                       <dt>source type</dt>
                       <dd>{inspection.version.source_type}</dd>
                     </dl>
@@ -635,6 +650,23 @@ function provenanceLabel(chunk: Chunk) {
     return `lines ${chunk.line_start}${chunk.line_end && chunk.line_end !== chunk.line_start ? `-${chunk.line_end}` : ""}`;
   }
   return chunk.section ?? "document";
+}
+
+function offsetLabel(chunk: Chunk) {
+  if (chunk.char_start !== null && chunk.char_end !== null) {
+    return `${chunk.char_start}-${chunk.char_end}`;
+  }
+  return "—";
+}
+
+function chunkContextWindow(chunks: Chunk[], selectedChunkId: string, radius = 1) {
+  const selectedIndex = chunks.findIndex((chunk) => chunk.id === selectedChunkId);
+  if (selectedIndex < 0) {
+    return chunks.slice(0, radius * 2 + 1);
+  }
+  const start = Math.max(0, selectedIndex - radius);
+  const end = Math.min(chunks.length, selectedIndex + radius + 1);
+  return chunks.slice(start, end);
 }
 
 function sectionNames(chunks: Chunk[]) {
