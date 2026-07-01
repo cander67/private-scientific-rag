@@ -1,6 +1,8 @@
 # Frontend
 
-The frontend is a React/Vite app. PRD1 provides only the shell; production UI work starts after the static mockups are approved.
+The frontend is a React/Vite app. PRD1 provides the shell, and the static mockups describe the planned repository, document manager, source viewer, search, chat, prompt sandbox, settings, and export workflows.
+
+Current implementation status: the production frontend shell is still minimal. PRD3 will introduce source inspection UI for uploaded documents, including user-uploaded patent PDFs. Bulk patent-data workflows are planned separately in PRD12.
 
 Run locally:
 
