@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from private_rag.core.settings import Settings, get_settings
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
-from private_rag.ingestion.parser import PARSER_NAME, PARSER_VERSION, parse_source
+from private_rag.ingestion.parser import parse_source
 from private_rag.ingestion.schemas import (
     DocumentChunkRead,
     DocumentInspection,
@@ -68,8 +68,8 @@ def upload_document(
         byte_size=len(data),
         storage_path=str(storage_path),
         status="needs_ocr" if parsed.ocr_required else "parsed",
-        parser_name=PARSER_NAME,
-        parser_version=PARSER_VERSION,
+        parser_name=parsed.parser_name,
+        parser_version=parsed.parser_version,
         ocr_required=parsed.ocr_required,
         page_count=parsed.page_count,
         line_count=parsed.line_count,
@@ -89,6 +89,7 @@ def upload_document(
         chunk_size=repository_settings.chunking.chunk_size,
         chunk_overlap=repository_settings.chunking.chunk_overlap,
         source_hash=digest,
+        parser_version=parsed.parser_version,
     )
     session.add_all(chunks)
     version.chunk_count = len(chunks)
@@ -171,11 +172,12 @@ def reprocess_document(
         chunk_size=repository_settings.chunking.chunk_size,
         chunk_overlap=repository_settings.chunking.chunk_overlap,
         source_hash=version.sha256,
+        parser_version=parsed.parser_version,
     )
     session.add_all(chunks)
     version.status = "needs_ocr" if parsed.ocr_required else "parsed"
-    version.parser_name = PARSER_NAME
-    version.parser_version = PARSER_VERSION
+    version.parser_name = parsed.parser_name
+    version.parser_version = parsed.parser_version
     version.ocr_required = parsed.ocr_required
     version.page_count = parsed.page_count
     version.line_count = parsed.line_count
@@ -227,6 +229,7 @@ def _chunk_parsed_document(
     chunk_size: int,
     chunk_overlap: int,
     source_hash: str,
+    parser_version: str,
 ) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
     for segment in _coalesce_segments(parsed.segments, chunk_size, chunk_overlap):
@@ -247,7 +250,7 @@ def _chunk_parsed_document(
                 line_end=segment.line_end,
                 char_start=segment.char_start,
                 char_end=segment.char_end,
-                parser_version=PARSER_VERSION,
+                parser_version=parser_version,
                 extra_metadata={
                     **segment.metadata,
                     "source_hash": source_hash,
@@ -405,5 +408,6 @@ def _chunk_read(chunk: DocumentChunk) -> DocumentChunkRead:
         char_start=chunk.char_start,
         char_end=chunk.char_end,
         parser_version=chunk.parser_version,
+        source_hash=str(chunk.extra_metadata.get("source_hash", "")),
         metadata=chunk.extra_metadata,
     )
