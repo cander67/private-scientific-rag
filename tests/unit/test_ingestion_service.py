@@ -199,6 +199,7 @@ def test_helper_storage_and_chunk_edges(tmp_path: Path) -> None:
         chunk_size=100,
         chunk_overlap=0,
         source_hash="hash",
+        parser_version="test-parser",
     )
     coalesced = _coalesce_segments(
         [
