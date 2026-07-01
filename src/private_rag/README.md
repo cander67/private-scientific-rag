@@ -9,7 +9,8 @@ Module boundaries:
 - `db/`: SQLAlchemy base, engine, and session wiring.
 - `repositories/`: repository SQLAlchemy models, Pydantic settings/manifest schemas, and reproducibility service logic.
 - `services/`: local service checks and future domain services.
-- Future ingestion modules should keep original source files, parsed artifacts, chunks, and provenance metadata distinct.
+- `ingestion/`: document upload models, parser/chunker service, source file storage, and provenance schemas.
+- Ingestion keeps original source files, parsed artifacts, chunks, and provenance metadata distinct.
 
 Current API surface:
 
@@ -19,5 +20,10 @@ Current API surface:
 - `PUT /repositories/{repository_id}/settings`: validates and saves repository settings.
 - `GET /repositories/{repository_id}/manifest`: exports a reproducibility manifest and stores a snapshot.
 - `POST /repositories/recreate/validate`: reports missing source files, missing models, and incompatible settings before recreate work begins.
+- `POST /repositories/{repository_id}/documents`: uploads and parses a local document.
+- `GET /repositories/{repository_id}/documents`: lists uploaded documents.
+- `GET /repositories/{repository_id}/documents/{document_id}`: inspects parsed chunks and provenance.
+- `POST /repositories/{repository_id}/documents/{document_id}/reprocess`: reparses the stored source file.
+- `DELETE /repositories/{repository_id}/documents/{document_id}`: deletes a document and derived chunks.
 
-PRD2 owns repository-aware settings and reproducibility. PRD3 will add local document ingestion and source inspection for PDFs, text, markdown, annotations, and user-uploaded patent PDFs. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.
+PRD2 owns repository-aware settings and reproducibility. PRD3 adds local document ingestion and source inspection for PDFs, text, markdown, annotations, and user-uploaded patent PDFs. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.
