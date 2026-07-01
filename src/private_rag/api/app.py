@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from private_rag import __version__
+from private_rag.api.routes.documents import router as documents_router
 from private_rag.api.routes.health import router as health_router
 from private_rag.api.routes.repositories import router as repositories_router
 from private_rag.core.settings import get_settings
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
 
     app.include_router(health_router)
     app.include_router(repositories_router)
+    app.include_router(documents_router)
     return app
 
 
