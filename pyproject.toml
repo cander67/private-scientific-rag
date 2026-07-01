@@ -7,9 +7,12 @@ requires-python = ">=3.11"
 license = "MIT"
 dependencies = [
     "alembic>=1.13.3",
+    "docling>=2.0.0",
     "fastapi>=0.115.0",
     "httpx>=0.27.2",
     "pydantic-settings>=2.5.2",
+    "pymupdf>=1.24.0",
+    "pypdf>=5.0.0",
     "python-multipart>=0.0.20",
     "sqlalchemy>=2.0.35",
     "uvicorn[standard]>=0.30.6",
