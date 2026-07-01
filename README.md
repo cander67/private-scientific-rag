@@ -8,7 +8,9 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 foundation is complete, and PRD2 repository settings work has started. The current scaffold provides:
+PRD1 foundation is complete, PRD2 repository settings work has started, and the next planned implementation slice is PRD3 document ingestion/source inspection. PRD3 now assumes users can upload patent PDFs of interest, while bulk patent downloads and raw patent-data feeds are deferred to PRD12.
+
+The current scaffold provides:
 
 - FastAPI backend shell with `/health`.
 - Repository settings API for default repository creation, settings updates, manifest export, and recreate validation.
@@ -17,6 +19,7 @@ PRD1 foundation is complete, and PRD2 repository settings work has started. The 
 - Qdrant Docker Compose service.
 - Pytest, Ruff, Mypy, and CI configuration.
 - Public-repo safety defaults.
+- A versioned golden corpus plan and scaffold under `documents/golden_corpus/` for PRD3 ingestion smoke tests.
 
 Public repository target: `cander67/private-scientific-rag`.
 
@@ -88,11 +91,14 @@ Runtime data belongs outside Git:
 - `.qdrant/`
 - private document corpora
 
+The golden corpus folder is for curated test planning and safe fixtures only. Do not commit private, licensed, or restricted research documents.
+
 The `example_code/` folder is local inspiration code and should not be committed.
 
 ## Documentation
 
 - [PRD backlog](prds/README.md)
+- [Golden corpus manifest](documents/golden_corpus/golden_corpus_manifest_v1.md)
 - [Test documentation](tests/README.md)
 - [Backend documentation](src/private_rag/README.md)
 - [Frontend documentation](frontend/README.md)
