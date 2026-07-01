@@ -19,7 +19,8 @@ Shared decisions:
 - Embeddings: SentenceTransformers first, with room for Ollama embeddings and fine-tuned models later.
 - Reranking: cross-encoder default.
 - Supported local hosts: macOS, Windows-native Python/Ollama, and Linux/Ubuntu.
-- Public repo posture: no secrets, no private data, no generated indexes, no model files, no document corpus in Git.
+- Public repo posture: no secrets, no private data, no generated indexes, no model files, and no restricted document corpus in Git.
+- Patent scope: PRD3 supports user-uploaded patent PDFs. Bulk downloads, raw patent feeds, and cross-jurisdiction patent-data normalization are deferred to PRD12.
 
 PRD files:
 
@@ -34,3 +35,4 @@ PRD files:
 9. [Export, import, and recreate repository](09-export-import-recreate.md)
 10. [Structured scientific and multimodal parsing](10-structured-scientific-multimodal-parsing.md)
 11. [Chemistry and patent extensions](11-chemistry-patent-extensions.md)
+12. [Bulk patent data integration](12-bulk-patent-data-integration.md)
