@@ -50,8 +50,19 @@ def test_upload_text_document_chunks_with_line_provenance() -> None:
     assert payload["version"]["source_type"] == "text"
     assert payload["version"]["status"] == "parsed"
     assert payload["version"]["chunk_count"] >= 1
-    assert payload["chunks_preview"][0]["line_start"] == 1
-    assert payload["chunks_preview"][0]["metadata"]["source_type"] == "text"
+    chunk = payload["chunks_preview"][0]
+    assert chunk["repository_id"] == repository_id
+    assert chunk["document_id"] == payload["document"]["id"]
+    assert chunk["document_version_id"] == payload["version"]["id"]
+    assert chunk["line_start"] == 1
+    assert chunk["line_end"] == 3
+    assert chunk["section"] == "Abstract"
+    assert chunk["chunk_index"] == 0
+    assert chunk["parser_version"] == payload["version"]["parser_version"]
+    assert chunk["char_start"] == 0
+    assert chunk["char_end"] > chunk["char_start"]
+    assert chunk["source_hash"] == payload["version"]["sha256"]
+    assert chunk["metadata"]["source_type"] == "text"
 
 
 def test_upload_patent_pdf_marks_patent_section_hints() -> None:
