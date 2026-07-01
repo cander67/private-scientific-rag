@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from private_rag.core.settings import Settings, get_settings
+from private_rag.ingestion.models import DocumentVersion
 from private_rag.repositories.models import Repository, RepositorySettingsRow, RepositorySnapshot
 from private_rag.repositories.schemas import (
     RecreateValidationIssue,
@@ -79,7 +80,7 @@ def export_manifest(session: Session, repository_id: str) -> RepositoryManifest 
     manifest = RepositoryManifest(
         repository=repository_settings.repository,
         settings=repository_settings.settings,
-        source_files=[],
+        source_files=list_source_files(session, repository_id),
     )
     snapshot = RepositorySnapshot(
         repository_id=repository_id,
@@ -139,6 +140,16 @@ def validate_recreate_request(request: RecreateValidationRequest) -> RecreateVal
         missing_source_files=missing_source_files,
         missing_models=missing_models,
         incompatible_settings=incompatible_settings,
+    )
+
+
+def list_source_files(session: Session, repository_id: str) -> list[str]:
+    return list(
+        session.scalars(
+            select(DocumentVersion.storage_path)
+            .where(DocumentVersion.repository_id == repository_id)
+            .order_by(DocumentVersion.created_at)
+        )
     )
 
 
