@@ -66,10 +66,12 @@ def _parse_pdf(data: bytes) -> ParsedDocument:
     segments = result.segments or _segments_from_lines(text, page_count=page_count)
     sections = _unique_sections(segments)
     patent_sections = _detect_patent_sections(text)
+    structure_hints = _detect_scientific_structure_hints(text)
     metadata: dict[str, object] = {
         "page_images_available": True,
         "patent_section_hints": patent_sections,
         "parser_chain": result.parser_chain,
+        "structure_hints": structure_hints,
     }
     if patent_sections:
         metadata["document_kind"] = "patent_pdf"
@@ -166,18 +168,39 @@ def _decode(data: bytes) -> str:
 
 
 def _extract_pdf_with_parser_chain(data: bytes) -> PdfExtractionResult:
-    attempts = (
-        _extract_with_pypdf,
-        _extract_with_pymupdf,
-        _extract_with_docling,
-        _extract_with_built_in_pdf_fallback,
-    )
     failures: list[str] = []
-    for attempt in attempts:
-        result = attempt(data)
-        if result.text.strip():
-            return result
-        failures.extend(result.warnings)
+    pypdf_result = _extract_with_pypdf(data)
+    if pypdf_result.text.strip():
+        return pypdf_result
+    failures.extend(pypdf_result.warnings)
+
+    pymupdf_result = _extract_with_pymupdf(data)
+    if pymupdf_result.text.strip():
+        return pymupdf_result
+    failures.extend(pymupdf_result.warnings)
+
+    if _has_image_pages_without_native_text(data):
+        return PdfExtractionResult(
+            text="",
+            parser_name=BUILT_IN_PARSER_NAME,
+            parser_version=BUILT_IN_PARSER_VERSION,
+            parser_chain=["pypdf", "pymupdf", "needs_ocr_gate"],
+            page_count=pymupdf_result.page_count,
+            warnings=[
+                *failures,
+                "PDF pages appear image-only; OCR is required before text chunking.",
+            ],
+        )
+
+    docling_result = _extract_with_docling(data)
+    if docling_result.text.strip():
+        return docling_result
+    failures.extend(docling_result.warnings)
+
+    fallback_result = _extract_with_built_in_pdf_fallback(data)
+    if fallback_result.text.strip():
+        return fallback_result
+    failures.extend(fallback_result.warnings)
 
     return PdfExtractionResult(
         text="",
@@ -186,6 +209,27 @@ def _extract_pdf_with_parser_chain(data: bytes) -> PdfExtractionResult:
         parser_chain=["pypdf", "pymupdf", "docling", "built_in_fallback"],
         warnings=failures,
     )
+
+
+def _has_image_pages_without_native_text(data: bytes) -> bool:
+    try:
+        import fitz
+    except Exception:
+        return False
+
+    try:
+        document = fitz.open(stream=data, filetype="pdf")
+        if document.page_count == 0:
+            return False
+        text_length = 0
+        image_pages = 0
+        for page in document:
+            text_length += len(page.get_text("text").strip())
+            if page.get_images(full=True):
+                image_pages += 1
+        return text_length < PDF_MIN_TEXT_LENGTH and image_pages > 0
+    except Exception:
+        return False
 
 
 def _extract_with_docling(data: bytes) -> PdfExtractionResult:
@@ -512,3 +556,12 @@ def _unique_sections(segments: list[ParsedSegment]) -> list[str]:
 
 def _detect_patent_sections(text: str) -> list[str]:
     return [name for name, pattern in _PATENT_SECTION_PATTERNS if pattern.search(text)]
+
+
+def _detect_scientific_structure_hints(text: str) -> list[str]:
+    patterns: tuple[tuple[str, re.Pattern[str]], ...] = (
+        ("tables", re.compile(r"\b(table|tab\.)\s+\d+", re.IGNORECASE)),
+        ("figures", re.compile(r"\b(fig\.|figure)\s+\d+", re.IGNORECASE)),
+        ("captions", re.compile(r"\b(caption|scheme)\s+\d+", re.IGNORECASE)),
+    )
+    return [name for name, pattern in patterns if pattern.search(text)]
