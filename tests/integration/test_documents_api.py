@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from io import BytesIO
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -28,6 +31,16 @@ def _client_with_database() -> TestClient:
     app = create_app()
     app.dependency_overrides[get_db_session] = override_session
     return TestClient(app)
+
+
+def _pdf_bytes_with_text(text: str) -> bytes:
+    fitz = pytest.importorskip("fitz")
+    document = fitz.open()
+    page = document.new_page()
+    page.insert_text((72, 72), text)
+    data = BytesIO()
+    document.save(data)
+    return data.getvalue()
 
 
 def test_upload_text_document_chunks_with_line_provenance() -> None:
@@ -89,6 +102,37 @@ def test_upload_patent_pdf_marks_patent_section_hints() -> None:
     assert payload["chunks_preview"][0]["page_start"] == 1
 
 
+def test_upload_pdf_generates_and_serves_page_images(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PRIVATE_RAG_DATA_DIR", str(tmp_path))
+    client = _client_with_database()
+    repository_id = client.get("/repositories/default").json()["repository"]["id"]
+    pdf_bytes = _pdf_bytes_with_text(
+        "Abstract\nThis page has enough scientific text to parse and render as a thumbnail."
+    )
+
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("sectioned-paper.pdf", pdf_bytes, "application/pdf")},
+    )
+
+    assert upload_response.status_code == 200
+    document_id = upload_response.json()["document"]["id"]
+    inspection = client.get(f"/repositories/{repository_id}/documents/{document_id}")
+    payload = inspection.json()
+    page_images = payload["page_images"]
+    image_response = client.get(page_images[0]["url"])
+
+    assert inspection.status_code == 200
+    assert page_images[0]["page"] == 1
+    assert page_images[0]["byte_size"] > 0
+    assert payload["version"]["metadata"]["page_images_available"] is True
+    assert image_response.status_code == 200
+    assert image_response.headers["content-type"] == "image/png"
+
+
 def test_upload_markdown_and_annotation_then_inspect_and_delete() -> None:
     client = _client_with_database()
     repository_id = client.get("/repositories/default").json()["repository"]["id"]
@@ -121,6 +165,26 @@ def test_upload_markdown_and_annotation_then_inspect_and_delete() -> None:
     assert len(documents.json()) == 2
     assert delete_response.status_code == 204
     assert deleted_inspection.status_code == 404
+
+
+def test_annotation_upload_links_to_matching_text_file() -> None:
+    client = _client_with_database()
+    repository_id = client.get("/repositories/default").json()["repository"]["id"]
+    text_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("sample.txt", b"precursor was heated\n", "text/plain")},
+    )
+    annotation_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("sample.ann", b"T1\tMaterial 0 9\tprecursor\n", "text/plain")},
+    )
+
+    assert text_response.status_code == 200
+    assert annotation_response.status_code == 200
+    metadata = annotation_response.json()["version"]["metadata"]
+    assert metadata["paired_text_document_id"] == text_response.json()["document"]["id"]
+    assert metadata["paired_text_version_id"] == text_response.json()["version"]["id"]
+    assert metadata["paired_text_filename"] == "sample.txt"
 
 
 def test_repository_manifest_includes_uploaded_source_files() -> None:
