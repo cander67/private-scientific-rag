@@ -3,12 +3,14 @@ from __future__ import annotations
 from collections.abc import Generator
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from private_rag.core.settings import Settings
 from private_rag.db.base import Base
+from private_rag.ingestion import service as ingestion_service
 from private_rag.ingestion.models import Document
 from private_rag.ingestion.schemas import ParsedDocument, ParsedSegment
 from private_rag.ingestion.service import (
@@ -150,6 +152,34 @@ def test_reprocess_document_reports_missing_source_file(tmp_path: Path) -> None:
     assert inspection is not None
     assert inspection.version.status == "failed"
     assert "Original source file is missing." in inspection.version.warnings
+
+
+def test_upload_parser_exception_creates_failed_inspectable_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+
+    def broken_parser(filename: str, content_type: str | None, data: bytes) -> ParsedDocument:
+        raise RuntimeError("parser boom")
+
+    monkeypatch.setattr(ingestion_service, "parse_source", broken_parser)
+
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "paper.txt",
+        "text/plain",
+        b"unparseable",
+        settings=Settings(data_dir=tmp_path),
+    )
+
+    assert uploaded is not None
+    assert uploaded.version.status == "failed"
+    assert uploaded.version.chunk_count == 0
+    assert uploaded.version.metadata["parse_error"] == "RuntimeError"
+    assert "Parsing failed: RuntimeError: parser boom" in uploaded.version.warnings
 
 
 def test_reprocess_missing_and_wrong_repository_return_none(tmp_path: Path) -> None:
