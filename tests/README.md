@@ -7,7 +7,7 @@ Tests are split by speed and dependency profile:
 
 Live tests that require local services or models should use the `live` marker and should not run by default.
 
-Golden corpus planning currently lives in `documents/golden_corpus/golden_corpus_manifest_v1.md`. PRD3 uses this corpus for ingestion/source-inspection smoke tests, with patent coverage limited to user-uploaded PDFs. Bulk patent-data feeds are deferred to PRD12.
+Golden corpus planning currently lives in `documents/golden_corpus/golden_corpus_manifest_v1.md`. PRD3 uses this corpus for ingestion/source-inspection smoke tests, with patent coverage limited to user-uploaded PDFs. The `documents/golden_corpus/ocr/` fixtures include both existing OCR-text-layer PDFs and PNG round-trip PDFs that should be marked `needs_ocr` while still showing page thumbnails. Bulk patent-data feeds are deferred to PRD12.
 
 Run all default tests:
 
