@@ -36,3 +36,5 @@ PRD files:
 10. [Structured scientific and multimodal parsing](10-structured-scientific-multimodal-parsing.md)
 11. [Chemistry and patent extensions](11-chemistry-patent-extensions.md)
 12. [Bulk patent data integration](12-bulk-patent-data-integration.md)
+13. [OCR and page-image text recovery](13-ocr-page-image-text-recovery.md)
+14. [Structured table extraction](14-structured-table-extraction.md)
