@@ -45,6 +45,14 @@ golden_corpus/
     patent-ocr-stress.pdf
     chemistry-heavy-si.pdf
     chemistry-ml-latex-paper.pdf
+  ocr/
+    TestOCR.pdf
+    TestOCR_from_png.pdf
+    US2764565.pdf
+    US2764565_from_png.pdf
+    chemistry-heavy-si_from_png.pdf
+    patent-chemistry_from_png.pdf
+    patent-ocr-stress_from_png.pdf
   source_bundles/
     sectioned-paper-source.tar
     table-heavy-source.tar
@@ -79,6 +87,8 @@ Keep the original downloaded file names in a source manifest if you rename files
 | `patent-drawings.pdf` | `US9941441.pdf` | Existing local file | Patent with photovoltaic module attachment-bracket drawings and claims. |
 | `patent-chemistry.pdf` | `US11370944.pdf` | Existing local file | Patent with adhesive composition, chemistry terminology, classifications, and no drawings. |
 | `patent-ocr-stress.pdf` | `US11845885.pdf` | Existing local file | Image-only parsed patent in current preprocessing; useful OCR/page-image stress test. |
+| `ocr/TestOCR.pdf` | Existing OCR-layer sample | Existing local file | Image-backed page with an existing Tesseract text layer; useful control for OCR-layer quality checks. |
+| `ocr/*_from_png.pdf` | PNG round-trip exports | Existing local files | Text layers removed by image round-trip; should be marked `needs_ocr` and still show page thumbnails. |
 | `patent-bulk-download` | Deferred to future PRD | Deferred | Bulk downloads, archives, raw patent feeds, and cross-jurisdiction normalization are outside PRD3. |
 | `chemistry-heavy.pdf` | `ol401035t_si_001.pdf` | Existing local file | Supporting information with synthesis, chemical structures, NMR, MS, XPS, AFM, ellipsometry, and adhesion tests. |
 | `chemistry-heavy-latex` | arXiv: ML4Chem or DScribe TeX source bundle | Web candidate | Tests LaTeX/e-print extraction, equations, references, captions, and code-like scientific prose. |
@@ -418,6 +428,32 @@ Keep the original downloaded file names in a source manifest if you rename files
 
 ---
 
+### ocr/ image-only and OCR-layer fixtures
+
+- **Type:** Local OCR stress fixtures.
+- **Local sources:**
+  - `ocr/TestOCR.pdf`: image-backed sample with an existing Tesseract OCR text layer.
+  - `ocr/US2764565.pdf`: scanned patent PDF with an existing noisy OCR text layer.
+  - `ocr/*_from_png.pdf`: PDFs exported from PNG images so the hidden text layer is removed.
+- **Expected PRD3 behavior:**
+  - originals with OCR text layers should parse as ordinary PDFs and remain useful controls;
+  - `_from_png` variants should have no native text layer;
+  - `_from_png` variants should be marked `needs_ocr`;
+  - `_from_png` variants should still generate page thumbnails and open in Source Viewer even with zero chunks.
+- **Expected PRD13 behavior:**
+  - OCRmyPDF/Tesseract should recover text from `_from_png` variants;
+  - RapidOCR fallback can be evaluated on poor-confidence pages;
+  - quality scoring should distinguish clean OCR text from noisy patent drawing text.
+- **Known quirks:**
+  - Docling may invoke OCR-capable dependencies internally; PRD3 should gate image-only pages before silent OCR.
+  - The originals and `_from_png` files are complementary: keep both sets for regression coverage.
+- **Evaluation checks:**
+  - Confirm `_from_png` files have `segments == []` before OCR.
+  - Confirm page images are available for every page.
+  - Confirm Source Viewer shows thumbnails, status, and warnings without requiring selected chunks.
+
+---
+
 ### annotation-pair.ann
 
 - **Type:** BRAT standoff annotation file paired with a scientific `.txt` file.
@@ -478,7 +514,7 @@ Keep the original downloaded file names in a source manifest if you rename files
 This is intentionally conservative and does not download large USPTO archives automatically.
 
 ```bash
-mkdir -p golden_corpus/{pdf,source_bundles,text,markdown,patents_uploaded,notes,checks}
+mkdir -p golden_corpus/{pdf,ocr,source_bundles,text,markdown,patents_uploaded,notes,checks}
 
 # Open-access PDFs and arXiv source bundles
 curl -L -o golden_corpus/pdf/sectioned-paper.pdf https://arxiv.org/pdf/2111.01037
@@ -513,6 +549,12 @@ cp US9941441.pdf golden_corpus/pdf/patent-drawings.pdf
 cp US11370944.pdf golden_corpus/pdf/patent-chemistry.pdf
 cp US11845885.pdf golden_corpus/pdf/patent-ocr-stress.pdf
 cp ol401035t_si_001.pdf golden_corpus/pdf/chemistry-heavy-si.pdf
+
+# OCR stress controls: keep OCR-layer originals and PNG round-trip no-text variants
+cp TestOCR.pdf golden_corpus/ocr/TestOCR.pdf
+cp TestOCR_from_png.pdf golden_corpus/ocr/TestOCR_from_png.pdf
+cp US2764565.pdf golden_corpus/ocr/US2764565.pdf
+cp US2764565_from_png.pdf golden_corpus/ocr/US2764565_from_png.pdf
 ```
 
 For bulk patent data, create a deferral note instead of downloading archives in PRD3:
@@ -537,6 +579,13 @@ EOF
 | patent-drawings.pdf | yes | yes | maybe | no | high | patent figures | adhesives/PV | yes | no | no |
 | patent-chemistry.pdf | yes | yes | maybe | examples | no | no | adhesives | yes | no | no |
 | patent-ocr-stress.pdf | no/low | yes | yes | unknown | high | patent figures | adhesives | yes | no | no |
+| ocr/TestOCR.pdf | yes, OCR layer | yes | no | no | no | no | no | no | no | no |
+| ocr/TestOCR_from_png.pdf | no | yes | yes | no | no | no | no | no | no | no |
+| ocr/US2764565.pdf | yes, noisy OCR layer | yes | no | no | high | patent figures | polyurethane | yes | no | no |
+| ocr/US2764565_from_png.pdf | no | yes | yes | no | high | patent figures | polyurethane | yes | no | no |
+| ocr/chemistry-heavy-si_from_png.pdf | no | yes | yes | analytical after OCR | high | mixed after OCR | high | no | no | no |
+| ocr/patent-chemistry_from_png.pdf | no | yes | yes | examples after OCR | unknown | unknown | adhesives | yes | no | no |
+| ocr/patent-ocr-stress_from_png.pdf | no | yes | yes | unknown | high | patent figures | adhesives | yes | no | no |
 | chemistry-heavy-si.pdf | yes | yes | maybe | analytical | high | mixed | high | no | no | no |
 | chemistry-ml-latex-paper.pdf | yes | yes | no | maybe | yes | yes | chemistry/materials ML | no | no | yes |
 | materials-synthesis-procedure.txt | no | no | no | no | no | no | high | no | yes | no |
@@ -623,7 +672,10 @@ related_assets:
    - section maps;
    - table/caption candidates;
    - OCR flags;
+   - page thumbnails for `needs_ocr` PDFs with zero chunks;
    - chunk metadata;
    - citation-card rendering.
 
-5. Only then add arXiv source bundles and USPTO bulk archive tests.
+5. Add the `ocr/*_from_png.pdf` fixtures to confirm PRD3 does not silently OCR image-only PDFs and still shows thumbnails in Source Viewer.
+
+6. Only then add arXiv source bundles and USPTO bulk archive tests.
