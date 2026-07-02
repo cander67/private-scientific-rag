@@ -28,6 +28,16 @@ class DocumentChunkRead(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class PageImageRead(BaseModel):
+    page: int
+    url: str
+    mime_type: str = "image/png"
+    width: int | None = None
+    height: int | None = None
+    byte_size: int
+    sha256: str
+
+
 class DocumentVersionRead(BaseModel):
     id: str
     document_id: str
@@ -72,6 +82,7 @@ class DocumentInspection(BaseModel):
     document: DocumentRead
     version: DocumentVersionRead
     chunks: list[DocumentChunkRead] = Field(default_factory=list)
+    page_images: list[PageImageRead] = Field(default_factory=list)
 
 
 class ParsedSegment(BaseModel):
