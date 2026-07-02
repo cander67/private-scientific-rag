@@ -7,6 +7,8 @@ Focus: chemistry, materials science, patents, scientific PDFs, supporting inform
 
 > This manifest is intended as a practical test set, not a legal redistribution package. Keep source URLs and access dates with each file, and verify license/reuse terms before committing third-party files to a public repository.
 
+> CI note: default automated tests must not read from `documents/golden_corpus/`. PRD3 CI uses committed fixtures under `tests/fixtures/ingestion/` plus generated miniature PDFs under the test suite to validate text-layer and image-only OCR-gate behavior. Treat the PDF and OCR entries below as local/manual corpus candidates unless they are later copied into `tests/fixtures/` with redistribution approval.
+
 ---
 
 ## 1. Corpus purpose
