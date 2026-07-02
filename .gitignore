@@ -25,6 +25,7 @@ htmlcov/
 .ruff_cache/
 coverage.xml
 .uv-cache/
+tmp/
 
 # IDE settings (personal preferences)
 .vscode/
