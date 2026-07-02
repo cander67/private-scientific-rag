@@ -34,6 +34,29 @@ def test_pdf_fallback_filters_container_syntax_and_stream_data_from_chunks() -> 
     assert "claims" in parsed.metadata["patent_section_hints"]
 
 
+def test_pdf_parser_records_scientific_structure_hints(monkeypatch) -> None:
+    monkeypatch.setattr(
+        parser,
+        "_extract_with_pypdf",
+        lambda data: parser.PdfExtractionResult(
+            text=(
+                "Abstract\n"
+                "Figure 1 shows the device layout.\n"
+                "Table 2 lists measured properties.\n"
+                "Scheme 3 summarizes the synthesis."
+            ),
+            parser_name="pypdf",
+            parser_version="test",
+            parser_chain=["pypdf"],
+            page_count=1,
+        ),
+    )
+
+    parsed = parse_source("paper.pdf", "application/pdf", b"%PDF")
+
+    assert parsed.metadata["structure_hints"] == ["tables", "figures", "captions"]
+
+
 def test_pdf_fallback_marks_binary_only_pdf_as_needs_ocr_without_chunks() -> None:
     pdf_bytes = (
         b"%PDF-1.5\n%\xe2\xe3\xcf\xd3\n"
