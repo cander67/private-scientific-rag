@@ -8,14 +8,14 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 foundation is complete, PRD2 repository settings work has started, and the first PRD3 document ingestion/source inspection slice is implemented. PRD3 assumes users can upload patent PDFs of interest, while bulk patent downloads and raw patent-data feeds are deferred to PRD12.
+PRD1 foundation is complete, PRD2 repository settings work has started, and PRD3 document ingestion/source inspection is implemented for local PDFs, text, markdown, annotations, user-uploaded patent PDFs, page thumbnails, parser warnings, and `needs_ocr` status. Full OCR execution is planned in PRD13, structured table extraction in PRD14, and bulk patent downloads/raw patent-data feeds in PRD12.
 
 The current scaffold provides:
 
 - FastAPI backend shell with `/health`.
 - Repository settings API for default repository creation, settings updates, manifest export, and recreate validation.
-- Document upload, PDF parser fallback chain, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
-- React/Vite frontend document manager and source inspector.
+- Document upload, PDF parser fallback chain, page-thumbnail generation, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
+- React/Vite frontend document manager and source inspector, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
 - SQLAlchemy/Alembic migration wiring with the first repository/settings tables.
 - Qdrant Docker Compose service.
 - Pytest, Ruff, Mypy, and CI configuration.
@@ -58,6 +58,9 @@ Run the backend:
 uv run uvicorn private_rag.api.app:app --reload
 ```
 
+Defaults to `http://127.0.0.1:8000`
+Docs available at `http://127.0.0.1:8000/docs`
+
 Install and run the frontend:
 
 ```bash
@@ -65,6 +68,8 @@ cd frontend
 npm install
 npm run dev
 ```
+
+Defaults to `http://127.0.0.1:5173`
 
 ## Checks
 
@@ -80,6 +85,7 @@ Frontend:
 ```bash
 cd frontend
 npm run build
+npm test
 ```
 
 ## Local Data
