@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import shutil
 from collections.abc import Iterable
 from pathlib import Path
 from typing import cast
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from private_rag.core.settings import Settings, get_settings
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
-from private_rag.ingestion.parser import parse_source
+from private_rag.ingestion.parser import detect_source_type, parse_source
 from private_rag.ingestion.schemas import (
     DocumentChunkRead,
     DocumentInspection,
@@ -19,6 +20,7 @@ from private_rag.ingestion.schemas import (
     DocumentStatus,
     DocumentUploadResponse,
     DocumentVersionRead,
+    PageImageRead,
     ParsedDocument,
     ParsedSegment,
     SourceType,
@@ -50,8 +52,10 @@ def upload_document(
     if existing_version is not None:
         return _upload_response(existing_version, skipped=True)
 
-    storage_path = _write_source_file(repository_id, filename, digest, data, settings)
-    parsed = parse_source(filename, content_type, data)
+    app_settings = settings or get_settings()
+    storage_path = _write_source_file(repository_id, filename, digest, data, app_settings)
+    parsed = _parse_document_safely(filename, content_type, data)
+    _attach_annotation_pair_metadata(session, repository_id, filename, parsed)
     repository_settings = RepositorySettings.model_validate(repository.settings.settings)
 
     document = Document(repository_id=repository_id, display_name=filename)
@@ -67,7 +71,7 @@ def upload_document(
         sha256=digest,
         byte_size=len(data),
         storage_path=str(storage_path),
-        status="needs_ocr" if parsed.ocr_required else "parsed",
+        status=_status_for_parsed_document(parsed),
         parser_name=parsed.parser_name,
         parser_version=parsed.parser_version,
         ocr_required=parsed.ocr_required,
@@ -80,6 +84,14 @@ def upload_document(
     )
     session.add(version)
     session.flush()
+
+    _attach_page_image_metadata(
+        data=data,
+        parsed=parsed,
+        version=version,
+        document_id=document.id,
+        settings=app_settings,
+    )
 
     chunks = _chunk_parsed_document(
         parsed=parsed,
@@ -132,6 +144,7 @@ def inspect_document(
         document=_document_read(document, version),
         version=_version_read(version),
         chunks=[_chunk_read(chunk) for chunk in chunks],
+        page_images=_page_images_from_metadata(version.extra_metadata),
     )
 
 
@@ -155,7 +168,8 @@ def reprocess_document(
         return inspect_document(session, repository_id, document_id)
 
     data = source_path.read_bytes()
-    parsed = parse_source(version.original_filename, version.content_type, data)
+    parsed = _parse_document_safely(version.original_filename, version.content_type, data)
+    _attach_annotation_pair_metadata(session, repository_id, version.original_filename, parsed)
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
         return None
@@ -175,7 +189,7 @@ def reprocess_document(
         parser_version=parsed.parser_version,
     )
     session.add_all(chunks)
-    version.status = "needs_ocr" if parsed.ocr_required else "parsed"
+    version.status = _status_for_parsed_document(parsed)
     version.parser_name = parsed.parser_name
     version.parser_version = parsed.parser_version
     version.ocr_required = parsed.ocr_required
@@ -185,6 +199,13 @@ def reprocess_document(
     version.chunk_count = len(chunks)
     version.warnings = parsed.warnings
     version.extra_metadata = parsed.metadata
+    _attach_page_image_metadata(
+        data=data,
+        parsed=parsed,
+        version=version,
+        document_id=document.id,
+        settings=get_settings(),
+    )
     session.add(version)
     session.commit()
     return inspect_document(session, repository_id, document_id)
@@ -196,9 +217,58 @@ def delete_document(session: Session, repository_id: str, document_id: str) -> b
         return None
     if document.repository_id != repository_id:
         return None
+    for version in document.versions:
+        _delete_version_artifacts(version)
     session.delete(document)
     session.commit()
     return True
+
+
+def document_page_image_path(
+    session: Session,
+    repository_id: str,
+    document_id: str,
+    version_id: str,
+    page: int,
+) -> Path | None:
+    document = session.get(Document, document_id)
+    if document is None or document.repository_id != repository_id:
+        return None
+    version = next((item for item in document.versions if item.id == version_id), None)
+    if version is None:
+        return None
+    for image in _page_images_from_metadata(version.extra_metadata):
+        if image.page == page:
+            path = _page_image_disk_path(version, page)
+            if path.exists():
+                return path
+    return None
+
+
+def _parse_document_safely(
+    filename: str,
+    content_type: str | None,
+    data: bytes,
+) -> ParsedDocument:
+    try:
+        return parse_source(filename, content_type, data)
+    except Exception as exc:
+        return ParsedDocument(
+            source_type=detect_source_type(filename, content_type),
+            text="",
+            parser_name="private-rag-built-in",
+            parser_version="prd3-v1",
+            warnings=[f"Parsing failed: {type(exc).__name__}: {exc}"],
+            metadata={"parse_error": type(exc).__name__},
+        )
+
+
+def _status_for_parsed_document(parsed: ParsedDocument) -> DocumentStatus:
+    if parsed.metadata.get("parse_error"):
+        return "failed"
+    if parsed.ocr_required:
+        return "needs_ocr"
+    return "parsed"
 
 
 def _write_source_file(
@@ -214,6 +284,150 @@ def _write_source_file(
     destination = destination_dir / f"{digest[:12]}-{_safe_filename(filename)}"
     destination.write_bytes(data)
     return destination
+
+
+def _attach_annotation_pair_metadata(
+    session: Session,
+    repository_id: str,
+    filename: str,
+    parsed: ParsedDocument,
+) -> None:
+    if parsed.source_type != "annotation":
+        return
+    paired_version = _find_paired_text_version(session, repository_id, filename)
+    if paired_version is None:
+        parsed.metadata["paired_text_missing"] = True
+        return
+    parsed.metadata.update(
+        {
+            "paired_text_document_id": paired_version.document_id,
+            "paired_text_version_id": paired_version.id,
+            "paired_text_filename": paired_version.original_filename,
+        }
+    )
+
+
+def _find_paired_text_version(
+    session: Session,
+    repository_id: str,
+    filename: str,
+) -> DocumentVersion | None:
+    basename = Path(filename).stem
+    candidates = {f"{basename}.txt", f"{basename}.text"}
+    return session.scalar(
+        select(DocumentVersion)
+        .where(
+            DocumentVersion.repository_id == repository_id,
+            DocumentVersion.source_type == "text",
+            DocumentVersion.original_filename.in_(candidates),
+        )
+        .order_by(DocumentVersion.created_at.desc())
+    )
+
+
+def _attach_page_image_metadata(
+    data: bytes,
+    parsed: ParsedDocument,
+    version: DocumentVersion,
+    document_id: str,
+    settings: Settings,
+) -> None:
+    if parsed.source_type != "pdf":
+        return
+    page_images, warnings = _render_pdf_page_images(
+        data=data,
+        repository_id=version.repository_id,
+        document_id=document_id,
+        version_id=version.id,
+        page_count=parsed.page_count,
+        settings=settings,
+    )
+    metadata = {**version.extra_metadata, "page_images": page_images}
+    metadata["page_images_available"] = bool(page_images)
+    version.extra_metadata = metadata
+    if warnings:
+        version.warnings = [*version.warnings, *warnings]
+
+
+def _render_pdf_page_images(
+    data: bytes,
+    repository_id: str,
+    document_id: str,
+    version_id: str,
+    page_count: int | None,
+    settings: Settings,
+) -> tuple[list[dict[str, object]], list[str]]:
+    try:
+        import fitz
+    except Exception as exc:
+        return [], [f"Page thumbnails unavailable: PyMuPDF import failed ({type(exc).__name__})."]
+
+    destination_dir = (
+        settings.data_dir / "repositories" / repository_id / "derived" / version_id / "page-images"
+    )
+    if destination_dir.exists():
+        shutil.rmtree(destination_dir)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        document = fitz.open(stream=data, filetype="pdf")
+        render_count = page_count or document.page_count
+        page_images: list[dict[str, object]] = []
+        for page_index in range(min(render_count, document.page_count)):
+            page_number = page_index + 1
+            page = document.load_page(page_index)
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(0.35, 0.35), alpha=False)
+            destination = destination_dir / _page_image_filename(page_number)
+            pixmap.save(destination)
+            image_bytes = destination.read_bytes()
+            page_images.append(
+                {
+                    "page": page_number,
+                    "url": (
+                        f"/repositories/{repository_id}/documents/{document_id}/versions/"
+                        f"{version_id}/page-images/{page_number}"
+                    ),
+                    "mime_type": "image/png",
+                    "width": pixmap.width,
+                    "height": pixmap.height,
+                    "byte_size": len(image_bytes),
+                    "sha256": hashlib.sha256(image_bytes).hexdigest(),
+                }
+            )
+        return page_images, []
+    except Exception as exc:
+        shutil.rmtree(destination_dir, ignore_errors=True)
+        return [], [f"Page thumbnails unavailable: PDF render failed ({type(exc).__name__})."]
+
+
+def _page_image_filename(page: int) -> str:
+    return f"page-{page:04d}.png"
+
+
+def _page_image_disk_path(version: DocumentVersion, page: int) -> Path:
+    return (
+        Path(version.storage_path).parents[1]
+        / "derived"
+        / version.id
+        / "page-images"
+        / _page_image_filename(page)
+    )
+
+
+def _delete_version_artifacts(version: DocumentVersion) -> None:
+    derived_dir = Path(version.storage_path).parents[1] / "derived" / version.id
+    shutil.rmtree(derived_dir, ignore_errors=True)
+
+
+def _page_images_from_metadata(metadata: dict[str, object]) -> list[PageImageRead]:
+    page_images = metadata.get("page_images")
+    if not isinstance(page_images, list):
+        return []
+    parsed_images: list[PageImageRead] = []
+    for image in page_images:
+        if isinstance(image, dict):
+            parsed_images.append(PageImageRead.model_validate(image))
+    return parsed_images
 
 
 def _safe_filename(filename: str) -> str:
