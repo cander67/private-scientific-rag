@@ -1,4 +1,0 @@
-T1	Material 15 26	precursor A
-T2	Solvent 32 41	solvent B
-T3	Temperature 73 77	80 C
-R1	Uses Arg1:T1 Arg2:T2
