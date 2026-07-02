@@ -23,7 +23,8 @@ Current API surface:
 - `POST /repositories/{repository_id}/documents`: uploads and parses a local document.
 - `GET /repositories/{repository_id}/documents`: lists uploaded documents.
 - `GET /repositories/{repository_id}/documents/{document_id}`: inspects parsed chunks and provenance.
+- `GET /repositories/{repository_id}/documents/{document_id}/versions/{version_id}/page-images/{page}`: serves generated PDF page thumbnails for source inspection.
 - `POST /repositories/{repository_id}/documents/{document_id}/reprocess`: reparses the stored source file.
 - `DELETE /repositories/{repository_id}/documents/{document_id}`: deletes a document and derived chunks.
 
-PRD2 owns repository-aware settings and reproducibility. PRD3 adds local document ingestion and source inspection for PDFs, text, markdown, annotations, and user-uploaded patent PDFs. PDF parsing tries `pypdf`, then PyMuPDF, then Docling, then a conservative built-in fallback that marks low-text PDFs as OCR-needed instead of chunking binary streams. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.
+PRD2 owns repository-aware settings and reproducibility. PRD3 adds local document ingestion and source inspection for PDFs, text, markdown, annotations, and user-uploaded patent PDFs. PDF parsing tries `pypdf`, then PyMuPDF, gates image-only/no-native-text pages as `needs_ocr`, then uses Docling and a conservative built-in fallback for remaining non-image PDFs. PRD3 intentionally does not run a full OCR pipeline; PRD13 owns OCRmyPDF/Tesseract and fallback OCR. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.
