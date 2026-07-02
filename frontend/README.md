@@ -2,7 +2,9 @@
 
 The frontend is a React/Vite app. PRD1 provides the shell, and the static mockups describe the planned repository, document manager, source viewer, search, chat, prompt sandbox, settings, and export workflows.
 
-Current implementation status: the production frontend includes the PRD3 document manager/source inspector for upload, document selection, PDF page thumbnails, chunk provenance inspection, `needs_ocr`/zero-chunk inspection states, reprocess, and delete. Bulk patent-data workflows are planned separately in PRD12.
+Current implementation status: PRD3 is complete. The production frontend includes the document manager/source inspector for upload, document selection, PDF page thumbnails, chunk provenance inspection, `needs_ocr`/zero-chunk inspection states, reprocess, and delete.
+
+PRD4 full-text search is next. Bulk patent-data workflows are planned separately in PRD12.
 
 Run locally:
 

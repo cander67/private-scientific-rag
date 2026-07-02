@@ -2,6 +2,13 @@
 
 This folder breaks the local multimodal scientific RAG plan into development-sized PRDs.
 
+Current status:
+
+- Complete: PRD1 local project foundation.
+- Complete: PRD2 repository settings and reproducibility.
+- Complete: PRD3 document ingestion and source inspection.
+- Next: PRD4 full-text search.
+
 The intended flow is:
 
 1. Approve all static HTML mockups.
@@ -21,13 +28,14 @@ Shared decisions:
 - Supported local hosts: macOS, Windows-native Python/Ollama, and Linux/Ubuntu.
 - Public repo posture: no secrets, no private data, no generated indexes, no model files, and no restricted document corpus in Git.
 - Patent scope: PRD3 supports user-uploaded patent PDFs. Bulk downloads, raw patent feeds, and cross-jurisdiction patent-data normalization are deferred to PRD12.
+- Test fixture posture: default CI uses `tests/fixtures/`, not `documents/golden_corpus/`.
 
 PRD files:
 
-1. [Local project foundation](01-local-project-foundation.md)
-2. [Repository settings and reproducibility](02-repository-settings-reproducibility.md)
-3. [Document ingestion and source inspection](03-document-ingestion-source-inspection.md)
-4. [Full-text search](04-full-text-search.md)
+1. [Local project foundation](01-local-project-foundation.md) - complete
+2. [Repository settings and reproducibility](02-repository-settings-reproducibility.md) - complete
+3. [Document ingestion and source inspection](03-document-ingestion-source-inspection.md) - complete
+4. [Full-text search](04-full-text-search.md) - next
 5. [Vector search with Qdrant](05-vector-search-qdrant.md)
 6. [Hybrid search and reranking](06-hybrid-search-reranking.md)
 7. [Local RAG chat with citations](07-local-rag-chat-citations.md)

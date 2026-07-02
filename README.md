@@ -8,7 +8,9 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 foundation is complete, PRD2 repository settings work has started, and PRD3 document ingestion/source inspection is implemented for local PDFs, text, markdown, annotations, user-uploaded patent PDFs, page thumbnails, parser warnings, and `needs_ocr` status. Full OCR execution is planned in PRD13, structured table extraction in PRD14, and bulk patent downloads/raw patent-data feeds in PRD12.
+PRD1, PRD2, and PRD3 are complete. The project now has the local app foundation, repository settings/reproducibility, and document ingestion/source inspection for local PDFs, text, markdown, annotations, user-uploaded patent PDFs, page thumbnails, parser warnings, and `needs_ocr` status. PRD4 full-text search is next.
+
+Full OCR execution is planned in PRD13, structured table extraction in PRD14, and bulk patent downloads/raw patent-data feeds in PRD12.
 
 The current scaffold provides:
 
@@ -16,11 +18,11 @@ The current scaffold provides:
 - Repository settings API for default repository creation, settings updates, manifest export, and recreate validation.
 - Document upload, PDF parser fallback chain, page-thumbnail generation, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
 - React/Vite frontend document manager and source inspector, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
-- SQLAlchemy/Alembic migration wiring with the first repository/settings tables.
+- SQLAlchemy/Alembic migration wiring for repository/settings and document-ingestion tables.
 - Qdrant Docker Compose service.
 - Pytest, Ruff, Mypy, and CI configuration.
 - Public-repo safety defaults.
-- A versioned golden corpus plan and scaffold under `documents/golden_corpus/` for PRD3 ingestion smoke tests.
+- Local/manual golden corpus documentation under `documents/golden_corpus/`, with CI-safe fixtures under `tests/fixtures/`.
 
 Public repository target: `cander67/private-scientific-rag`.
 
@@ -98,14 +100,15 @@ Runtime data belongs outside Git:
 - `.qdrant/`
 - private document corpora
 
-The golden corpus folder is for curated test planning and safe fixtures only. Do not commit private, licensed, or restricted research documents.
+The `documents/` folder is a local/manual workspace. Do not commit private, licensed, downloaded, generated, or restricted research documents. Use `scripts/prepare_golden_corpus.sh` to recreate the golden-corpus folder layout and optional public candidates. CI tests use `tests/fixtures/`, not `documents/`.
 
 The `example_code/` folder is local inspiration code and should not be committed.
 
 ## Documentation
 
 - [PRD backlog](prds/README.md)
-- [Golden corpus manifest](documents/golden_corpus/golden_corpus_manifest_v1.md)
+- [Golden corpus manifest](documents/golden_corpus/golden_corpus_manifest.md)
+- [Documents workspace](documents/README.md)
 - [Test documentation](tests/README.md)
 - [Backend documentation](src/private_rag/README.md)
 - [Frontend documentation](frontend/README.md)

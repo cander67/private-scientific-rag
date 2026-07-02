@@ -1,6 +1,6 @@
 # Backend Package
 
-The backend package contains the FastAPI app, configuration, database wiring, repository metadata, and future RAG services.
+The backend package contains the FastAPI app, configuration, database wiring, repository metadata, document ingestion/source inspection, and future retrieval/RAG services.
 
 Module boundaries:
 
@@ -27,4 +27,11 @@ Current API surface:
 - `POST /repositories/{repository_id}/documents/{document_id}/reprocess`: reparses the stored source file.
 - `DELETE /repositories/{repository_id}/documents/{document_id}`: deletes a document and derived chunks.
 
-PRD2 owns repository-aware settings and reproducibility. PRD3 adds local document ingestion and source inspection for PDFs, text, markdown, annotations, and user-uploaded patent PDFs. PDF parsing tries `pypdf`, then PyMuPDF, gates image-only/no-native-text pages as `needs_ocr`, then uses Docling and a conservative built-in fallback for remaining non-image PDFs. PRD3 intentionally does not run a full OCR pipeline; PRD13 owns OCRmyPDF/Tesseract and fallback OCR. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.
+Current status:
+
+- PRD1 foundation is complete.
+- PRD2 repository-aware settings and reproducibility are complete.
+- PRD3 local document ingestion and source inspection are complete.
+- PRD4 full-text search is next.
+
+PDF parsing tries `pypdf`, then PyMuPDF, gates image-only/no-native-text pages as `needs_ocr`, then uses Docling and a conservative built-in fallback for remaining non-image PDFs. PRD3 intentionally does not run a full OCR pipeline; PRD13 owns OCRmyPDF/Tesseract and fallback OCR. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.

@@ -2,9 +2,10 @@
 
 Alembic migrations live in this folder.
 
-The first application migration is:
+Application migrations:
 
 - `versions/20260630214430_repository_settings.py`: creates repositories, repository settings, and repository snapshots for PRD2 reproducibility work.
+- `versions/20260701101500_document_ingestion.py`: creates document, version, chunk, artifact, and processing-event tables for PRD3 ingestion/source inspection.
 
 Run migrations locally with:
 
