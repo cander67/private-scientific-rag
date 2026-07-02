@@ -10,6 +10,27 @@ fixtures:
   - fixture_name: pdf/patent-ocr-stress.pdf
     source_type: pdf
     expected_features: [patent, page_images, needs_ocr]
+  - fixture_name: ocr/TestOCR.pdf
+    source_type: pdf
+    expected_features: [image_page, existing_ocr_text_layer, page_images]
+  - fixture_name: ocr/TestOCR_from_png.pdf
+    source_type: pdf
+    expected_features: [image_page, no_text_layer, page_images, needs_ocr]
+  - fixture_name: ocr/US2764565.pdf
+    source_type: pdf
+    expected_features: [patent, drawings, image_pages, existing_noisy_ocr_text_layer]
+  - fixture_name: ocr/US2764565_from_png.pdf
+    source_type: pdf
+    expected_features: [patent, drawings, image_pages, no_text_layer, needs_ocr]
+  - fixture_name: ocr/chemistry-heavy-si_from_png.pdf
+    source_type: pdf
+    expected_features: [chemistry, supporting_information, image_pages, no_text_layer, needs_ocr]
+  - fixture_name: ocr/patent-chemistry_from_png.pdf
+    source_type: pdf
+    expected_features: [patent, chemistry, image_pages, no_text_layer, needs_ocr]
+  - fixture_name: ocr/patent-ocr-stress_from_png.pdf
+    source_type: pdf
+    expected_features: [patent, image_pages, no_text_layer, needs_ocr]
   - fixture_name: pdf/chemistry-heavy-si.pdf
     source_type: pdf
     expected_features: [chemistry, supporting_information, figures, analytical_data]
