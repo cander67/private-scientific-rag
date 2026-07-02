@@ -52,10 +52,21 @@ type Chunk = {
   metadata: Record<string, unknown>;
 };
 
+type PageImage = {
+  page: number;
+  url: string;
+  mime_type: string;
+  width: number | null;
+  height: number | null;
+  byte_size: number;
+  sha256: string;
+};
+
 type Inspection = {
   document: DocumentSummary;
   version: DocumentVersion;
   chunks: Chunk[];
+  page_images: PageImage[];
 };
 
 function App() {
@@ -110,6 +121,16 @@ function App() {
       return [];
     }
     return chunkContextWindow(inspection.chunks, selectedChunk.id);
+  }, [inspection, selectedChunk]);
+
+  const selectedPageImages = useMemo(() => {
+    if (!inspection || !selectedChunk?.page_start) {
+      return inspection?.page_images.slice(0, 3) ?? [];
+    }
+    const pageEnd = selectedChunk.page_end ?? selectedChunk.page_start;
+    return inspection.page_images.filter(
+      (image) => image.page >= selectedChunk.page_start! && image.page <= pageEnd,
+    );
   }, [inspection, selectedChunk]);
 
   const filteredDocuments = useMemo(
@@ -419,7 +440,7 @@ function App() {
               />
             </div>
 
-            {inspection && selectedChunk ? (
+            {inspection ? (
               <>
                 <div className="banner banner-accent source-banner">
                   <div>
@@ -450,75 +471,132 @@ function App() {
                       </span>
                     </details>
                     <details open>
+                      <summary>Page images ({inspection.page_images.length})</summary>
+                      {inspection.page_images.length > 0 ? (
+                        inspection.page_images.slice(0, 24).map((image) => (
+                          <a className="leaf" key={image.page} href={absoluteApiUrl(image.url)}>
+                            page {image.page}
+                          </a>
+                        ))
+                      ) : (
+                        <span className="leaf">No thumbnails</span>
+                      )}
+                    </details>
+                    <details open>
                       <summary>Chunks ({inspection.chunks.length})</summary>
-                      {inspection.chunks.map((chunk) => (
-                        <button
-                          type="button"
-                          key={chunk.id}
-                          className={chunk.id === selectedChunk.id ? "leaf active" : "leaf"}
-                          onClick={() => setSelectedChunkId(chunk.id)}
-                        >
-                          chunk {chunk.chunk_index + 1} · {provenanceLabel(chunk)}
-                        </button>
-                      ))}
+                      {inspection.chunks.length > 0 ? (
+                        inspection.chunks.map((chunk) => (
+                          <button
+                            type="button"
+                            key={chunk.id}
+                            className={chunk.id === selectedChunk?.id ? "leaf active" : "leaf"}
+                            onClick={() => setSelectedChunkId(chunk.id)}
+                          >
+                            chunk {chunk.chunk_index + 1} · {provenanceLabel(chunk)}
+                          </button>
+                        ))
+                      ) : (
+                        <span className="leaf">No parsed chunks</span>
+                      )}
                     </details>
                   </aside>
 
                   <section className="card doc-text">
-                    <div className="page-break">
-                      {provenanceLabel(selectedChunk)}
-                      {selectedChunk.section ? ` · ${selectedChunk.section}` : ""}
-                    </div>
-                    {contextChunks.map((chunk) =>
-                      chunk.id === selectedChunk.id ? (
-                        <div className="chunk-mark" key={chunk.id}>
-                          <div className="muted num chunk-label">
-                            chunk {chunk.chunk_index + 1} · {provenanceLabel(chunk)}
-                            {chunk.char_start !== null && chunk.char_end !== null
-                              ? ` · offsets ${chunk.char_start}-${chunk.char_end}`
-                              : ""}
-                          </div>
-                          {chunk.text}
-                        </div>
-                      ) : (
-                        <p key={chunk.id}>{chunk.text}</p>
-                      ),
+                    {inspection.version.source_type === "pdf" && (
+                      <PageImageStrip
+                        images={selectedPageImages}
+                        pageCount={inspection.version.page_count ?? 0}
+                      />
                     )}
-                    {inspection.chunks.length > contextChunks.length && (
-                      <p className="hint">
-                        Showing surrounding chunk context. Select another chunk in the structure pane
-                        to move this window.
-                      </p>
+                    {selectedChunk ? (
+                      <>
+                        <div className="page-break">
+                          {provenanceLabel(selectedChunk)}
+                          {selectedChunk.section ? ` · ${selectedChunk.section}` : ""}
+                        </div>
+                        {contextChunks.map((chunk) =>
+                          chunk.id === selectedChunk.id ? (
+                            <div className="chunk-mark" key={chunk.id}>
+                              <div className="muted num chunk-label">
+                                chunk {chunk.chunk_index + 1} · {provenanceLabel(chunk)}
+                                {chunk.char_start !== null && chunk.char_end !== null
+                                  ? ` · offsets ${chunk.char_start}-${chunk.char_end}`
+                                  : ""}
+                              </div>
+                              {chunk.text}
+                            </div>
+                          ) : (
+                            <p key={chunk.id}>{chunk.text}</p>
+                          ),
+                        )}
+                        {inspection.chunks.length > contextChunks.length && (
+                          <p className="hint">
+                            Showing surrounding chunk context. Select another chunk in the structure
+                            pane to move this window.
+                          </p>
+                        )}
+                      </>
+                    ) : (
+                      <div className="empty-inline">
+                        <h3>No parsed chunks yet</h3>
+                        <p>
+                          Page thumbnails and parser warnings are available for inspection, but this
+                          document has no chunk text yet.
+                        </p>
+                      </div>
                     )}
                   </section>
 
                   <aside className="card card-pad-sm">
-                    <div className="eyebrow">Selected chunk</div>
-                    <h2>chunk {selectedChunk.chunk_index + 1}</h2>
-                    <dl className="kv">
-                      <dt>repository</dt>
-                      <dd>{repository?.name ?? "default"}</dd>
-                      <dt>document</dt>
-                      <dd>{inspection.document.id}</dd>
-                      <dt>version</dt>
-                      <dd>{inspection.version.id}</dd>
-                      <dt>page/line</dt>
-                      <dd>{provenanceLabel(selectedChunk)}</dd>
-                      <dt>section</dt>
-                      <dd>{selectedChunk.section ?? "—"}</dd>
-                      <dt>chunk index</dt>
-                      <dd>
-                        {selectedChunk.chunk_index + 1} / {inspection.version.chunk_count}
-                      </dd>
-                      <dt>parser</dt>
-                      <dd>{inspection.version.parser_version}</dd>
-                      <dt>source hash</dt>
-                      <dd>{shortHash(selectedChunk.source_hash)}</dd>
-                      <dt>offsets</dt>
-                      <dd>{offsetLabel(selectedChunk)}</dd>
-                      <dt>source type</dt>
-                      <dd>{inspection.version.source_type}</dd>
-                    </dl>
+                    <div className="eyebrow">{selectedChunk ? "Selected chunk" : "Document"}</div>
+                    <h2>
+                      {selectedChunk
+                        ? `chunk ${selectedChunk.chunk_index + 1}`
+                        : inspection.document.display_name}
+                    </h2>
+                    {selectedChunk ? (
+                      <dl className="kv">
+                        <dt>repository</dt>
+                        <dd>{repository?.name ?? "default"}</dd>
+                        <dt>document</dt>
+                        <dd>{inspection.document.id}</dd>
+                        <dt>version</dt>
+                        <dd>{inspection.version.id}</dd>
+                        <dt>page/line</dt>
+                        <dd>{provenanceLabel(selectedChunk)}</dd>
+                        <dt>section</dt>
+                        <dd>{selectedChunk.section ?? "—"}</dd>
+                        <dt>chunk index</dt>
+                        <dd>
+                          {selectedChunk.chunk_index + 1} / {inspection.version.chunk_count}
+                        </dd>
+                        <dt>parser</dt>
+                        <dd>{inspection.version.parser_version}</dd>
+                        <dt>source hash</dt>
+                        <dd>{shortHash(selectedChunk.source_hash)}</dd>
+                        <dt>offsets</dt>
+                        <dd>{offsetLabel(selectedChunk)}</dd>
+                        <dt>source type</dt>
+                        <dd>{inspection.version.source_type}</dd>
+                      </dl>
+                    ) : (
+                      <dl className="kv">
+                        <dt>repository</dt>
+                        <dd>{repository?.name ?? "default"}</dd>
+                        <dt>document</dt>
+                        <dd>{inspection.document.id}</dd>
+                        <dt>version</dt>
+                        <dd>{inspection.version.id}</dd>
+                        <dt>status</dt>
+                        <dd>{inspection.version.status}</dd>
+                        <dt>parser</dt>
+                        <dd>{inspection.version.parser_version}</dd>
+                        <dt>source hash</dt>
+                        <dd>{shortHash(inspection.version.sha256)}</dd>
+                        <dt>source type</dt>
+                        <dd>{inspection.version.source_type}</dd>
+                      </dl>
+                    )}
                     {inspection.version.warnings.length > 0 && (
                       <>
                         <hr className="divider" />
@@ -527,10 +605,12 @@ function App() {
                         </div>
                       </>
                     )}
-                    <p className="hint citation">
-                      Citation: [{inspection.document.display_name}, {provenanceLabel(selectedChunk)},
-                      chunk {selectedChunk.chunk_index + 1}]
-                    </p>
+                    {selectedChunk && (
+                      <p className="hint citation">
+                        Citation: [{inspection.document.display_name},{" "}
+                        {provenanceLabel(selectedChunk)}, chunk {selectedChunk.chunk_index + 1}]
+                      </p>
+                    )}
                   </aside>
                 </div>
               </>
@@ -544,6 +624,31 @@ function App() {
         </main>
       </div>
     </>
+  );
+}
+
+function PageImageStrip({ images, pageCount }: { images: PageImage[]; pageCount: number }) {
+  if (images.length === 0) {
+    return (
+      <div className="page-image-empty">
+        {pageCount > 0 ? "No page thumbnails are available for this PDF." : "No PDF pages detected."}
+      </div>
+    );
+  }
+  return (
+    <div className="page-image-strip">
+      {images.map((image) => (
+        <a
+          className="page-thumb"
+          href={absoluteApiUrl(image.url)}
+          key={image.page}
+          title={`Open page ${image.page}`}
+        >
+          <img src={absoluteApiUrl(image.url)} alt={`Page ${image.page}`} />
+          <span>p. {image.page}</span>
+        </a>
+      ))}
+    </div>
   );
 }
 
@@ -633,6 +738,10 @@ function versionSummary(version: DocumentVersion) {
   if (Array.isArray(hints) && hints.length > 0) {
     return `Patent PDF hints: ${hints.join(", ")}`;
   }
+  const structureHints = version.metadata.structure_hints;
+  if (Array.isArray(structureHints) && structureHints.length > 0) {
+    return `Source structure hints: ${structureHints.join(", ")}`;
+  }
   if (version.ocr_required) {
     return "This document has little extractable text and should be inspected with OCR/page images.";
   }
@@ -640,6 +749,13 @@ function versionSummary(version: DocumentVersion) {
     return version.warnings.join(" ");
   }
   return `${version.parser_version} produced inspectable source chunks.`;
+}
+
+function absoluteApiUrl(path: string) {
+  if (path.startsWith("http")) {
+    return path;
+  }
+  return `${API_BASE}${path}`;
 }
 
 function provenanceLabel(chunk: Chunk) {

@@ -647,6 +647,44 @@ select:focus {
   min-width: 0;
 }
 
+.page-image-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+
+.page-thumb {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.page-thumb img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  object-fit: contain;
+}
+
+.page-image-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: 0.82rem;
+  margin-bottom: var(--s4);
+  padding: var(--s3);
+  text-align: center;
+}
+
 .doc-text p {
   margin: 0 0 var(--s4);
   white-space: pre-wrap;
