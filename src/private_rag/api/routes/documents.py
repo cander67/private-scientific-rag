@@ -3,11 +3,13 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 
 from private_rag.api.routes.repositories import DbSession
 from private_rag.ingestion.schemas import DocumentInspection, DocumentRead, DocumentUploadResponse
 from private_rag.ingestion.service import (
     delete_document,
+    document_page_image_path,
     inspect_document,
     list_documents,
     reprocess_document,
@@ -57,6 +59,20 @@ def inspect_repository_document(
     if inspection is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return inspection
+
+
+@router.get("/{document_id}/versions/{version_id}/page-images/{page}")
+def read_document_page_image(
+    repository_id: str,
+    document_id: str,
+    version_id: str,
+    page: int,
+    session: DbSession,
+) -> FileResponse:
+    path = document_page_image_path(session, repository_id, document_id, version_id, page)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Page image not found")
+    return FileResponse(path, media_type="image/png")
 
 
 @router.post("/{document_id}/reprocess", response_model=DocumentInspection)
