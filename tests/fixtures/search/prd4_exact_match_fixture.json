@@ -1,0 +1,41 @@
+{
+  "documents": [
+    {
+      "filename": "materials-notes.txt",
+      "content_type": "text/plain",
+      "content": "Abstract\nLiFePO4 cathode powder was measured by UV-Vis spectroscopy.\nResults\nSSZ-13 membranes retained CO2/CH4 selectivity after calcination.\n"
+    },
+    {
+      "filename": "US11370944.pdf",
+      "content_type": "application/pdf",
+      "content": "%PDF-1.4\nTitle: UV Curable Epoxy Acrylate Adhesive Composition\nAbstract\nA curable adhesive composition is described.\nTable 2 reports UV-Vis absorbance.\nClaims\nWhat is claimed is:\n1. A composition comprising epoxy acrylate resin and photoinitiator.\n%%EOF"
+    }
+  ],
+  "queries": [
+    {
+      "id": "formula",
+      "query": "LiFePO4",
+      "expected_document_title": "materials-notes.txt"
+    },
+    {
+      "id": "abbreviation",
+      "query": "UV-Vis",
+      "expected_document_title": "materials-notes.txt"
+    },
+    {
+      "id": "identifier",
+      "query": "SSZ-13",
+      "expected_document_title": "materials-notes.txt"
+    },
+    {
+      "id": "patent-term",
+      "query": "epoxy acrylate",
+      "expected_document_title": "US11370944.pdf"
+    },
+    {
+      "id": "section-heading",
+      "query": "Claims",
+      "expected_document_title": "US11370944.pdf"
+    }
+  ]
+}
