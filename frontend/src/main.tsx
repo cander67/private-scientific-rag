@@ -468,7 +468,7 @@ function App() {
               </div>
             </div>
             <div className="topbar-actions">
-              {activeView !== "search" && (
+              {activeView === "documents" && (
                 <label className="btn btn-primary upload-button">
                   Upload documents
                   <input
@@ -523,122 +523,131 @@ function App() {
               />
             ) : (
               <>
-                <label className="dropzone">
-              <input
-                type="file"
-                multiple
-                accept=".pdf,.txt,.md,.markdown,.ann,application/pdf,text/plain,text/markdown"
-                onChange={(event) => void uploadFiles(event.target.files)}
-                disabled={busy || !repository}
-              />
-              <p>
-                <strong>Drop PDF, TXT, Markdown, or ANN files here</strong>
-              </p>
-              <p className="muted">or use the Upload button. Duplicate files are skipped by hash.</p>
-            </label>
+                {activeView === "documents" && (
+                  <>
+                    <label className="dropzone">
+                      <input
+                        type="file"
+                        multiple
+                        accept=".pdf,.txt,.md,.markdown,.ann,application/pdf,text/plain,text/markdown"
+                        onChange={(event) => void uploadFiles(event.target.files)}
+                        disabled={busy || !repository}
+                      />
+                      <p>
+                        <strong>Drop PDF, TXT, Markdown, or ANN files here</strong>
+                      </p>
+                      <p className="muted">
+                        or use the Upload button. Duplicate files are skipped by hash.
+                      </p>
+                    </label>
 
-            <div className="row row-between">
-              <div className="row">
-                <input
-                  type="search"
-                  placeholder="Filter by name..."
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  style={{ width: 220 }}
-                />
-                <select
-                  value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value)}
-                  style={{ width: "auto" }}
-                >
-                  <option value="all">All statuses</option>
-                  <option value="parsed">Parsed</option>
-                  <option value="needs_ocr">Needs OCR</option>
-                  <option value="failed">Failed</option>
-                  <option value="skipped">Skipped</option>
-                </select>
-              </div>
-              <span className="muted">
-                {documents.length} documents · {totalChunks} chunks
-              </span>
-            </div>
-
-            <div className="grid grid-side">
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Document</th>
-                      <th>Status</th>
-                      <th>Pages</th>
-                      <th>Chunks</th>
-                      <th>Uploaded</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredDocuments.length === 0 ? (
-                      <tr>
-                        <td colSpan={6}>
-                          <div className="empty-inline">No documents match this view.</div>
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredDocuments.map((document) => (
-                        <tr
-                          key={document.id}
-                          className={document.id === selectedDocumentId ? "selected-row" : ""}
+                    <div className="row row-between">
+                      <div className="row">
+                        <input
+                          type="search"
+                          placeholder="Filter by name..."
+                          value={query}
+                          onChange={(event) => setQuery(event.target.value)}
+                          style={{ width: 220 }}
+                        />
+                        <select
+                          value={statusFilter}
+                          onChange={(event) => setStatusFilter(event.target.value)}
+                          style={{ width: "auto" }}
                         >
-                          <td>
-                            <div className="name">{document.display_name}</div>
-                            <div className="muted num table-sub">
-                              {document.current_version
-                                ? `${formatBytes(document.current_version.byte_size)} · sha256 ${shortHash(
-                                    document.current_version.sha256,
-                                  )}`
-                                : "No parsed version"}
-                            </div>
-                          </td>
-                          <td>
-                            <StatusBadge status={document.current_version?.status ?? "failed"} />
-                          </td>
-                          <td className="num">
-                            {document.current_version?.page_count ??
-                              document.current_version?.line_count ??
-                              "—"}
-                          </td>
-                          <td className="num">{document.current_version?.chunk_count ?? "—"}</td>
-                          <td className="muted">
-                            {document.current_version
-                              ? formatDate(document.current_version.created_at)
-                              : "—"}
-                          </td>
-                          <td>
-                            <button
-                              className="btn btn-sm btn-ghost"
-                              type="button"
-                              onClick={() => setSelectedDocumentId(document.id)}
-                            >
-                              Inspect
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                          <option value="all">All statuses</option>
+                          <option value="parsed">Parsed</option>
+                          <option value="needs_ocr">Needs OCR</option>
+                          <option value="failed">Failed</option>
+                          <option value="skipped">Skipped</option>
+                        </select>
+                      </div>
+                      <span className="muted">
+                        {documents.length} documents · {totalChunks} chunks
+                      </span>
+                    </div>
 
-              <SelectedDocumentCard
-                selectedDocument={selectedDocument}
-                inspection={inspection}
-                busy={busy}
-                onReprocess={() => void reprocessSelected()}
-                onDelete={() => void deleteSelected()}
-              />
-            </div>
+                    <div className="grid grid-side">
+                      <div className="table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Document</th>
+                              <th>Status</th>
+                              <th>Pages</th>
+                              <th>Chunks</th>
+                              <th>Uploaded</th>
+                              <th />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredDocuments.length === 0 ? (
+                              <tr>
+                                <td colSpan={6}>
+                                  <div className="empty-inline">No documents match this view.</div>
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredDocuments.map((document) => (
+                                <tr
+                                  key={document.id}
+                                  className={document.id === selectedDocumentId ? "selected-row" : ""}
+                                >
+                                  <td>
+                                    <div className="name">{document.display_name}</div>
+                                    <div className="muted num table-sub">
+                                      {document.current_version
+                                        ? `${formatBytes(document.current_version.byte_size)} · sha256 ${shortHash(
+                                            document.current_version.sha256,
+                                          )}`
+                                        : "No parsed version"}
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <StatusBadge status={document.current_version?.status ?? "failed"} />
+                                  </td>
+                                  <td className="num">
+                                    {document.current_version?.page_count ??
+                                      document.current_version?.line_count ??
+                                      "—"}
+                                  </td>
+                                  <td className="num">{document.current_version?.chunk_count ?? "—"}</td>
+                                  <td className="muted">
+                                    {document.current_version
+                                      ? formatDate(document.current_version.created_at)
+                                      : "—"}
+                                  </td>
+                                  <td>
+                                    <button
+                                      className="btn btn-sm btn-ghost"
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedDocumentId(document.id);
+                                        navigateTo("source");
+                                      }}
+                                    >
+                                      Inspect
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
 
-            {inspection ? (
+                      <SelectedDocumentCard
+                        selectedDocument={selectedDocument}
+                        inspection={inspection}
+                        busy={busy}
+                        onReprocess={() => void reprocessSelected()}
+                        onDelete={() => void deleteSelected()}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {activeView === "source" && (inspection ? (
               <>
                 <div className="banner banner-accent source-banner">
                   <div>
@@ -817,7 +826,7 @@ function App() {
                 <h3>Select a document</h3>
                 <p>Uploaded documents will open in the source viewer with chunks and provenance.</p>
               </div>
-            )}
+            ))}
               </>
             )}
           </div>

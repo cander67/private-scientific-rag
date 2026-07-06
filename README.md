@@ -8,7 +8,7 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1, PRD2, PRD3, and PRD4 are complete. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, and inspectable SQLite FTS5 full-text search for exact scientific terms, identifiers, formulas, abbreviations, and patent language.
+PRD1, PRD2, and PRD3 are complete. PRD4 full-text search is implemented on this branch and ready for review, adding inspectable SQLite FTS5 search for exact scientific terms, identifiers, formulas, abbreviations, and patent language.
 
 Full OCR execution is planned in PRD13, structured table extraction in PRD14, and bulk patent downloads/raw patent-data feeds in PRD12.
 

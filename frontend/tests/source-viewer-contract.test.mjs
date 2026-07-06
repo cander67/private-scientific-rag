@@ -26,3 +26,12 @@ test("Source Viewer keeps PRD3 document actions and provenance visible", () => {
   assert.match(source, /Patent PDF hints/);
   assert.match(source, /Source structure hints/);
 });
+
+test("Document Manager and Source Viewer render as separate live views", () => {
+  assert.match(source, /activeView === "documents"/);
+  assert.match(source, /activeView === "source"/);
+  assert.match(source, /navigateTo\("source"\)/);
+  assert.match(source, /activeView === "documents" && \(/);
+  assert.match(source, /activeView === "source" && \(inspection \? \(/);
+  assert.match(source, /\{activeView === "documents" && \(\s*<label className="btn btn-primary upload-button">/);
+});
