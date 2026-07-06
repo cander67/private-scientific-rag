@@ -426,7 +426,7 @@ function App() {
               Document Manager
             </a>
             <a
-              className={activeView === "source" ? "active" : inspection ? "active-secondary" : ""}
+              className={activeView === "source" ? "active" : ""}
               href="#source-viewer"
               onClick={() => navigateTo("source")}
             >
