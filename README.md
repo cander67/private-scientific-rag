@@ -8,7 +8,7 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1, PRD2, and PRD3 are complete. The project now has the local app foundation, repository settings/reproducibility, and document ingestion/source inspection for local PDFs, text, markdown, annotations, user-uploaded patent PDFs, page thumbnails, parser warnings, and `needs_ocr` status. PRD4 full-text search is next.
+PRD1, PRD2, and PRD3 are complete. The project now has the local app foundation, repository settings/reproducibility, and document ingestion/source inspection for local PDFs, text, markdown, annotations, user-uploaded patent PDFs, page thumbnails, parser warnings, and `needs_ocr` status. PRD4 full-text search is in progress.
 
 Full OCR execution is planned in PRD13, structured table extraction in PRD14, and bulk patent downloads/raw patent-data feeds in PRD12.
 
@@ -17,6 +17,7 @@ The current scaffold provides:
 - FastAPI backend shell with `/health`.
 - Repository settings API for default repository creation, settings updates, manifest export, and recreate validation.
 - Document upload, PDF parser fallback chain, page-thumbnail generation, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
+- SQLite FTS5 rebuild and full-text search API for repository chunks, with BM25 scores, snippets, matched fields, metadata filters, and citation-ready provenance.
 - React/Vite frontend document manager and source inspector, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
 - SQLAlchemy/Alembic migration wiring for repository/settings and document-ingestion tables.
 - Qdrant Docker Compose service.
@@ -78,7 +79,7 @@ Defaults to `http://127.0.0.1:5173`
 ```bash
 uv run ruff format --check .
 uv run ruff check .
-uv run mypy src
+uv run mypy src tests
 uv run pytest
 ```
 
