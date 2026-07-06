@@ -7,7 +7,8 @@ Current status:
 - Complete: PRD1 local project foundation.
 - Complete: PRD2 repository settings and reproducibility.
 - Complete: PRD3 document ingestion and source inspection.
-- Ready for review: PRD4 full-text search.
+- Complete: PRD4 full-text search.
+- Next: PRD5 vector search with Qdrant.
 
 The intended flow is:
 
@@ -35,8 +36,8 @@ PRD files:
 1. [Local project foundation](01-local-project-foundation.md) - complete
 2. [Repository settings and reproducibility](02-repository-settings-reproducibility.md) - complete
 3. [Document ingestion and source inspection](03-document-ingestion-source-inspection.md) - complete
-4. [Full-text search](04-full-text-search.md) - ready for review
-5. [Vector search with Qdrant](05-vector-search-qdrant.md)
+4. [Full-text search](04-full-text-search.md) - complete
+5. [Vector search with Qdrant](05-vector-search-qdrant.md) - next
 6. [Hybrid search and reranking](06-hybrid-search-reranking.md)
 7. [Local RAG chat with citations](07-local-rag-chat-citations.md)
 8. [Prompt sandbox and evaluation](08-prompt-sandbox-evaluation.md)

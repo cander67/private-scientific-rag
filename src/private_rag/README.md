@@ -35,6 +35,7 @@ Current status:
 - PRD1 foundation is complete.
 - PRD2 repository-aware settings and reproducibility are complete.
 - PRD3 local document ingestion and source inspection are complete.
-- PRD4 full-text search is implemented and ready for review: sparse index rebuild, full-text query API, metadata filters, exact-match evaluation, and frontend Search Lab are available.
+- PRD4 full-text search is complete: sparse index rebuild, full-text query API, metadata filters, exact-match evaluation, and frontend Search Lab are available.
+- PRD5 vector search with Qdrant is next.
 
 PDF parsing tries `pypdf`, then PyMuPDF, gates image-only/no-native-text pages as `needs_ocr`, then uses Docling and a conservative built-in fallback for remaining non-image PDFs. PRD3 intentionally does not run a full OCR pipeline; PRD13 owns OCRmyPDF/Tesseract and fallback OCR. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.
