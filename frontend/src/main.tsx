@@ -11,6 +11,8 @@ type RepositoryResponse = {
   };
 };
 
+type View = "documents" | "source" | "search";
+
 type DocumentVersion = {
   id: string;
   source_type: "pdf" | "text" | "markdown" | "annotation";
@@ -69,6 +71,45 @@ type Inspection = {
   page_images: PageImage[];
 };
 
+type FullTextRebuildResponse = {
+  repository_id: string;
+  indexed_chunks: number;
+  tokenizer: "unicode61" | "porter";
+};
+
+type FullTextSearchResult = {
+  rank: number;
+  score: number;
+  repository_id: string;
+  document_id: string;
+  document_version_id: string;
+  chunk_id: string;
+  chunk_index: number;
+  document_title: string;
+  section: string | null;
+  page_start: number | null;
+  page_end: number | null;
+  line_start: number | null;
+  line_end: number | null;
+  snippet: string;
+  matched_fields: string[];
+  metadata: {
+    source_type?: string;
+    document_kind?: string | null;
+    tags?: string[];
+    has_table?: boolean;
+    has_figure?: boolean;
+    patent_sections?: string[];
+  };
+};
+
+type FullTextSearchResponse = {
+  query: string;
+  normalized_query: string;
+  repository_id: string;
+  results: FullTextSearchResult[];
+};
+
 function App() {
   const [repository, setRepository] = useState<RepositoryResponse["repository"] | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
@@ -81,6 +122,26 @@ function App() {
   const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   const [navOpen, setNavOpen] = useState(false);
+  const [activeView, setActiveView] = useState<View>(() => viewFromHash(window.location.hash));
+  const [searchQuery, setSearchQuery] = useState("LiFePO4");
+  const [searchLimit, setSearchLimit] = useState(10);
+  const [searchDocumentId, setSearchDocumentId] = useState("");
+  const [searchSection, setSearchSection] = useState("");
+  const [searchSourceType, setSearchSourceType] = useState("");
+  const [searchDocumentKind, setSearchDocumentKind] = useState("");
+  const [searchHasTable, setSearchHasTable] = useState(false);
+  const [searchHasFigure, setSearchHasFigure] = useState(false);
+  const [searchPatentSection, setSearchPatentSection] = useState("");
+  const [searchResults, setSearchResults] = useState<FullTextSearchResult[]>([]);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchMessage, setSearchMessage] = useState("Rebuild the full-text index, then run a query.");
+  const [lastRebuild, setLastRebuild] = useState<FullTextRebuildResponse | null>(null);
+
+  useEffect(() => {
+    const onHashChange = () => setActiveView(viewFromHash(window.location.hash));
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -103,7 +164,11 @@ function App() {
   }, [repository, selectedDocumentId]);
 
   useEffect(() => {
-    setSelectedChunkId(inspection?.chunks[0]?.id ?? null);
+    setSelectedChunkId((current) =>
+      current && inspection?.chunks.some((chunk) => chunk.id === current)
+        ? current
+        : (inspection?.chunks[0]?.id ?? null),
+    );
   }, [inspection]);
 
   const selectedDocument = useMemo(
@@ -254,6 +319,87 @@ function App() {
     }
   }
 
+  async function rebuildFullTextIndex() {
+    if (!repository) {
+      return;
+    }
+    setSearchBusy(true);
+    setSearchMessage("Rebuilding full-text index");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/full-text/rebuild`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("rebuild failed");
+      }
+      const payload = (await response.json()) as FullTextRebuildResponse;
+      setLastRebuild(payload);
+      setSearchMessage(`Indexed ${payload.indexed_chunks} chunks`);
+    } catch {
+      setSearchMessage("Full-text rebuild failed");
+    } finally {
+      setSearchBusy(false);
+    }
+  }
+
+  async function runFullTextSearch() {
+    if (!repository || !searchQuery.trim()) {
+      return;
+    }
+    setSearchBusy(true);
+    setSearchMessage("Searching full-text index");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/full-text/search`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: searchQuery,
+          limit: searchLimit,
+          filters: {
+            document_id: searchDocumentId || null,
+            section: searchSection || null,
+            source_type: searchSourceType || null,
+            document_kind: searchDocumentKind || null,
+            has_table: searchHasTable ? true : null,
+            has_figure: searchHasFigure ? true : null,
+            patent_section: searchPatentSection || null,
+          },
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("search failed");
+      }
+      const payload = (await response.json()) as FullTextSearchResponse;
+      setSearchResults(payload.results);
+      setSearchMessage(`${payload.results.length} results`);
+    } catch {
+      setSearchMessage("Full-text search failed. Rebuild the index and try again.");
+      setSearchResults([]);
+    } finally {
+      setSearchBusy(false);
+    }
+  }
+
+  function navigateTo(view: View) {
+    window.location.hash =
+      view === "documents" ? "documents" : view === "source" ? "source-viewer" : "search-lab";
+    setActiveView(view);
+    setNavOpen(false);
+  }
+
+  function openSearchResult(result: FullTextSearchResult) {
+    setSelectedDocumentId(result.document_id);
+    setSelectedChunkId(result.chunk_id);
+    navigateTo("source");
+  }
+
+  const title =
+    activeView === "search" ? "Search Lab" : activeView === "source" ? "Source Viewer" : "Document Manager";
+  const subtitle =
+    activeView === "search"
+      ? "Inspect full-text retrieval with BM25 scores and citation provenance"
+      : `${repository?.name ?? "Default Repository"} · ${message}`;
+
   return (
     <>
       <div
@@ -272,9 +418,27 @@ function App() {
             <a>Home</a>
             <span className="nav-label">Workspace</span>
             <a>Repository Dashboard</a>
-            <a className="active">Document Manager</a>
-            <a className={inspection ? "active-secondary" : ""}>Source Viewer</a>
-            <a>Search Lab</a>
+            <a
+              className={activeView === "documents" ? "active" : ""}
+              href="#documents"
+              onClick={() => navigateTo("documents")}
+            >
+              Document Manager
+            </a>
+            <a
+              className={activeView === "source" ? "active" : ""}
+              href="#source-viewer"
+              onClick={() => navigateTo("source")}
+            >
+              Source Viewer
+            </a>
+            <a
+              className={activeView === "search" ? "active" : ""}
+              href="#search-lab"
+              onClick={() => navigateTo("search")}
+            >
+              Search Lab
+            </a>
             <a>Prompt Sandbox</a>
             <a>Chat Workspace</a>
             <span className="nav-label">Manage</span>
@@ -299,21 +463,23 @@ function App() {
                 <span />
               </button>
               <div className="titles">
-                <h1>Document Manager</h1>
-                <p>{repository?.name ?? "Default Repository"} · {message}</p>
+                <h1>{title}</h1>
+                <p>{subtitle}</p>
               </div>
             </div>
             <div className="topbar-actions">
-              <label className="btn btn-primary upload-button">
-                Upload documents
-                <input
-                  type="file"
-                  multiple
-                  accept=".pdf,.txt,.md,.markdown,.ann,application/pdf,text/plain,text/markdown"
-                  onChange={(event) => void uploadFiles(event.target.files)}
-                  disabled={busy || !repository}
-                />
-              </label>
+              {activeView === "documents" && (
+                <label className="btn btn-primary upload-button">
+                  Upload documents
+                  <input
+                    type="file"
+                    multiple
+                    accept=".pdf,.txt,.md,.markdown,.ann,application/pdf,text/plain,text/markdown"
+                    onChange={(event) => void uploadFiles(event.target.files)}
+                    disabled={busy || !repository}
+                  />
+                </label>
+              )}
               <button
                 className="theme-toggle"
                 type="button"
@@ -325,122 +491,163 @@ function App() {
           </header>
 
           <div className="page">
-            <label className="dropzone">
-              <input
-                type="file"
-                multiple
-                accept=".pdf,.txt,.md,.markdown,.ann,application/pdf,text/plain,text/markdown"
-                onChange={(event) => void uploadFiles(event.target.files)}
-                disabled={busy || !repository}
+            {activeView === "search" ? (
+              <SearchLab
+                documents={documents}
+                repositoryReady={Boolean(repository)}
+                query={searchQuery}
+                limit={searchLimit}
+                documentId={searchDocumentId}
+                section={searchSection}
+                sourceType={searchSourceType}
+                documentKind={searchDocumentKind}
+                hasTable={searchHasTable}
+                hasFigure={searchHasFigure}
+                patentSection={searchPatentSection}
+                results={searchResults}
+                busy={searchBusy}
+                message={searchMessage}
+                lastRebuild={lastRebuild}
+                onQueryChange={setSearchQuery}
+                onLimitChange={setSearchLimit}
+                onDocumentChange={setSearchDocumentId}
+                onSectionChange={setSearchSection}
+                onSourceTypeChange={setSearchSourceType}
+                onDocumentKindChange={setSearchDocumentKind}
+                onHasTableChange={setSearchHasTable}
+                onHasFigureChange={setSearchHasFigure}
+                onPatentSectionChange={setSearchPatentSection}
+                onRebuild={() => void rebuildFullTextIndex()}
+                onSearch={() => void runFullTextSearch()}
+                onOpenResult={openSearchResult}
               />
-              <p>
-                <strong>Drop PDF, TXT, Markdown, or ANN files here</strong>
-              </p>
-              <p className="muted">or use the Upload button. Duplicate files are skipped by hash.</p>
-            </label>
+            ) : (
+              <>
+                {activeView === "documents" && (
+                  <>
+                    <label className="dropzone">
+                      <input
+                        type="file"
+                        multiple
+                        accept=".pdf,.txt,.md,.markdown,.ann,application/pdf,text/plain,text/markdown"
+                        onChange={(event) => void uploadFiles(event.target.files)}
+                        disabled={busy || !repository}
+                      />
+                      <p>
+                        <strong>Drop PDF, TXT, Markdown, or ANN files here</strong>
+                      </p>
+                      <p className="muted">
+                        or use the Upload button. Duplicate files are skipped by hash.
+                      </p>
+                    </label>
 
-            <div className="row row-between">
-              <div className="row">
-                <input
-                  type="search"
-                  placeholder="Filter by name..."
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  style={{ width: 220 }}
-                />
-                <select
-                  value={statusFilter}
-                  onChange={(event) => setStatusFilter(event.target.value)}
-                  style={{ width: "auto" }}
-                >
-                  <option value="all">All statuses</option>
-                  <option value="parsed">Parsed</option>
-                  <option value="needs_ocr">Needs OCR</option>
-                  <option value="failed">Failed</option>
-                  <option value="skipped">Skipped</option>
-                </select>
-              </div>
-              <span className="muted">
-                {documents.length} documents · {totalChunks} chunks
-              </span>
-            </div>
-
-            <div className="grid grid-side">
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Document</th>
-                      <th>Status</th>
-                      <th>Pages</th>
-                      <th>Chunks</th>
-                      <th>Uploaded</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredDocuments.length === 0 ? (
-                      <tr>
-                        <td colSpan={6}>
-                          <div className="empty-inline">No documents match this view.</div>
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredDocuments.map((document) => (
-                        <tr
-                          key={document.id}
-                          className={document.id === selectedDocumentId ? "selected-row" : ""}
+                    <div className="row row-between">
+                      <div className="row">
+                        <input
+                          type="search"
+                          placeholder="Filter by name..."
+                          value={query}
+                          onChange={(event) => setQuery(event.target.value)}
+                          style={{ width: 220 }}
+                        />
+                        <select
+                          value={statusFilter}
+                          onChange={(event) => setStatusFilter(event.target.value)}
+                          style={{ width: "auto" }}
                         >
-                          <td>
-                            <div className="name">{document.display_name}</div>
-                            <div className="muted num table-sub">
-                              {document.current_version
-                                ? `${formatBytes(document.current_version.byte_size)} · sha256 ${shortHash(
-                                    document.current_version.sha256,
-                                  )}`
-                                : "No parsed version"}
-                            </div>
-                          </td>
-                          <td>
-                            <StatusBadge status={document.current_version?.status ?? "failed"} />
-                          </td>
-                          <td className="num">
-                            {document.current_version?.page_count ??
-                              document.current_version?.line_count ??
-                              "—"}
-                          </td>
-                          <td className="num">{document.current_version?.chunk_count ?? "—"}</td>
-                          <td className="muted">
-                            {document.current_version
-                              ? formatDate(document.current_version.created_at)
-                              : "—"}
-                          </td>
-                          <td>
-                            <button
-                              className="btn btn-sm btn-ghost"
-                              type="button"
-                              onClick={() => setSelectedDocumentId(document.id)}
-                            >
-                              Inspect
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                          <option value="all">All statuses</option>
+                          <option value="parsed">Parsed</option>
+                          <option value="needs_ocr">Needs OCR</option>
+                          <option value="failed">Failed</option>
+                          <option value="skipped">Skipped</option>
+                        </select>
+                      </div>
+                      <span className="muted">
+                        {documents.length} documents · {totalChunks} chunks
+                      </span>
+                    </div>
 
-              <SelectedDocumentCard
-                selectedDocument={selectedDocument}
-                inspection={inspection}
-                busy={busy}
-                onReprocess={() => void reprocessSelected()}
-                onDelete={() => void deleteSelected()}
-              />
-            </div>
+                    <div className="grid grid-side">
+                      <div className="table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Document</th>
+                              <th>Status</th>
+                              <th>Pages</th>
+                              <th>Chunks</th>
+                              <th>Uploaded</th>
+                              <th />
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filteredDocuments.length === 0 ? (
+                              <tr>
+                                <td colSpan={6}>
+                                  <div className="empty-inline">No documents match this view.</div>
+                                </td>
+                              </tr>
+                            ) : (
+                              filteredDocuments.map((document) => (
+                                <tr
+                                  key={document.id}
+                                  className={document.id === selectedDocumentId ? "selected-row" : ""}
+                                >
+                                  <td>
+                                    <div className="name">{document.display_name}</div>
+                                    <div className="muted num table-sub">
+                                      {document.current_version
+                                        ? `${formatBytes(document.current_version.byte_size)} · sha256 ${shortHash(
+                                            document.current_version.sha256,
+                                          )}`
+                                        : "No parsed version"}
+                                    </div>
+                                  </td>
+                                  <td>
+                                    <StatusBadge status={document.current_version?.status ?? "failed"} />
+                                  </td>
+                                  <td className="num">
+                                    {document.current_version?.page_count ??
+                                      document.current_version?.line_count ??
+                                      "—"}
+                                  </td>
+                                  <td className="num">{document.current_version?.chunk_count ?? "—"}</td>
+                                  <td className="muted">
+                                    {document.current_version
+                                      ? formatDate(document.current_version.created_at)
+                                      : "—"}
+                                  </td>
+                                  <td>
+                                    <button
+                                      className="btn btn-sm btn-ghost"
+                                      type="button"
+                                      onClick={() => {
+                                        setSelectedDocumentId(document.id);
+                                        navigateTo("source");
+                                      }}
+                                    >
+                                      Inspect
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
 
-            {inspection ? (
+                      <SelectedDocumentCard
+                        selectedDocument={selectedDocument}
+                        inspection={inspection}
+                        busy={busy}
+                        onReprocess={() => void reprocessSelected()}
+                        onDelete={() => void deleteSelected()}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {activeView === "source" && (inspection ? (
               <>
                 <div className="banner banner-accent source-banner">
                   <div>
@@ -619,11 +826,341 @@ function App() {
                 <h3>Select a document</h3>
                 <p>Uploaded documents will open in the source viewer with chunks and provenance.</p>
               </div>
+            ))}
+              </>
             )}
           </div>
         </main>
       </div>
     </>
+  );
+}
+
+function SearchLab({
+  documents,
+  repositoryReady,
+  query,
+  limit,
+  documentId,
+  section,
+  sourceType,
+  documentKind,
+  hasTable,
+  hasFigure,
+  patentSection,
+  results,
+  busy,
+  message,
+  lastRebuild,
+  onQueryChange,
+  onLimitChange,
+  onDocumentChange,
+  onSectionChange,
+  onSourceTypeChange,
+  onDocumentKindChange,
+  onHasTableChange,
+  onHasFigureChange,
+  onPatentSectionChange,
+  onRebuild,
+  onSearch,
+  onOpenResult,
+}: {
+  documents: DocumentSummary[];
+  repositoryReady: boolean;
+  query: string;
+  limit: number;
+  documentId: string;
+  section: string;
+  sourceType: string;
+  documentKind: string;
+  hasTable: boolean;
+  hasFigure: boolean;
+  patentSection: string;
+  results: FullTextSearchResult[];
+  busy: boolean;
+  message: string;
+  lastRebuild: FullTextRebuildResponse | null;
+  onQueryChange: (value: string) => void;
+  onLimitChange: (value: number) => void;
+  onDocumentChange: (value: string) => void;
+  onSectionChange: (value: string) => void;
+  onSourceTypeChange: (value: string) => void;
+  onDocumentKindChange: (value: string) => void;
+  onHasTableChange: (value: boolean) => void;
+  onHasFigureChange: (value: boolean) => void;
+  onPatentSectionChange: (value: string) => void;
+  onRebuild: () => void;
+  onSearch: () => void;
+  onOpenResult: (result: FullTextSearchResult) => void;
+}) {
+  const sections = Array.from(
+    new Set(
+      documents
+        .map((document) => document.current_version?.metadata?.patent_section_hints)
+        .filter((hints): hints is unknown[] => Array.isArray(hints))
+        .flat()
+        .map(String),
+    ),
+  );
+  return (
+    <>
+      <div className="card search-panel">
+        <label className="field" htmlFor="full-text-query">
+          Query
+        </label>
+        <div className="row search-row">
+          <input
+            id="full-text-query"
+            type="search"
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                onSearch();
+              }
+            }}
+          />
+          <button
+            className="btn btn-primary"
+            type="button"
+            onClick={onSearch}
+            disabled={busy || !repositoryReady || !query.trim()}
+          >
+            Run search
+          </button>
+          <button className="btn" type="button" onClick={onRebuild} disabled={busy || !repositoryReady}>
+            Rebuild index
+          </button>
+        </div>
+
+        <div className="grid grid-2 search-controls">
+          <div>
+            <label className="field">Search mode</label>
+            <div className="segmented">
+              <button type="button" aria-pressed="true">
+                Full-text
+              </button>
+              <button type="button" disabled>
+                Vector
+              </button>
+              <button type="button" disabled>
+                Hybrid
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="field">Reranking strategy</label>
+            <select disabled>
+              <option>None - planned for PRD6</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-3 search-controls">
+          <div>
+            <label className="field" htmlFor="search-limit">
+              Top-k
+            </label>
+            <select
+              id="search-limit"
+              value={limit}
+              onChange={(event) => onLimitChange(Number(event.target.value))}
+            >
+              {[5, 10, 20, 50].map((value) => (
+                <option value={value} key={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="field" htmlFor="search-document">
+              Document
+            </label>
+            <select
+              id="search-document"
+              value={documentId}
+              onChange={(event) => onDocumentChange(event.target.value)}
+            >
+              <option value="">Any document</option>
+              {documents.map((document) => (
+                <option value={document.id} key={document.id}>
+                  {document.display_name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="field" htmlFor="search-section">
+              Section
+            </label>
+            <input
+              id="search-section"
+              value={section}
+              onChange={(event) => onSectionChange(event.target.value)}
+              placeholder="Abstract, Claims, Results"
+            />
+          </div>
+          <div>
+            <label className="field" htmlFor="search-source-type">
+              Source type
+            </label>
+            <select
+              id="search-source-type"
+              value={sourceType}
+              onChange={(event) => onSourceTypeChange(event.target.value)}
+            >
+              <option value="">Any type</option>
+              <option value="pdf">PDF</option>
+              <option value="text">Text</option>
+              <option value="markdown">Markdown</option>
+              <option value="annotation">Annotation</option>
+            </select>
+          </div>
+          <div>
+            <label className="field" htmlFor="search-document-kind">
+              Document kind
+            </label>
+            <select
+              id="search-document-kind"
+              value={documentKind}
+              onChange={(event) => onDocumentKindChange(event.target.value)}
+            >
+              <option value="">Any kind</option>
+              <option value="patent_pdf">Patent PDF</option>
+            </select>
+          </div>
+          <div>
+            <label className="field" htmlFor="search-patent-section">
+              Patent section
+            </label>
+            <select
+              id="search-patent-section"
+              value={patentSection}
+              onChange={(event) => onPatentSectionChange(event.target.value)}
+            >
+              <option value="">Any patent section</option>
+              {[...new Set(["claims", "abstract", "description", "examples", ...sections])].map((value) => (
+                <option value={value} key={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="row search-toggles">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={hasTable}
+              onChange={(event) => onHasTableChange(event.target.checked)}
+            />
+            <span>Has table hint</span>
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={hasFigure}
+              onChange={(event) => onHasFigureChange(event.target.checked)}
+            />
+            <span>Has figure hint</span>
+          </label>
+        </div>
+      </div>
+
+      <div className="row row-between">
+        <span className="muted">
+          {message}
+          {lastRebuild ? ` · ${lastRebuild.indexed_chunks} indexed chunks` : ""}
+        </span>
+        <span className="badge">
+          <span className="dot" />
+          Manual rebuild
+        </span>
+      </div>
+
+      {busy ? (
+        <div className="card card-pad-sm">
+          <div className="eyebrow">Searching</div>
+          <div className="stack">
+            <div className="skeleton" style={{ width: "80%" }} />
+            <div className="skeleton" style={{ width: "95%" }} />
+            <div className="skeleton" style={{ width: "55%" }} />
+          </div>
+        </div>
+      ) : results.length > 0 ? (
+        <div className="stack">
+          {results.map((result) => (
+            <SearchResultCard result={result} key={result.chunk_id} onOpen={() => onOpenResult(result)} />
+          ))}
+        </div>
+      ) : (
+        <div className="empty">
+          <h3>No full-text results yet</h3>
+          <p>Rebuild the index after document changes, then run an exact-term query.</p>
+        </div>
+      )}
+    </>
+  );
+}
+
+function SearchResultCard({
+  result,
+  onOpen,
+}: {
+  result: FullTextSearchResult;
+  onOpen: () => void;
+}) {
+  return (
+    <div className="result">
+      <div className="row row-between">
+        <div>
+          <span className="rank">#{result.rank}</span>
+          <strong> {result.document_title}</strong>
+          <span className="muted">
+            {" "}
+            · {searchProvenanceLabel(result)} · {result.section ?? "document"} · chunk{" "}
+            {result.chunk_index + 1}
+          </span>
+        </div>
+        <button className="btn btn-sm btn-ghost" type="button" onClick={onOpen}>
+          View source
+        </button>
+      </div>
+      <p
+        className="search-snippet"
+        dangerouslySetInnerHTML={{ __html: result.snippet }}
+      />
+      <div className="scores">
+        <div className="score">
+          <span>BM25</span>
+          <b>{Math.abs(result.score).toFixed(4)}</b>
+        </div>
+        <div className="score">
+          <span>Rank</span>
+          <b>{result.rank}</b>
+        </div>
+        <div className="score">
+          <span>Fields</span>
+          <b>{result.matched_fields.join(", ")}</b>
+        </div>
+      </div>
+      <div className="row result-meta">
+        {result.metadata.source_type && <span className="badge">{result.metadata.source_type}</span>}
+        {result.metadata.document_kind && <span className="badge">{result.metadata.document_kind}</span>}
+        {result.metadata.has_table && <span className="badge">table</span>}
+        {result.metadata.has_figure && <span className="badge">figure</span>}
+        {result.metadata.patent_sections?.map((section) => (
+          <span className="badge" key={section}>
+            {section}
+          </span>
+        ))}
+      </div>
+      <p className="hint citation">
+        Citation: [{result.document_title}, {searchProvenanceLabel(result)}, chunk{" "}
+        {result.chunk_index + 1}]
+      </p>
+    </div>
   );
 }
 
@@ -810,6 +1347,26 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(
     new Date(value),
   );
+}
+
+function searchProvenanceLabel(result: FullTextSearchResult) {
+  if (result.page_start) {
+    return `p. ${result.page_start}${result.page_end && result.page_end !== result.page_start ? `-${result.page_end}` : ""}`;
+  }
+  if (result.line_start) {
+    return `lines ${result.line_start}${result.line_end && result.line_end !== result.line_start ? `-${result.line_end}` : ""}`;
+  }
+  return result.section ?? "document";
+}
+
+function viewFromHash(hash: string): View {
+  if (hash === "#search-lab") {
+    return "search";
+  }
+  if (hash === "#source-viewer") {
+    return "source";
+  }
+  return "documents";
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

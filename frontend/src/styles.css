@@ -516,6 +516,8 @@ td .name {
 }
 
 input[type="search"],
+input[type="text"],
+input:not([type]),
 select {
   width: 100%;
   border: 1px solid var(--border);
@@ -531,6 +533,132 @@ select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.search-row {
+  align-items: stretch;
+  flex-wrap: nowrap;
+}
+
+.search-row input {
+  min-width: 0;
+}
+
+.search-controls {
+  margin-top: var(--s4);
+}
+
+.search-toggles {
+  margin-top: var(--s4);
+}
+
+.segmented {
+  display: inline-flex;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.segmented button {
+  flex: 1;
+  min-height: 38px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.segmented button:last-child {
+  border-right: 0;
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.segmented button:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.result {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: var(--s4);
+}
+
+.rank {
+  font-family: var(--mono);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.search-snippet {
+  margin: var(--s3) 0 0;
+}
+
+.search-snippet mark {
+  border-radius: 4px;
+  background: var(--warn-soft);
+  color: var(--text);
+  padding: 0 2px;
+}
+
+.scores {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+
+.score {
+  min-width: 96px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 6px 8px;
+}
+
+.score span {
+  display: block;
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.score b {
+  display: block;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  margin-top: 2px;
+}
+
+.result-meta {
+  margin-top: var(--s3);
+}
+
+.skeleton {
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--surface-2), var(--surface-3), var(--surface-2));
 }
 
 .banner {
