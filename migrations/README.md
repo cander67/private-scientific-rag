@@ -6,6 +6,7 @@ Application migrations:
 
 - `versions/20260630214430_repository_settings.py`: creates repositories, repository settings, and repository snapshots for PRD2 reproducibility work.
 - `versions/20260701101500_document_ingestion.py`: creates document, version, chunk, artifact, and processing-event tables for PRD3 ingestion/source inspection.
+- `versions/20260706120000_full_text_search.py`: creates the SQLite FTS5 `full_text_chunks` virtual table for PRD4 sparse full-text search.
 
 Run migrations locally with:
 
