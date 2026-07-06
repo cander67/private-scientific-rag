@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -34,7 +36,7 @@ def test_repository_settings_reject_chunk_overlap_larger_than_chunk_size() -> No
         RepositorySettings.model_validate(payload)
 
 
-def test_recreate_validation_reports_missing_files_and_models(tmp_path) -> None:
+def test_recreate_validation_reports_missing_files_and_models(tmp_path: Path) -> None:
     existing_source = tmp_path / "paper.pdf"
     existing_source.write_text("source", encoding="utf-8")
     settings = RepositorySettings.from_app_settings(Settings())

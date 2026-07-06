@@ -40,11 +40,12 @@ def rebuild_full_text_index(
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
         return None
-    full_text_settings = RepositorySettings.model_validate(
-        repository.settings.settings
-    ).full_text
+    full_text_settings = RepositorySettings.model_validate(repository.settings.settings).full_text
     ensure_full_text_schema(session, full_text_settings)
-    session.execute(text(f"DELETE FROM {FTS_TABLE} WHERE repository_id = :repository_id"), {"repository_id": repository_id})
+    session.execute(
+        text(f"DELETE FROM {FTS_TABLE} WHERE repository_id = :repository_id"),
+        {"repository_id": repository_id},
+    )
 
     chunks = session.execute(
         select(DocumentChunk, Document, DocumentVersion)
@@ -94,9 +95,7 @@ def search_full_text(
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
         return None
-    full_text_settings = RepositorySettings.model_validate(
-        repository.settings.settings
-    ).full_text
+    full_text_settings = RepositorySettings.model_validate(repository.settings.settings).full_text
     ensure_full_text_schema(session, full_text_settings)
     normalized_query = normalize_fts_query(query)
     if not normalized_query:
@@ -287,9 +286,7 @@ def _classify_body_text(
     fields["body"] = text_value
     section_lower = section.lower()
     metadata_sections = {
-        str(item).lower()
-        for item in metadata.get("sections", [])
-        if isinstance(item, str)
+        str(item).lower() for item in metadata.get("sections", []) if isinstance(item, str)
     }
     all_sections = {section_lower, *metadata_sections}
     if any("claim" in value for value in all_sections):

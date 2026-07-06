@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ "**" ]
   pull_request:
     branches: [ main ]
 
@@ -31,8 +31,8 @@ jobs:
     - name: Lint backend
       run: uv run ruff check .
     
-    - name: Type check backend
-      run: uv run mypy src
+    - name: Type check backend and tests
+      run: uv run mypy src tests
     
     - name: Run backend tests
       run: uv run pytest

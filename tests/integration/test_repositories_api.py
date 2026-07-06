@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -66,7 +67,7 @@ def test_repository_settings_round_trip_and_manifest_export() -> None:
     assert manifest["settings"]["parser"]["structured_parser"]
 
 
-def test_recreate_validation_endpoint_reports_clear_issues(tmp_path) -> None:
+def test_recreate_validation_endpoint_reports_clear_issues(tmp_path: Path) -> None:
     client = _client_with_database()
     created = client.get("/repositories/default").json()
     manifest = client.get(f"/repositories/{created['repository']['id']}/manifest").json()

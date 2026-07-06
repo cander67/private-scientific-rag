@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from private_rag.ingestion import parser
 from private_rag.ingestion.parser import parse_source
 
@@ -34,7 +36,9 @@ def test_pdf_fallback_filters_container_syntax_and_stream_data_from_chunks() -> 
     assert "claims" in parsed.metadata["patent_section_hints"]
 
 
-def test_pdf_parser_records_scientific_structure_hints(monkeypatch) -> None:
+def test_pdf_parser_records_scientific_structure_hints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         parser,
         "_extract_with_pypdf",
@@ -96,7 +100,9 @@ def test_pdf_fallback_does_not_chunk_uncompressed_stream_text_without_real_parse
     assert parsed.segments == []
 
 
-def test_pdf_parser_chain_uses_pypdf_first_when_it_extracts_text(monkeypatch) -> None:
+def test_pdf_parser_chain_uses_pypdf_first_when_it_extracts_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         parser,
         "_extract_with_pypdf",
@@ -130,7 +136,9 @@ def test_pdf_parser_chain_uses_pypdf_first_when_it_extracts_text(monkeypatch) ->
     ]
 
 
-def test_pdf_parser_chain_falls_through_to_pymupdf(monkeypatch) -> None:
+def test_pdf_parser_chain_falls_through_to_pymupdf(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     empty_pypdf = parser.PdfExtractionResult(
         text="",
         parser_name="pypdf",
@@ -154,7 +162,9 @@ def test_pdf_parser_chain_falls_through_to_pymupdf(monkeypatch) -> None:
     assert parsed.metadata["parser_chain"] == ["pypdf", "pymupdf"]
 
 
-def test_pdf_parser_chain_falls_through_to_docling(monkeypatch) -> None:
+def test_pdf_parser_chain_falls_through_to_docling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     empty_pypdf = parser.PdfExtractionResult(
         text="",
         parser_name="pypdf",
