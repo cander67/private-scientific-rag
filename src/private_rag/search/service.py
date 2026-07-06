@@ -17,6 +17,32 @@ from private_rag.search.schemas import (
 )
 
 FTS_TABLE = "full_text_chunks"
+REQUIRED_FTS_COLUMNS = {
+    "repository_id",
+    "document_id",
+    "document_version_id",
+    "chunk_id",
+    "chunk_index",
+    "document_title",
+    "section",
+    "source_type",
+    "document_kind",
+    "tags",
+    "has_table",
+    "has_figure",
+    "patent_sections",
+    "page_start",
+    "page_end",
+    "line_start",
+    "line_end",
+    "title",
+    "headings",
+    "body",
+    "captions",
+    "tables",
+    "claims",
+    "examples",
+}
 FIELD_WEIGHTS = {
     "title": 6.0,
     "headings": 5.0,
@@ -63,12 +89,14 @@ def rebuild_full_text_index(
                 INSERT INTO {FTS_TABLE} (
                     repository_id, document_id, document_version_id, chunk_id, chunk_index,
                     document_title, section, source_type, document_kind, tags,
+                    has_table, has_figure, patent_sections,
                     page_start, page_end, line_start, line_end,
                     title, headings, body, captions, tables, claims, examples
                 )
                 VALUES (
                     :repository_id, :document_id, :document_version_id, :chunk_id, :chunk_index,
                     :document_title, :section, :source_type, :document_kind, :tags,
+                    :has_table, :has_figure, :patent_sections,
                     :page_start, :page_end, :line_start, :line_end,
                     :title, :headings, :body, :captions, :tables, :claims, :examples
                 )
@@ -116,9 +144,18 @@ def search_full_text(
     _append_filter(where_clauses, params, "section", filters.section)
     _append_filter(where_clauses, params, "source_type", filters.source_type)
     _append_filter(where_clauses, params, "document_kind", filters.document_kind)
+    _append_bool_filter(where_clauses, params, "has_table", filters.has_table)
+    _append_bool_filter(where_clauses, params, "has_figure", filters.has_figure)
     if filters.tag:
-        where_clauses.append("tags LIKE :tag")
-        params["tag"] = f"%|{filters.tag}|%"
+        _append_pipe_list_filter(where_clauses, params, "tags", "tag", filters.tag)
+    if filters.patent_section:
+        _append_pipe_list_filter(
+            where_clauses,
+            params,
+            "patent_sections",
+            "patent_section",
+            filters.patent_section,
+        )
 
     score_expression = "bm25({table}, {weights})".format(
         table=FTS_TABLE,
@@ -130,8 +167,9 @@ def search_full_text(
             SELECT
                 repository_id, document_id, document_version_id, chunk_id, chunk_index,
                 document_title, section, source_type, document_kind, tags,
+                has_table, has_figure, patent_sections,
                 page_start, page_end, line_start, line_end,
-                snippet({FTS_TABLE}, 16, '<mark>', '</mark>', '...', 24) AS snippet,
+                snippet({FTS_TABLE}, 19, '<mark>', '</mark>', '...', 24) AS snippet,
                 {score_expression} AS score,
                 title, headings, body, captions, tables, claims, examples
             FROM {FTS_TABLE}
@@ -164,6 +202,9 @@ def search_full_text(
                 "source_type": row["source_type"],
                 "document_kind": row["document_kind"],
                 "tags": _split_tags(row["tags"]),
+                "has_table": row["has_table"] == "1",
+                "has_figure": row["has_figure"] == "1",
+                "patent_sections": _split_tags(row["patent_sections"]),
             },
         )
         for rank, row in enumerate(rows, start=1)
@@ -177,6 +218,7 @@ def search_full_text(
 
 
 def ensure_full_text_schema(session: Session, settings: FullTextSettings) -> None:
+    _drop_incompatible_fts_table(session)
     tokenizer = "porter unicode61" if settings.porter_stemming else settings.tokenizer
     prefix_clause = ", prefix='2 3 4'" if settings.prefix_index else ""
     session.execute(
@@ -193,6 +235,9 @@ def ensure_full_text_schema(session: Session, settings: FullTextSettings) -> Non
                 source_type UNINDEXED,
                 document_kind UNINDEXED,
                 tags UNINDEXED,
+                has_table UNINDEXED,
+                has_figure UNINDEXED,
+                patent_sections UNINDEXED,
                 page_start UNINDEXED,
                 page_end UNINDEXED,
                 line_start UNINDEXED,
@@ -210,6 +255,15 @@ def ensure_full_text_schema(session: Session, settings: FullTextSettings) -> Non
             """
         )
     )
+
+
+def _drop_incompatible_fts_table(session: Session) -> None:
+    columns = {
+        str(row["name"])
+        for row in session.execute(text(f"PRAGMA table_info({FTS_TABLE})")).mappings()
+    }
+    if columns and not REQUIRED_FTS_COLUMNS.issubset(columns):
+        session.execute(text(f"DROP TABLE {FTS_TABLE}"))
 
 
 def normalize_fts_query(query: str) -> str:
@@ -243,15 +297,43 @@ def _append_filter(
     params[column] = value
 
 
+def _append_bool_filter(
+    where_clauses: list[str],
+    params: dict[str, Any],
+    column: str,
+    value: bool | None,
+) -> None:
+    if value is None:
+        return
+    where_clauses.append(f"{column} = :{column}")
+    params[column] = "1" if value else "0"
+
+
+def _append_pipe_list_filter(
+    where_clauses: list[str],
+    params: dict[str, Any],
+    column: str,
+    parameter: str,
+    value: str,
+) -> None:
+    where_clauses.append(f"{column} LIKE :{parameter}")
+    params[parameter] = f"%|{value}|%"
+
+
 def _fields_for_chunk(
     chunk: DocumentChunk,
     document: Document,
     version: DocumentVersion,
 ) -> dict[str, Any]:
     metadata = chunk.extra_metadata or {}
+    version_metadata = version.extra_metadata or {}
     section = chunk.section or ""
-    field_text = _classify_body_text(chunk.text, section, metadata)
+    structure_hints = _string_list(version_metadata.get("structure_hints"))
+    patent_sections = _string_list(version_metadata.get("patent_section_hints"))
+    field_text = _classify_body_text(chunk.text, section, metadata, structure_hints)
     tags = _tags(metadata)
+    has_table = _has_structure_hint("tables", structure_hints, metadata, section)
+    has_figure = _has_structure_hint("figures", structure_hints, metadata, section)
     return {
         "repository_id": chunk.repository_id,
         "document_id": chunk.document_id,
@@ -261,16 +343,17 @@ def _fields_for_chunk(
         "document_title": document.display_name,
         "section": chunk.section,
         "source_type": version.source_type,
-        "document_kind": version.extra_metadata.get("document_kind"),
+        "document_kind": version_metadata.get("document_kind"),
         "tags": "|" + "|".join(tags) + "|" if tags else "",
+        "has_table": "1" if has_table else "0",
+        "has_figure": "1" if has_figure else "0",
+        "patent_sections": _pipe_list(patent_sections),
         "page_start": chunk.page_start,
         "page_end": chunk.page_end,
         "line_start": chunk.line_start,
         "line_end": chunk.line_end,
         "title": " ".join(
-            str(value)
-            for value in [document.display_name, version.extra_metadata.get("title")]
-            if value
+            str(value) for value in [document.display_name, version_metadata.get("title")] if value
         ),
         "headings": section,
         **field_text,
@@ -281,6 +364,7 @@ def _classify_body_text(
     text_value: str,
     section: str,
     metadata: dict[str, Any],
+    structure_hints: list[str],
 ) -> dict[str, str]:
     fields = {field: "" for field in INDEXED_FIELDS if field not in {"title", "headings"}}
     fields["body"] = text_value
@@ -288,16 +372,35 @@ def _classify_body_text(
     metadata_sections = {
         str(item).lower() for item in metadata.get("sections", []) if isinstance(item, str)
     }
-    all_sections = {section_lower, *metadata_sections}
+    all_sections = {section_lower, *metadata_sections, *structure_hints}
     if any("claim" in value for value in all_sections):
         fields["claims"] = text_value
     if any("example" in value for value in all_sections):
         fields["examples"] = text_value
     if metadata.get("table_hints") or any("table" in value for value in all_sections):
         fields["tables"] = text_value
-    if metadata.get("figure_hints") or any("caption" in value for value in all_sections):
+    if metadata.get("figure_hints") or any(
+        value in {"figures", "captions"} or "caption" in value for value in all_sections
+    ):
         fields["captions"] = text_value
     return fields
+
+
+def _has_structure_hint(
+    hint: str,
+    structure_hints: list[str],
+    metadata: dict[str, Any],
+    section: str,
+) -> bool:
+    section_lower = section.lower()
+    metadata_sections = _string_list(metadata.get("sections"))
+    if hint == "tables" and metadata.get("table_hints"):
+        return True
+    if hint == "figures" and metadata.get("figure_hints"):
+        return True
+    return hint in structure_hints or any(
+        hint.rstrip("s") in value for value in [section_lower, *metadata_sections]
+    )
 
 
 def _tags(metadata: dict[str, Any]) -> list[str]:
@@ -305,6 +408,16 @@ def _tags(metadata: dict[str, Any]) -> list[str]:
     if not isinstance(raw_tags, list):
         return []
     return [str(tag) for tag in raw_tags if str(tag).strip()]
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip().lower() for item in value if str(item).strip()]
+
+
+def _pipe_list(values: list[str]) -> str:
+    return "|" + "|".join(values) + "|" if values else ""
 
 
 def _split_tags(value: Any) -> list[str]:

@@ -76,6 +76,46 @@ def test_rebuild_and_search_full_text_index_returns_citation_ready_results() -> 
     assert filtered_response.json()["results"][0]["document_title"] == "rare-materials.txt"
 
 
+def test_full_text_search_filters_by_available_metadata() -> None:
+    client = _client_with_database()
+    repository_id = client.get("/repositories/default").json()["repository"]["id"]
+    pdf_bytes = (
+        b"%PDF-1.4\n/Type /Page\n"
+        b"Title: UV Curable Epoxy Acrylate Adhesive Composition\n"
+        b"Abstract\nFigure 1 shows the adhesive test layout.\n"
+        b"Table 2 reports UV-Vis absorbance for LiFePO4 samples.\n"
+        b"What is claimed is:\n1. A composition comprising epoxy acrylate resin.\n%%EOF"
+    )
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("US11370944.pdf", pdf_bytes, "application/pdf")},
+    )
+
+    rebuild_response = client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    filtered_response = client.post(
+        f"/repositories/{repository_id}/full-text/search",
+        json={
+            "query": "epoxy acrylate",
+            "filters": {
+                "document_kind": "patent_pdf",
+                "has_table": True,
+                "has_figure": True,
+                "patent_section": "claims",
+            },
+        },
+    )
+
+    assert upload_response.status_code == 200
+    assert rebuild_response.status_code == 200
+    assert filtered_response.status_code == 200
+    result = filtered_response.json()["results"][0]
+    assert result["document_title"] == "US11370944.pdf"
+    assert result["metadata"]["document_kind"] == "patent_pdf"
+    assert result["metadata"]["has_table"] is True
+    assert result["metadata"]["has_figure"] is True
+    assert "claims" in result["metadata"]["patent_sections"]
+
+
 def test_full_text_search_returns_404_for_missing_repository() -> None:
     client = _client_with_database()
 

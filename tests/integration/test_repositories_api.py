@@ -51,6 +51,8 @@ def test_repository_settings_round_trip_and_manifest_export() -> None:
     settings = created["settings"]
     settings["chunking"]["chunk_size"] = 1200
     settings["chunking"]["chunk_overlap"] = 160
+    settings["full_text"]["tokenizer"] = "porter"
+    settings["full_text"]["porter_stemming"] = True
     settings["prompt"]["version"] = "science-v2"
 
     update_response = client.put(
@@ -65,6 +67,8 @@ def test_repository_settings_round_trip_and_manifest_export() -> None:
     manifest = manifest_response.json()
     assert manifest["settings"]["chunking"]["chunk_size"] == 1200
     assert manifest["settings"]["parser"]["structured_parser"]
+    assert manifest["settings"]["full_text"]["tokenizer"] == "porter"
+    assert manifest["settings"]["full_text"]["porter_stemming"] is True
 
 
 def test_recreate_validation_endpoint_reports_clear_issues(tmp_path: Path) -> None:

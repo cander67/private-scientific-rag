@@ -11,6 +11,9 @@ class FullTextSearchFilters(BaseModel):
     source_type: str | None = None
     document_kind: str | None = None
     tag: str | None = None
+    has_table: bool | None = None
+    has_figure: bool | None = None
+    patent_section: str | None = None
 
 
 class FullTextSearchRequest(BaseModel):
