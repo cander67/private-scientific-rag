@@ -77,7 +77,22 @@ type FullTextRebuildResponse = {
   tokenizer: "unicode61" | "porter";
 };
 
+type VectorRebuildResponse = {
+  repository_id: string;
+  embedding_run_id: string;
+  provider: string;
+  model: string;
+  collection_name: string;
+  indexed_chunks: number;
+  vector_size: number;
+  distance: "cosine" | "dot" | "euclid";
+};
+
+type SearchMode = "full-text" | "vector";
+type SearchRebuildResponse = FullTextRebuildResponse | VectorRebuildResponse;
+
 type FullTextSearchResult = {
+  mode: "full-text";
   rank: number;
   score: number;
   repository_id: string;
@@ -103,11 +118,57 @@ type FullTextSearchResult = {
   };
 };
 
+type VectorSearchResult = {
+  mode: "vector";
+  rank: number;
+  score: number;
+  distance: "cosine" | "dot" | "euclid";
+  repository_id: string;
+  document_id: string;
+  document_version_id: string;
+  chunk_id: string;
+  chunk_index: number;
+  document_title: string;
+  section: string | null;
+  page_start: number | null;
+  page_end: number | null;
+  line_start: number | null;
+  line_end: number | null;
+  text_preview: string;
+  metadata: {
+    source_type?: string;
+    document_kind?: string | null;
+    tags?: string[];
+    has_table?: boolean;
+    has_figure?: boolean;
+    patent_sections?: string[];
+  };
+  embedding_run_id: string;
+  embedding_provider: string;
+  embedding_model: string;
+  vector_size: number;
+  collection_name: string;
+};
+
+type SearchResult = FullTextSearchResult | VectorSearchResult;
+
 type FullTextSearchResponse = {
   query: string;
   normalized_query: string;
   repository_id: string;
   results: FullTextSearchResult[];
+};
+
+type VectorSearchResponse = {
+  query: string;
+  repository_id: string;
+  embedding_run_id: string;
+  provider: string;
+  model: string;
+  collection_name: string;
+  vector_size: number;
+  distance: string;
+  results: VectorSearchResult[];
 };
 
 function App() {
@@ -132,10 +193,11 @@ function App() {
   const [searchHasTable, setSearchHasTable] = useState(false);
   const [searchHasFigure, setSearchHasFigure] = useState(false);
   const [searchPatentSection, setSearchPatentSection] = useState("");
-  const [searchResults, setSearchResults] = useState<FullTextSearchResult[]>([]);
+  const [searchMode, setSearchMode] = useState<SearchMode>("full-text");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchMessage, setSearchMessage] = useState("Rebuild the full-text index, then run a query.");
-  const [lastRebuild, setLastRebuild] = useState<FullTextRebuildResponse | null>(null);
+  const [lastRebuild, setLastRebuild] = useState<SearchRebuildResponse | null>(null);
 
   useEffect(() => {
     const onHashChange = () => setActiveView(viewFromHash(window.location.hash));
@@ -319,37 +381,39 @@ function App() {
     }
   }
 
-  async function rebuildFullTextIndex() {
+  async function rebuildSearchIndex() {
     if (!repository) {
       return;
     }
     setSearchBusy(true);
-    setSearchMessage("Rebuilding full-text index");
+    setSearchMessage(`Rebuilding ${searchModeLabel(searchMode)} index`);
     try {
-      const response = await fetch(`${API_BASE}/repositories/${repository.id}/full-text/rebuild`, {
+      const endpoint = searchMode === "vector" ? "vector" : "full-text";
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/${endpoint}/rebuild`, {
         method: "POST",
       });
       if (!response.ok) {
         throw new Error("rebuild failed");
       }
-      const payload = (await response.json()) as FullTextRebuildResponse;
+      const payload = (await response.json()) as SearchRebuildResponse;
       setLastRebuild(payload);
       setSearchMessage(`Indexed ${payload.indexed_chunks} chunks`);
     } catch {
-      setSearchMessage("Full-text rebuild failed");
+      setSearchMessage(`${searchModeLabel(searchMode)} rebuild failed`);
     } finally {
       setSearchBusy(false);
     }
   }
 
-  async function runFullTextSearch() {
+  async function runSearch() {
     if (!repository || !searchQuery.trim()) {
       return;
     }
     setSearchBusy(true);
-    setSearchMessage("Searching full-text index");
+    setSearchMessage(`Searching ${searchModeLabel(searchMode)} index`);
     try {
-      const response = await fetch(`${API_BASE}/repositories/${repository.id}/full-text/search`, {
+      const endpoint = searchMode === "vector" ? "vector" : "full-text";
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/${endpoint}/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -369,11 +433,17 @@ function App() {
       if (!response.ok) {
         throw new Error("search failed");
       }
-      const payload = (await response.json()) as FullTextSearchResponse;
-      setSearchResults(payload.results);
-      setSearchMessage(`${payload.results.length} results`);
+      if (searchMode === "vector") {
+        const payload = (await response.json()) as VectorSearchResponse;
+        setSearchResults(payload.results.map((result) => ({ ...result, mode: "vector" })));
+        setSearchMessage(`${payload.results.length} results`);
+      } else {
+        const payload = (await response.json()) as FullTextSearchResponse;
+        setSearchResults(payload.results.map((result) => ({ ...result, mode: "full-text" })));
+        setSearchMessage(`${payload.results.length} results`);
+      }
     } catch {
-      setSearchMessage("Full-text search failed. Rebuild the index and try again.");
+      setSearchMessage(`${searchModeLabel(searchMode)} search failed. Rebuild the index and try again.`);
       setSearchResults([]);
     } finally {
       setSearchBusy(false);
@@ -387,7 +457,7 @@ function App() {
     setNavOpen(false);
   }
 
-  function openSearchResult(result: FullTextSearchResult) {
+  function openSearchResult(result: SearchResult) {
     setSelectedDocumentId(result.document_id);
     setSelectedChunkId(result.chunk_id);
     navigateTo("source");
@@ -495,6 +565,7 @@ function App() {
               <SearchLab
                 documents={documents}
                 repositoryReady={Boolean(repository)}
+                mode={searchMode}
                 query={searchQuery}
                 limit={searchLimit}
                 documentId={searchDocumentId}
@@ -508,6 +579,12 @@ function App() {
                 busy={searchBusy}
                 message={searchMessage}
                 lastRebuild={lastRebuild}
+                onModeChange={(mode) => {
+                  setSearchMode(mode);
+                  setSearchResults([]);
+                  setLastRebuild(null);
+                  setSearchMessage(`Rebuild the ${searchModeLabel(mode)} index, then run a query.`);
+                }}
                 onQueryChange={setSearchQuery}
                 onLimitChange={setSearchLimit}
                 onDocumentChange={setSearchDocumentId}
@@ -517,8 +594,8 @@ function App() {
                 onHasTableChange={setSearchHasTable}
                 onHasFigureChange={setSearchHasFigure}
                 onPatentSectionChange={setSearchPatentSection}
-                onRebuild={() => void rebuildFullTextIndex()}
-                onSearch={() => void runFullTextSearch()}
+                onRebuild={() => void rebuildSearchIndex()}
+                onSearch={() => void runSearch()}
                 onOpenResult={openSearchResult}
               />
             ) : (
@@ -839,6 +916,7 @@ function App() {
 function SearchLab({
   documents,
   repositoryReady,
+  mode,
   query,
   limit,
   documentId,
@@ -852,6 +930,7 @@ function SearchLab({
   busy,
   message,
   lastRebuild,
+  onModeChange,
   onQueryChange,
   onLimitChange,
   onDocumentChange,
@@ -867,6 +946,7 @@ function SearchLab({
 }: {
   documents: DocumentSummary[];
   repositoryReady: boolean;
+  mode: SearchMode;
   query: string;
   limit: number;
   documentId: string;
@@ -876,10 +956,11 @@ function SearchLab({
   hasTable: boolean;
   hasFigure: boolean;
   patentSection: string;
-  results: FullTextSearchResult[];
+  results: SearchResult[];
   busy: boolean;
   message: string;
-  lastRebuild: FullTextRebuildResponse | null;
+  lastRebuild: SearchRebuildResponse | null;
+  onModeChange: (value: SearchMode) => void;
   onQueryChange: (value: string) => void;
   onLimitChange: (value: number) => void;
   onDocumentChange: (value: string) => void;
@@ -891,7 +972,7 @@ function SearchLab({
   onPatentSectionChange: (value: string) => void;
   onRebuild: () => void;
   onSearch: () => void;
-  onOpenResult: (result: FullTextSearchResult) => void;
+  onOpenResult: (result: SearchResult) => void;
 }) {
   const sections = Array.from(
     new Set(
@@ -905,12 +986,12 @@ function SearchLab({
   return (
     <>
       <div className="card search-panel">
-        <label className="field" htmlFor="full-text-query">
+        <label className="field" htmlFor="search-query">
           Query
         </label>
         <div className="row search-row">
           <input
-            id="full-text-query"
+            id="search-query"
             type="search"
             value={query}
             onChange={(event) => onQueryChange(event.target.value)}
@@ -937,10 +1018,10 @@ function SearchLab({
           <div>
             <label className="field">Search mode</label>
             <div className="segmented">
-              <button type="button" aria-pressed="true">
+              <button type="button" aria-pressed={mode === "full-text"} onClick={() => onModeChange("full-text")}>
                 Full-text
               </button>
-              <button type="button" disabled>
+              <button type="button" aria-pressed={mode === "vector"} onClick={() => onModeChange("vector")}>
                 Vector
               </button>
               <button type="button" disabled>
@@ -1072,6 +1153,7 @@ function SearchLab({
         <span className="muted">
           {message}
           {lastRebuild ? ` · ${lastRebuild.indexed_chunks} indexed chunks` : ""}
+          {lastRebuild && isVectorRebuild(lastRebuild) ? ` · ${lastRebuild.model}` : ""}
         </span>
         <span className="badge">
           <span className="dot" />
@@ -1096,8 +1178,8 @@ function SearchLab({
         </div>
       ) : (
         <div className="empty">
-          <h3>No full-text results yet</h3>
-          <p>Rebuild the index after document changes, then run an exact-term query.</p>
+          <h3>No {searchModeLabel(mode)} results yet</h3>
+          <p>Rebuild the index after document changes, then run a query.</p>
         </div>
       )}
     </>
@@ -1108,7 +1190,7 @@ function SearchResultCard({
   result,
   onOpen,
 }: {
-  result: FullTextSearchResult;
+  result: SearchResult;
   onOpen: () => void;
 }) {
   return (
@@ -1127,24 +1209,41 @@ function SearchResultCard({
           View source
         </button>
       </div>
-      <p
-        className="search-snippet"
-        dangerouslySetInnerHTML={{ __html: result.snippet }}
-      />
+      {result.mode === "full-text" ? (
+        <p
+          className="search-snippet"
+          dangerouslySetInnerHTML={{ __html: result.snippet }}
+        />
+      ) : (
+        <p className="search-snippet">{result.text_preview}</p>
+      )}
       <div className="scores">
         <div className="score">
-          <span>BM25</span>
+          <span>{result.mode === "full-text" ? "BM25" : "Dense"}</span>
           <b>{Math.abs(result.score).toFixed(4)}</b>
         </div>
         <div className="score">
           <span>Rank</span>
           <b>{result.rank}</b>
         </div>
-        <div className="score">
-          <span>Fields</span>
-          <b>{result.matched_fields.join(", ")}</b>
-        </div>
+        {result.mode === "full-text" ? (
+          <div className="score">
+            <span>Fields</span>
+            <b>{result.matched_fields.join(", ")}</b>
+          </div>
+        ) : (
+          <div className="score">
+            <span>Embedding</span>
+            <b>{shortModelName(result.embedding_model)}</b>
+          </div>
+        )}
       </div>
+      {result.mode === "vector" && (
+        <p className="hint">
+          {result.embedding_provider} · {result.vector_size}d · {result.distance} · run{" "}
+          {result.embedding_run_id.slice(0, 8)}
+        </p>
+      )}
       <div className="row result-meta">
         {result.metadata.source_type && <span className="badge">{result.metadata.source_type}</span>}
         {result.metadata.document_kind && <span className="badge">{result.metadata.document_kind}</span>}
@@ -1349,7 +1448,7 @@ function formatDate(value: string) {
   );
 }
 
-function searchProvenanceLabel(result: FullTextSearchResult) {
+function searchProvenanceLabel(result: SearchResult) {
   if (result.page_start) {
     return `p. ${result.page_start}${result.page_end && result.page_end !== result.page_start ? `-${result.page_end}` : ""}`;
   }
@@ -1357,6 +1456,19 @@ function searchProvenanceLabel(result: FullTextSearchResult) {
     return `lines ${result.line_start}${result.line_end && result.line_end !== result.line_start ? `-${result.line_end}` : ""}`;
   }
   return result.section ?? "document";
+}
+
+function searchModeLabel(mode: SearchMode) {
+  return mode === "vector" ? "vector" : "full-text";
+}
+
+function isVectorRebuild(rebuild: SearchRebuildResponse): rebuild is VectorRebuildResponse {
+  return "embedding_run_id" in rebuild;
+}
+
+function shortModelName(model: string) {
+  const parts = model.split("/");
+  return parts[parts.length - 1] ?? model;
 }
 
 function viewFromHash(hash: string): View {

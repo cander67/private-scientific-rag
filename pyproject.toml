@@ -14,6 +14,7 @@ dependencies = [
     "pymupdf>=1.24.0",
     "pypdf>=5.0.0",
     "python-multipart>=0.0.20",
+    "sentence-transformers>=3.0.0",
     "sqlalchemy>=2.0.35",
     "uvicorn[standard]>=0.30.6",
 ]
@@ -58,11 +59,13 @@ plugins = []
 [tool.pytest.ini_options]
 addopts = [
     "--import-mode=importlib",
+    "-m",
+    "not live",
     "--cov=private_rag",
     "--cov-report=term-missing",
     "--cov-report=html",
 ]
 testpaths = ["tests"]
 markers = [
-    "live: tests that require local services or models",
+    "live: tests that require local services or models; run explicitly with RUN_LIVE_TESTS=1 and -m live",
 ]

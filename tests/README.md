@@ -13,6 +13,8 @@ PRD4 full-text search coverage includes unit tests for FTS query normalization a
 
 Exact-match search fixtures live in `tests/fixtures/search/`. They cover formulas, abbreviations, identifiers, patent terms, and section headings, and require `recall@5` and `recall@10` to remain at `1.0` for the committed fixture set.
 
+PRD5 vector search coverage uses deterministic fake embeddings and an in-memory vector store for ordinary CI. It covers vector rebuild/search API behavior, latest-index replacement metadata, full-text-equivalent filters, missing-index errors, and semantic recall evaluation. The committed semantic fixture is `tests/fixtures/search/prd5_semantic_fixture.json`; real SentenceTransformers/Qdrant smoke checks should stay small and use the `live` marker when added.
+
 Golden corpus planning currently lives in `documents/golden_corpus/golden_corpus_manifest.md`; `golden_corpus_manifest_v1.md` is a frozen historical copy.
 
 Run all default tests:

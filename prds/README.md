@@ -8,7 +8,7 @@ Current status:
 - Complete: PRD2 repository settings and reproducibility.
 - Complete: PRD3 document ingestion and source inspection.
 - Complete: PRD4 full-text search.
-- Next: PRD5 vector search with Qdrant.
+- Ready for review: PRD5 vector search with Qdrant.
 
 The intended flow is:
 
@@ -37,7 +37,7 @@ PRD files:
 2. [Repository settings and reproducibility](02-repository-settings-reproducibility.md) - complete
 3. [Document ingestion and source inspection](03-document-ingestion-source-inspection.md) - complete
 4. [Full-text search](04-full-text-search.md) - complete
-5. [Vector search with Qdrant](05-vector-search-qdrant.md) - next
+5. [Vector search with Qdrant](05-vector-search-qdrant.md) - ready for review
 6. [Hybrid search and reranking](06-hybrid-search-reranking.md)
 7. [Local RAG chat with citations](07-local-rag-chat-citations.md)
 8. [Prompt sandbox and evaluation](08-prompt-sandbox-evaluation.md)
@@ -47,3 +47,5 @@ PRD files:
 12. [Bulk patent data integration](12-bulk-patent-data-integration.md)
 13. [OCR and page-image text recovery](13-ocr-page-image-text-recovery.md)
 14. [Structured table extraction](14-structured-table-extraction.md)
+15. [Additional embedding models](15-additional-embedding-models.md)
+16. [Immutable embedding indexes](16-immutable-embedding-indexes.md)

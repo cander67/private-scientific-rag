@@ -4,15 +4,21 @@ import test from "node:test";
 
 const source = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8");
 
-test("Search Lab calls PRD4 full-text rebuild and search endpoints", () => {
-  assert.match(source, /full-text\/rebuild/);
-  assert.match(source, /full-text\/search/);
+test("Search Lab calls PRD4 full-text and PRD5 vector search endpoints", () => {
+  assert.match(source, /endpoint = searchMode === "vector" \? "vector" : "full-text"/);
+  assert.match(source, /\$\{endpoint\}\/rebuild/);
+  assert.match(source, /\$\{endpoint\}\/search/);
   assert.match(source, /type FullTextSearchResult =/);
   assert.match(source, /type FullTextRebuildResponse =/);
+  assert.match(source, /type VectorSearchResult =/);
+  assert.match(source, /type VectorRebuildResponse =/);
 });
 
-test("Search Lab renders rank, BM25, snippets, filters, and provenance", () => {
+test("Search Lab renders full-text and vector result details", () => {
   assert.match(source, /BM25/);
+  assert.match(source, /Dense/);
+  assert.match(source, /embedding_model/);
+  assert.match(source, /embedding_run_id/);
   assert.match(source, /dangerouslySetInnerHTML/);
   assert.match(source, /matched_fields/);
   assert.match(source, /has_table/);
@@ -30,8 +36,8 @@ test("Search Lab can route a result into Source Viewer", () => {
   assert.match(source, /#source-viewer/);
 });
 
-test("PRD5 and PRD6 controls remain disabled in PRD4", () => {
-  assert.match(source, /<button type="button" disabled>\s*Vector\s*<\/button>/);
+test("PRD5 vector mode is enabled and PRD6 hybrid remains disabled", () => {
+  assert.match(source, /onModeChange\("vector"\)/);
   assert.match(source, /<button type="button" disabled>\s*Hybrid\s*<\/button>/);
   assert.match(source, /planned for PRD6/);
 });
