@@ -47,3 +47,5 @@ PRD files:
 12. [Bulk patent data integration](12-bulk-patent-data-integration.md)
 13. [OCR and page-image text recovery](13-ocr-page-image-text-recovery.md)
 14. [Structured table extraction](14-structured-table-extraction.md)
+15. [Additional embedding models](15-additional-embedding-models.md)
+16. [Immutable embedding indexes](16-immutable-embedding-indexes.md)
