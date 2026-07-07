@@ -8,7 +8,7 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1, PRD2, PRD3, and PRD4 are complete. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, and inspectable SQLite FTS5 search for exact scientific terms, identifiers, formulas, abbreviations, and patent language. PRD5 vector search with Qdrant is next.
+PRD1, PRD2, PRD3, and PRD4 are complete. PRD5 vector search with Qdrant is implemented and ready for review. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search for exact scientific terms, and dense vector search over repository chunks.
 
 Full OCR execution is planned in PRD13, structured table extraction in PRD14, and bulk patent downloads/raw patent-data feeds in PRD12.
 
@@ -18,7 +18,8 @@ The current scaffold provides:
 - Repository settings API for default repository creation, settings updates, manifest export, and recreate validation.
 - Document upload, PDF parser fallback chain, page-thumbnail generation, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
 - SQLite FTS5 rebuild and full-text search API for repository chunks, with BM25 scores, snippets, matched fields, metadata filters, citation-ready provenance, and CI exact-match recall evaluation.
-- React/Vite frontend document manager, source inspector, and Search Lab for full-text query inspection, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
+- Qdrant-backed vector index rebuild and vector search API for repository chunks, with local SentenceTransformers MiniLM embeddings, latest-index replacement, metadata filters, embedding run metadata, and CI semantic recall evaluation with deterministic fake embeddings.
+- React/Vite frontend document manager, source inspector, and Search Lab for full-text and vector query inspection, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
 - SQLAlchemy/Alembic migration wiring for repository/settings and document-ingestion tables.
 - Qdrant Docker Compose service.
 - Pytest, Ruff, Mypy, and CI configuration.
@@ -54,6 +55,8 @@ Start Qdrant:
 ```bash
 docker compose up -d qdrant
 ```
+
+Vector rebuilds use the repository embedding/vector settings. The default embedding model is `sentence-transformers/all-MiniLM-L6-v2` with 384-dimensional cosine vectors.
 
 Run the backend:
 

@@ -1,6 +1,6 @@
 # Backend Package
 
-The backend package contains the FastAPI app, configuration, database wiring, repository metadata, document ingestion/source inspection, full-text search, and future retrieval/RAG services.
+The backend package contains the FastAPI app, configuration, database wiring, repository metadata, document ingestion/source inspection, full-text search, vector search, and future retrieval/RAG services.
 
 Module boundaries:
 
@@ -9,6 +9,7 @@ Module boundaries:
 - `db/`: SQLAlchemy base, engine, and session wiring.
 - `repositories/`: repository SQLAlchemy models, Pydantic settings/manifest schemas, and reproducibility service logic.
 - `search/`: SQLite FTS5 schema management, sparse index rebuilds, query normalization, field weighting, result shaping, and exact-match recall evaluation.
+- `vector/`: embedding provider boundary, Qdrant vector-store boundary, latest embedding-run metadata, vector index rebuild/search orchestration, and semantic recall evaluation.
 - `services/`: local service checks and future domain services.
 - `ingestion/`: document upload models, PDF parser fallback chain, parser/chunker service, source file storage, and provenance schemas.
 - Ingestion keeps original source files, parsed artifacts, chunks, and provenance metadata distinct.
@@ -29,6 +30,8 @@ Current API surface:
 - `DELETE /repositories/{repository_id}/documents/{document_id}`: deletes a document and derived chunks.
 - `POST /repositories/{repository_id}/full-text/rebuild`: rebuilds the SQLite FTS5 sparse index for one repository.
 - `POST /repositories/{repository_id}/full-text/search`: searches indexed chunks and returns BM25 score, snippet, matched fields, metadata filters, document/chunk metadata, and citation-ready provenance.
+- `POST /repositories/{repository_id}/vector/rebuild`: replaces the latest Qdrant vector index for one repository using the configured embedding model.
+- `POST /repositories/{repository_id}/vector/search`: searches the latest vector index and returns dense score, embedding run/model/index settings, metadata filters, document/chunk metadata, and citation-ready provenance.
 
 Current status:
 
@@ -36,6 +39,6 @@ Current status:
 - PRD2 repository-aware settings and reproducibility are complete.
 - PRD3 local document ingestion and source inspection are complete.
 - PRD4 full-text search is complete: sparse index rebuild, full-text query API, metadata filters, exact-match evaluation, and frontend Search Lab are available.
-- PRD5 vector search with Qdrant is next.
+- PRD5 vector search with Qdrant is implemented and ready for review: latest-index rebuild, vector query API, metadata filters, embedding run metadata, deterministic CI tests, semantic recall evaluation, and frontend Search Lab vector mode are available.
 
 PDF parsing tries `pypdf`, then PyMuPDF, gates image-only/no-native-text pages as `needs_ocr`, then uses Docling and a conservative built-in fallback for remaining non-image PDFs. PRD3 intentionally does not run a full OCR pipeline; PRD13 owns OCRmyPDF/Tesseract and fallback OCR. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.
