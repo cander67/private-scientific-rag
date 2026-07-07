@@ -1,0 +1,12 @@
+{
+  "queries": [
+    {
+      "query": "battery cathode lithium phosphate cycling",
+      "expected_terms": ["Lithium iron phosphate cathodes"]
+    },
+    {
+      "query": "adhesive resin ultraviolet cure",
+      "expected_terms": ["UV curable epoxy acrylate binders"]
+    }
+  ]
+}
