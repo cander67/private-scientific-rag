@@ -5,7 +5,7 @@ Tests are split by speed and dependency profile:
 - `tests/unit/`: fast tests for pure functions, settings, models, and validation.
 - `tests/integration/`: local app integration tests that avoid real LLM/model calls by default.
 
-Live tests that require local services or models should use the `live` marker and should not run by default.
+Live tests that require local services or models use the `live` marker and do not run by default.
 
 PRD3 ingestion/source-inspection coverage is complete. Default CI does not read from `documents/golden_corpus/`; that directory is local/manual evaluation material. Tests use committed fixtures in `tests/fixtures/ingestion/` plus generated miniature PDFs for text-layer and image-only OCR-gate behavior. Larger files in `documents/golden_corpus/pdf/` and `documents/golden_corpus/ocr/` are useful for local/manual parser checks and future OCR work, but should not be default CI prerequisites unless they are intentionally copied into `tests/fixtures/` with redistribution approval.
 
@@ -13,9 +13,42 @@ PRD4 full-text search coverage includes unit tests for FTS query normalization a
 
 Exact-match search fixtures live in `tests/fixtures/search/`. They cover formulas, abbreviations, identifiers, patent terms, and section headings, and require `recall@5` and `recall@10` to remain at `1.0` for the committed fixture set.
 
-PRD5 vector search coverage uses deterministic fake embeddings and an in-memory vector store for ordinary CI. It covers vector rebuild/search API behavior, latest-index replacement metadata, full-text-equivalent filters, missing-index errors, and semantic recall evaluation. The committed semantic fixture is `tests/fixtures/search/prd5_semantic_fixture.json`; real SentenceTransformers/Qdrant smoke checks should stay small and use the `live` marker when added.
+PRD5 vector search coverage uses deterministic fake embeddings and an in-memory vector store for ordinary CI. It covers vector rebuild/search API behavior, latest-index replacement metadata, full-text-equivalent filters, missing-index errors, and semantic recall evaluation. The committed semantic fixture is `tests/fixtures/search/prd5_semantic_fixture.json`.
 
-PRD6 retrieval coverage starts with deterministic integration tests for the unified retrieval API. The tests exercise full-text mode, vector mode with fake embeddings and an in-memory vector store, hybrid RRF mode, normalized score breakdowns, retrieval run/result persistence, max-five recent history retention, strategy validation, cross-encoder reranking through a fake provider, and metadata boost scoring. Unit tests cover RRF merging for sparse-only, dense-only, overlapping, adjusted-constant cases, reranker score composition, and missing cross-encoder setup guidance. A `live` cross-encoder smoke test is available after downloading the configured model:
+PRD6 retrieval coverage includes deterministic integration tests for the unified retrieval API and evaluation comparison. The tests exercise full-text mode, vector mode with fake embeddings and an in-memory vector store, hybrid RRF mode, normalized score breakdowns, retrieval run/result persistence, max-five recent history retention, strategy validation, cross-encoder reranking through a fake provider, metadata boost scoring, and comparison metrics for full-text, vector, hybrid, and reranked hybrid. Unit tests cover RRF merging for sparse-only, dense-only, overlapping, adjusted-constant cases, reranker score composition, and missing cross-encoder setup guidance.
+
+## Live tests
+
+Default CI and `uv run pytest` exclude live tests. Run live checks only when the required local service or model is already available.
+
+### Vector/Qdrant live smoke
+
+Prerequisites:
+
+- Qdrant is running at the configured `qdrant_url` (`http://127.0.0.1:6333` by default).
+- The default SentenceTransformers embedding model can be loaded locally. If it is not cached, SentenceTransformers may download it during this explicit live run.
+
+Run:
+
+```bash
+docker compose up -d qdrant
+RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_vector_live.py
+```
+
+### Cross-encoder live smoke
+
+Prerequisites:
+
+- The configured cross-encoder model is downloaded/cached locally. The default is `cross-encoder/ms-marco-MiniLM-L6-v2`.
+- Retrieval API calls use `local_files_only=True` for cross-encoder reranking, so a missing model returns setup guidance instead of silently downloading during search.
+
+Download/cache the default model:
+
+```bash
+uv run python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')"
+```
+
+Run:
 
 ```bash
 RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_cross_encoder_live.py
