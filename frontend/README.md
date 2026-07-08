@@ -4,7 +4,7 @@ The frontend is a React/Vite app. PRD1 provides the shell, and the static mockup
 
 Current implementation status: PRD5 is complete and closed. The production frontend includes distinct document manager, source viewer, and Search Lab views for upload, document selection, PDF page thumbnails, chunk provenance inspection, `needs_ocr`/zero-chunk inspection states, reprocess, delete, full-text retrieval inspection, and vector retrieval inspection.
 
-Search Lab supports manual full-text and vector index rebuilds, query execution, top-k selection, document/section/source filters, table/figure/patent metadata filters, BM25 score display for full-text results, dense score and embedding metadata display for vector results, snippets or chunk previews, matched fields where available, and source navigation for matched chunks. Hybrid and reranking controls are intentionally disabled until PRD6.
+Search Lab supports manual full-text and vector index rebuilds, query execution through the unified retrieval API, full-text/vector/hybrid mode selection, reranking strategy selection, candidate-pool and RRF controls, metadata boost level selection, top-k selection, document/section/source filters, table/figure/patent metadata filters, BM25/dense/RRF/rerank/boost/final score display, snippets or chunk previews, matched fields where available, and source navigation for matched chunks.
 
 Bulk patent-data workflows are planned separately in PRD12.
 
