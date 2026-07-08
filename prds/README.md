@@ -8,7 +8,7 @@ Current status:
 - Complete: PRD2 repository settings and reproducibility.
 - Complete: PRD3 document ingestion and source inspection.
 - Complete: PRD4 full-text search.
-- Ready for review: PRD5 vector search with Qdrant.
+- Complete: PRD5 vector search with Qdrant.
 - Planned next: PRD6 hybrid search and reranking.
 
 The intended flow is:
@@ -38,7 +38,7 @@ PRD files:
 2. [Repository settings and reproducibility](02-repository-settings-reproducibility.md) - complete
 3. [Document ingestion and source inspection](03-document-ingestion-source-inspection.md) - complete
 4. [Full-text search](04-full-text-search.md) - complete
-5. [Vector search with Qdrant](05-vector-search-qdrant.md) - ready for review
+5. [Vector search with Qdrant](05-vector-search-qdrant.md) - complete
 6. [Hybrid search and reranking](06-hybrid-search-reranking.md) - planned next
 7. [Local RAG chat with citations](07-local-rag-chat-citations.md)
 8. [Prompt sandbox and evaluation](08-prompt-sandbox-evaluation.md)
