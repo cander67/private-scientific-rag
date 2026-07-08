@@ -9,7 +9,7 @@ Current status:
 - Complete: PRD3 document ingestion and source inspection.
 - Complete: PRD4 full-text search.
 - Complete: PRD5 vector search with Qdrant.
-- Planned next: PRD6 hybrid search and reranking.
+- In progress: PRD6 hybrid search and reranking.
 
 The intended flow is:
 
@@ -39,7 +39,7 @@ PRD files:
 3. [Document ingestion and source inspection](03-document-ingestion-source-inspection.md) - complete
 4. [Full-text search](04-full-text-search.md) - complete
 5. [Vector search with Qdrant](05-vector-search-qdrant.md) - complete
-6. [Hybrid search and reranking](06-hybrid-search-reranking.md) - planned next
+6. [Hybrid search and reranking](06-hybrid-search-reranking.md) - in progress
 7. [Local RAG chat with citations](07-local-rag-chat-citations.md)
 8. [Prompt sandbox and evaluation](08-prompt-sandbox-evaluation.md)
 9. [Export, import, and recreate repository](09-export-import-recreate.md)

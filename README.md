@@ -8,7 +8,7 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1, PRD2, PRD3, PRD4, and PRD5 are complete. PRD5 vector search is closed with Qdrant and local SentenceTransformers embeddings implemented. PRD6 hybrid search and reranking is the next planned implementation. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search for exact scientific terms, and dense vector search over repository chunks.
+PRD1, PRD2, PRD3, PRD4, and PRD5 are complete. PRD5 vector search is closed with Qdrant and local SentenceTransformers embeddings implemented. PRD6 hybrid search and reranking is in progress, starting with a unified retrieval API and recent retrieval history persistence. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search for exact scientific terms, and dense vector search over repository chunks.
 
 Full OCR execution is planned in PRD13, structured table extraction in PRD14, and bulk patent downloads/raw patent-data feeds in PRD12.
 
@@ -19,6 +19,7 @@ The current scaffold provides:
 - Document upload, PDF parser fallback chain, page-thumbnail generation, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
 - SQLite FTS5 rebuild and full-text search API for repository chunks, with BM25 scores, snippets, matched fields, metadata filters, citation-ready provenance, and CI exact-match recall evaluation.
 - Qdrant-backed vector index rebuild and vector search API for repository chunks, with local SentenceTransformers MiniLM embeddings, latest-index replacement, metadata filters, embedding run metadata, and CI semantic recall evaluation with deterministic fake embeddings.
+- Unified retrieval search API for full-text and vector modes, with candidate-pool/RRF/reranker settings capture and max-five recent retrieval history persistence. Hybrid RRF merging and reranking are the next PRD6 slices.
 - React/Vite frontend document manager, source inspector, and Search Lab for full-text and vector query inspection, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
 - SQLAlchemy/Alembic migration wiring for repository/settings and document-ingestion tables.
 - Qdrant Docker Compose service.
