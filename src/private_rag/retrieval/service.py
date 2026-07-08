@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -62,7 +63,32 @@ def search_retrieval(
             return None
         results = [_from_vector_result(result) for result in vector_response.results]
     else:
-        raise NotImplementedError("Hybrid retrieval will be added in the RRF slice.")
+        full_text_response = search_full_text(
+            session=session,
+            repository_id=repository_id,
+            query=request.query,
+            limit=candidate_pool_size,
+            filters=request.filters,
+        )
+        if full_text_response is None:
+            return None
+        vector_response = search_vector_index(
+            session=session,
+            repository_id=repository_id,
+            query=request.query,
+            limit=candidate_pool_size,
+            filters=request.filters,
+            store=store,
+            embedder=embedder,
+        )
+        if vector_response is None:
+            return None
+        results = merge_rrf_results(
+            full_text_response.results,
+            vector_response.results,
+            rrf_constant=request.rrf_constant,
+            limit=request.top_k,
+        )
 
     run = RetrievalRun(
         repository_id=repository_id,
@@ -168,6 +194,105 @@ def _from_vector_result(result: VectorSearchResult) -> RetrievalSearchResult:
         vector_size=result.vector_size,
         collection_name=result.collection_name,
     )
+
+
+@dataclass
+class _HybridCandidate:
+    chunk_id: str
+    full_text: FullTextSearchResult | None = None
+    vector: VectorSearchResult | None = None
+
+
+def merge_rrf_results(
+    full_text_results: list[FullTextSearchResult],
+    vector_results: list[VectorSearchResult],
+    *,
+    rrf_constant: int,
+    limit: int,
+) -> list[RetrievalSearchResult]:
+    candidates: dict[str, _HybridCandidate] = {}
+    for full_text_result in full_text_results:
+        candidate = candidates.setdefault(
+            full_text_result.chunk_id,
+            _HybridCandidate(chunk_id=full_text_result.chunk_id),
+        )
+        candidate.full_text = full_text_result
+    for vector_result in vector_results:
+        candidate = candidates.setdefault(
+            vector_result.chunk_id,
+            _HybridCandidate(chunk_id=vector_result.chunk_id),
+        )
+        candidate.vector = vector_result
+
+    ranked = sorted(
+        (_from_hybrid_candidate(candidate, rrf_constant) for candidate in candidates.values()),
+        key=lambda result: result.score_breakdown["rrf"],
+        reverse=True,
+    )
+    return [
+        result.model_copy(update={"rank": rank, "final_score": result.score_breakdown["rrf"]})
+        for rank, result in enumerate(ranked[:limit], start=1)
+    ]
+
+
+def _from_hybrid_candidate(
+    candidate: _HybridCandidate,
+    rrf_constant: int,
+) -> RetrievalSearchResult:
+    full_text = candidate.full_text
+    vector = candidate.vector
+    source = full_text or vector
+    if source is None:
+        raise ValueError("Hybrid candidate must have at least one retrieval source.")
+
+    full_text_rank = full_text.rank if full_text else None
+    vector_rank = vector.rank if vector else None
+    rrf_score = _rrf_score(full_text_rank, vector_rank, rrf_constant)
+    score_breakdown = {
+        "bm25": full_text.score if full_text else None,
+        "dense": vector.score if vector else None,
+        "rrf": rrf_score,
+    }
+
+    return RetrievalSearchResult(
+        rank=0,
+        final_score=rrf_score,
+        score_breakdown=score_breakdown,
+        source_ranks={"full_text": full_text_rank, "vector": vector_rank},
+        repository_id=source.repository_id,
+        document_id=source.document_id,
+        document_version_id=source.document_version_id,
+        chunk_id=source.chunk_id,
+        chunk_index=source.chunk_index,
+        document_title=source.document_title,
+        section=source.section,
+        page_start=source.page_start,
+        page_end=source.page_end,
+        line_start=source.line_start,
+        line_end=source.line_end,
+        snippet=full_text.snippet if full_text else None,
+        text_preview=vector.text_preview if vector else None,
+        matched_fields=list(full_text.matched_fields) if full_text else [],
+        metadata=dict(source.metadata),
+        embedding_run_id=vector.embedding_run_id if vector else None,
+        embedding_provider=vector.embedding_provider if vector else None,
+        embedding_model=vector.embedding_model if vector else None,
+        vector_size=vector.vector_size if vector else None,
+        collection_name=vector.collection_name if vector else None,
+    )
+
+
+def _rrf_score(
+    full_text_rank: int | None,
+    vector_rank: int | None,
+    rrf_constant: int,
+) -> float:
+    score = 0.0
+    if full_text_rank is not None:
+        score += 1.0 / (rrf_constant + full_text_rank)
+    if vector_rank is not None:
+        score += 1.0 / (rrf_constant + vector_rank)
+    return score
 
 
 def _trim_old_runs(session: Session, repository_id: str) -> None:

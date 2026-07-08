@@ -15,7 +15,7 @@ Exact-match search fixtures live in `tests/fixtures/search/`. They cover formula
 
 PRD5 vector search coverage uses deterministic fake embeddings and an in-memory vector store for ordinary CI. It covers vector rebuild/search API behavior, latest-index replacement metadata, full-text-equivalent filters, missing-index errors, and semantic recall evaluation. The committed semantic fixture is `tests/fixtures/search/prd5_semantic_fixture.json`; real SentenceTransformers/Qdrant smoke checks should stay small and use the `live` marker when added.
 
-PRD6 retrieval coverage starts with deterministic integration tests for the unified retrieval API. The tests exercise full-text mode, vector mode with fake embeddings and an in-memory vector store, normalized score breakdowns, retrieval run/result persistence, and max-five recent history retention. Hybrid RRF, reranking strategies, and opt-in real cross-encoder checks will extend this coverage in later PRD6 slices.
+PRD6 retrieval coverage starts with deterministic integration tests for the unified retrieval API. The tests exercise full-text mode, vector mode with fake embeddings and an in-memory vector store, hybrid RRF mode, normalized score breakdowns, retrieval run/result persistence, and max-five recent history retention. Unit tests cover RRF merging for sparse-only, dense-only, overlapping, and adjusted-constant cases. Reranking strategies and opt-in real cross-encoder checks will extend this coverage in later PRD6 slices.
 
 Golden corpus planning currently lives in `documents/golden_corpus/golden_corpus_manifest.md`; `golden_corpus_manifest_v1.md` is a frozen historical copy.
 

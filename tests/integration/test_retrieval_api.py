@@ -140,6 +140,84 @@ def test_retrieval_vector_mode_returns_embedding_metadata() -> None:
     assert result["collection_name"].endswith("_latest")
 
 
+def test_retrieval_hybrid_mode_merges_full_text_and_vector_scores() -> None:
+    client, session_factory = _client_with_retrieval_fakes()
+    repository_id = _default_repository_id(client)
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "hybrid-materials.txt",
+                (
+                    b"Abstract\n"
+                    b"Lithium iron phosphate cathodes retain capacity during cycling.\n"
+                    b"Methods\n"
+                    b"LiFePO4 binders improve electrode adhesion.\n"
+                ),
+                "text/plain",
+            )
+        },
+    )
+    full_text_rebuild = client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    vector_rebuild = client.post(f"/repositories/{repository_id}/vector/rebuild")
+
+    response = client.post(
+        f"/repositories/{repository_id}/retrieval/search",
+        json={
+            "query": "LiFePO4",
+            "mode": "hybrid",
+            "top_k": 5,
+            "rrf_constant": 30,
+        },
+    )
+
+    assert upload_response.status_code == 200
+    assert full_text_rebuild.status_code == 200
+    assert vector_rebuild.status_code == 200
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "hybrid"
+    assert payload["rrf_constant"] == 30
+    result = payload["results"][0]
+    assert result["chunk_id"] == upload_response.json()["chunks_preview"][0]["id"]
+    assert result["source_ranks"]["full_text"] == 1
+    assert result["source_ranks"]["vector"] == 1
+    assert result["score_breakdown"]["bm25"] is not None
+    assert result["score_breakdown"]["dense"] is not None
+    assert result["score_breakdown"]["rrf"] > 0
+
+    with session_factory() as session:
+        run = session.get(RetrievalRun, payload["run_id"])
+        assert run is not None
+        assert run.mode == "hybrid"
+        assert run.rrf_constant == 30
+        assert run.results[0].score_breakdown["rrf"] == result["score_breakdown"]["rrf"]
+
+
+def test_retrieval_hybrid_mode_requires_rebuilt_vector_index() -> None:
+    client, _ = _client_with_retrieval_fakes()
+    repository_id = _default_repository_id(client)
+    client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "hybrid-missing-vector.txt",
+                b"Abstract\nLiFePO4 conductivity improves after UV-Vis inspection.\n",
+                "text/plain",
+            )
+        },
+    )
+    client.post(f"/repositories/{repository_id}/full-text/rebuild")
+
+    response = client.post(
+        f"/repositories/{repository_id}/retrieval/search",
+        json={"query": "LiFePO4", "mode": "hybrid", "top_k": 5},
+    )
+
+    assert response.status_code == 409
+    assert "Vector index has not been rebuilt" in response.json()["detail"]
+
+
 def test_retrieval_history_keeps_five_recent_runs_per_repository() -> None:
     client, session_factory = _client_with_retrieval_fakes()
     repository_id = _default_repository_id(client)

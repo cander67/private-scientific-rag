@@ -33,7 +33,7 @@ Current API surface:
 - `POST /repositories/{repository_id}/full-text/search`: searches indexed chunks and returns BM25 score, snippet, matched fields, metadata filters, document/chunk metadata, and citation-ready provenance.
 - `POST /repositories/{repository_id}/vector/rebuild`: replaces the latest Qdrant vector index for one repository using the configured embedding model.
 - `POST /repositories/{repository_id}/vector/search`: searches the latest vector index and returns dense score, embedding run/model/index settings, metadata filters, document/chunk metadata, and citation-ready provenance.
-- `POST /repositories/{repository_id}/retrieval/search`: searches through the unified retrieval contract. Full-text and vector modes are available, with candidate-pool size, RRF constant, reranker strategy, metadata boost settings, normalized score breakdowns, and max-five recent retrieval run/result persistence. Hybrid mode and reranking are being added in follow-up PRD6 slices.
+- `POST /repositories/{repository_id}/retrieval/search`: searches through the unified retrieval contract. Full-text, vector, and hybrid modes are available, with candidate-pool size, adjustable RRF constant, reranker strategy, metadata boost settings, normalized score breakdowns, and max-five recent retrieval run/result persistence. Reranking is being added in follow-up PRD6 slices.
 
 Current status:
 
@@ -42,6 +42,6 @@ Current status:
 - PRD3 local document ingestion and source inspection are complete.
 - PRD4 full-text search is complete: sparse index rebuild, full-text query API, metadata filters, exact-match evaluation, and frontend Search Lab are available.
 - PRD5 vector search with Qdrant is complete and closed: latest-index rebuild, vector query API, metadata filters, embedding run metadata, deterministic CI tests, semantic recall evaluation, and frontend Search Lab vector mode are available.
-- PRD6 hybrid search and reranking is in progress: unified retrieval search, retrieval run/result persistence, and five-history retention are available; hybrid orchestration, Reciprocal Rank Fusion, selectable reranking, evaluation, and Search Lab controls are next.
+- PRD6 hybrid search and reranking is in progress: unified retrieval search, retrieval run/result persistence, five-history retention, hybrid orchestration, and Reciprocal Rank Fusion are available; selectable reranking, evaluation, and Search Lab controls are next.
 
 PDF parsing tries `pypdf`, then PyMuPDF, gates image-only/no-native-text pages as `needs_ocr`, then uses Docling and a conservative built-in fallback for remaining non-image PDFs. PRD3 intentionally does not run a full OCR pipeline; PRD13 owns OCRmyPDF/Tesseract and fallback OCR. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.
