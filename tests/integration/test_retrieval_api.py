@@ -9,12 +9,27 @@ from sqlalchemy.pool import StaticPool
 
 from private_rag.api.app import create_app
 from private_rag.api.routes.repositories import get_db_session
+from private_rag.api.routes.retrieval import get_reranker_provider
 from private_rag.api.routes.vector import get_embedding_provider, get_vector_store
 from private_rag.db.base import Base
 from private_rag.retrieval.models import RetrievalRun
+from private_rag.retrieval.schemas import RetrievalSearchResult
 from private_rag.retrieval.service import MAX_RETRIEVAL_HISTORIES_PER_REPOSITORY
 from private_rag.vector.embeddings import DeterministicEmbeddingProvider
 from private_rag.vector.store import InMemoryVectorStore
+
+
+class _FakeReranker:
+    def score(
+        self,
+        query: str,
+        results: list[RetrievalSearchResult],
+        model_name: str,
+    ) -> list[float]:
+        return [
+            1.0 if "adhesion" in (result.text_preview or result.snippet or "") else 0.1
+            for result in results
+        ]
 
 
 def _client_with_retrieval_fakes() -> tuple[TestClient, sessionmaker[Session]]:
@@ -36,6 +51,7 @@ def _client_with_retrieval_fakes() -> tuple[TestClient, sessionmaker[Session]]:
     app.dependency_overrides[get_db_session] = override_session
     app.dependency_overrides[get_vector_store] = lambda: store
     app.dependency_overrides[get_embedding_provider] = lambda: embedder
+    app.dependency_overrides[get_reranker_provider] = lambda: _FakeReranker()
     return TestClient(app), session_factory
 
 
@@ -216,6 +232,107 @@ def test_retrieval_hybrid_mode_requires_rebuilt_vector_index() -> None:
 
     assert response.status_code == 409
     assert "Vector index has not been rebuilt" in response.json()["detail"]
+
+
+def test_retrieval_cross_encoder_reranking_persists_rerank_score() -> None:
+    client, session_factory = _client_with_retrieval_fakes()
+    repository_id = _default_repository_id(client)
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "rerank-materials.txt",
+                (
+                    b"Abstract\n"
+                    b"Lithium iron phosphate cathodes retain capacity during cycling.\n"
+                    b"Methods\n"
+                    b"LiFePO4 electrode adhesion improves with polymer binders.\n"
+                ),
+                "text/plain",
+            )
+        },
+    )
+    client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    client.post(f"/repositories/{repository_id}/vector/rebuild")
+
+    response = client.post(
+        f"/repositories/{repository_id}/retrieval/search",
+        json={
+            "query": "LiFePO4 adhesion",
+            "mode": "hybrid",
+            "top_k": 5,
+            "reranker_strategy": "cross_encoder",
+        },
+    )
+
+    assert upload_response.status_code == 200
+    assert response.status_code == 200
+    payload = response.json()
+    result = payload["results"][0]
+    assert payload["reranker_strategy"] == "cross_encoder"
+    assert result["score_breakdown"]["rerank"] == 1.0
+    assert result["final_score"] == 1.0
+
+    with session_factory() as session:
+        run = session.get(RetrievalRun, payload["run_id"])
+        assert run is not None
+        assert run.reranker_strategy == "cross_encoder"
+        assert run.reranker_model == "cross-encoder/ms-marco-MiniLM-L6-v2"
+        assert run.results[0].score_breakdown["rerank"] == 1.0
+
+
+def test_retrieval_metadata_boost_reranking_reports_boost() -> None:
+    client, _ = _client_with_retrieval_fakes()
+    repository_id = _default_repository_id(client)
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "metadata-boost.txt",
+                b"Abstract\nLiFePO4 conductivity improves after UV-Vis inspection.\n",
+                "text/plain",
+            )
+        },
+    )
+    client.post(f"/repositories/{repository_id}/full-text/rebuild")
+
+    response = client.post(
+        f"/repositories/{repository_id}/retrieval/search",
+        json={
+            "query": "LiFePO4",
+            "mode": "full_text",
+            "top_k": 5,
+            "reranker_strategy": "metadata_boost",
+            "metadata_boosts": {
+                "section": "high",
+                "patent_section": "low",
+                "document_kind": "low",
+                "table_figure": "low",
+            },
+        },
+    )
+
+    assert upload_response.status_code == 200
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result["score_breakdown"]["metadata_boost"] == 0.3
+    assert result["final_score"] > abs(result["score_breakdown"]["bm25"])
+
+
+def test_retrieval_rejects_future_only_reranker_strategy() -> None:
+    client, _ = _client_with_retrieval_fakes()
+    repository_id = _default_repository_id(client)
+
+    response = client.post(
+        f"/repositories/{repository_id}/retrieval/search",
+        json={
+            "query": "LiFePO4",
+            "mode": "full_text",
+            "reranker_strategy": "diversity_mmr",
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_retrieval_history_keeps_five_recent_runs_per_repository() -> None:

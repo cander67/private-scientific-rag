@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from private_rag.retrieval.service import merge_rrf_results
+from private_rag.retrieval.schemas import MetadataBoostSettings, RetrievalSearchResult
+from private_rag.retrieval.service import apply_reranking, merge_rrf_results
 from private_rag.search.schemas import FullTextSearchResult
 from private_rag.vector.schemas import VectorSearchResult
 
@@ -77,3 +78,117 @@ def test_rrf_merge_honors_limit_and_adjustable_constant() -> None:
 
     assert len(default_results) == 1
     assert adjusted_results[0].score_breakdown["rrf"] > default_results[0].score_breakdown["rrf"]
+
+
+class _FakeReranker:
+    def __init__(self, scores: dict[str, float]) -> None:
+        self.scores = scores
+
+    def score(
+        self,
+        query: str,
+        results: list[RetrievalSearchResult],
+        model_name: str,
+    ) -> list[float]:
+        assert query == "adhesive cathode"
+        assert model_name == "cross-encoder/test"
+        return [self.scores[result.chunk_id] for result in results]
+
+
+def test_reranking_none_preserves_baseline_order() -> None:
+    baseline = merge_rrf_results(
+        [_full_text_result("first", 1), _full_text_result("second", 2)],
+        [],
+        rrf_constant=60,
+        limit=2,
+    )
+
+    reranked = apply_reranking(
+        query="adhesive cathode",
+        results=baseline,
+        strategy="none",
+        metadata_boosts=MetadataBoostSettings(),
+        reranker=_FakeReranker({"first": 0.1, "second": 0.9}),
+        reranker_model="cross-encoder/test",
+    )
+
+    assert [result.chunk_id for result in reranked] == ["first", "second"]
+
+
+def test_cross_encoder_reranking_changes_order_and_reports_score() -> None:
+    baseline = merge_rrf_results(
+        [_full_text_result("first", 1), _full_text_result("second", 2)],
+        [],
+        rrf_constant=60,
+        limit=2,
+    )
+
+    reranked = apply_reranking(
+        query="adhesive cathode",
+        results=baseline,
+        strategy="cross_encoder",
+        metadata_boosts=MetadataBoostSettings(),
+        reranker=_FakeReranker({"first": 0.1, "second": 0.9}),
+        reranker_model="cross-encoder/test",
+    )
+
+    assert [result.chunk_id for result in reranked] == ["second", "first"]
+    assert reranked[0].rank == 1
+    assert reranked[0].final_score == pytest.approx(0.9)
+    assert reranked[0].score_breakdown["rerank"] == pytest.approx(0.9)
+
+
+def test_metadata_boost_reranking_changes_order_and_reports_boost() -> None:
+    unboosted = _full_text_result("unboosted", 1)
+    boosted = _full_text_result("boosted", 2)
+    boosted.section = "Claims"
+    boosted.metadata = {"document_kind": "patent_pdf", "patent_sections": ["claims"]}
+    baseline = merge_rrf_results([unboosted, boosted], [], rrf_constant=60, limit=2)
+
+    reranked = apply_reranking(
+        query="adhesive cathode",
+        results=baseline,
+        strategy="metadata_boost",
+        metadata_boosts=MetadataBoostSettings(
+            section="high",
+            document_kind="high",
+            patent_section="high",
+            table_figure="low",
+        ),
+        reranker=_FakeReranker({}),
+        reranker_model=None,
+    )
+
+    assert [result.chunk_id for result in reranked] == ["boosted", "unboosted"]
+    assert reranked[0].score_breakdown["metadata_boost"] == pytest.approx(0.9)
+
+
+def test_combined_reranking_applies_cross_encoder_then_metadata_boost() -> None:
+    cross_encoder_winner = _full_text_result("cross-encoder-winner", 1)
+    metadata_winner = _full_text_result("metadata-winner", 2)
+    metadata_winner.section = "Claims"
+    metadata_winner.metadata = {"document_kind": "patent_pdf", "patent_sections": ["claims"]}
+    baseline = merge_rrf_results(
+        [cross_encoder_winner, metadata_winner],
+        [],
+        rrf_constant=60,
+        limit=2,
+    )
+
+    reranked = apply_reranking(
+        query="adhesive cathode",
+        results=baseline,
+        strategy="cross_encoder_metadata_boost",
+        metadata_boosts=MetadataBoostSettings(
+            section="medium",
+            document_kind="medium",
+            patent_section="medium",
+            table_figure="low",
+        ),
+        reranker=_FakeReranker({"cross-encoder-winner": 0.8, "metadata-winner": 0.4}),
+        reranker_model="cross-encoder/test",
+    )
+
+    assert [result.chunk_id for result in reranked] == ["metadata-winner", "cross-encoder-winner"]
+    assert reranked[0].score_breakdown["rerank"] == pytest.approx(0.4)
+    assert reranked[0].score_breakdown["metadata_boost"] == pytest.approx(0.45)

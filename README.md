@@ -19,7 +19,7 @@ The current scaffold provides:
 - Document upload, PDF parser fallback chain, page-thumbnail generation, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
 - SQLite FTS5 rebuild and full-text search API for repository chunks, with BM25 scores, snippets, matched fields, metadata filters, citation-ready provenance, and CI exact-match recall evaluation.
 - Qdrant-backed vector index rebuild and vector search API for repository chunks, with local SentenceTransformers MiniLM embeddings, latest-index replacement, metadata filters, embedding run metadata, and CI semantic recall evaluation with deterministic fake embeddings.
-- Unified retrieval search API for full-text, vector, and hybrid modes, with candidate-pool/RRF/reranker settings capture, Reciprocal Rank Fusion score breakdowns, and max-five recent retrieval history persistence. Reranking is the next PRD6 slice.
+- Unified retrieval search API for full-text, vector, and hybrid modes, with candidate-pool/RRF/reranker settings capture, Reciprocal Rank Fusion score breakdowns, selectable cross-encoder/metadata-boost reranking, and max-five recent retrieval history persistence.
 - React/Vite frontend document manager, source inspector, and Search Lab for full-text and vector query inspection, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
 - SQLAlchemy/Alembic migration wiring for repository/settings and document-ingestion tables.
 - Qdrant Docker Compose service.

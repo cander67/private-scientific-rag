@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session
 from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
 from private_rag.retrieval.models import RetrievalResult, RetrievalRun
+from private_rag.retrieval.rerankers import RerankerProvider
 from private_rag.retrieval.schemas import (
+    MetadataBoostSettings,
     RetrievalSearchRequest,
     RetrievalSearchResponse,
     RetrievalSearchResult,
@@ -30,6 +32,7 @@ def search_retrieval(
     request: RetrievalSearchRequest,
     store: VectorStore,
     embedder: EmbeddingProvider,
+    reranker: RerankerProvider,
 ) -> RetrievalSearchResponse | None:
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
@@ -90,6 +93,19 @@ def search_retrieval(
             limit=request.top_k,
         )
 
+    results = apply_reranking(
+        query=request.query,
+        results=results,
+        strategy=request.reranker_strategy,
+        metadata_boosts=request.metadata_boosts,
+        reranker=reranker,
+        reranker_model=settings.reranking.model,
+    )
+
+    uses_cross_encoder = request.reranker_strategy in {
+        "cross_encoder",
+        "cross_encoder_metadata_boost",
+    }
     run = RetrievalRun(
         repository_id=repository_id,
         mode=request.mode,
@@ -102,7 +118,7 @@ def search_retrieval(
         embedding_run_id=_first_value(result.embedding_run_id for result in results),
         vector_collection_name=_first_value(result.collection_name for result in results),
         reranker_strategy=request.reranker_strategy,
-        reranker_model=settings.reranking.model,
+        reranker_model=settings.reranking.model if uses_cross_encoder else None,
         metadata_boosts=request.metadata_boosts.model_dump(mode="json"),
         settings_snapshot=settings.model_dump(mode="json"),
     )
@@ -293,6 +309,92 @@ def _rrf_score(
     if vector_rank is not None:
         score += 1.0 / (rrf_constant + vector_rank)
     return score
+
+
+def apply_reranking(
+    *,
+    query: str,
+    results: list[RetrievalSearchResult],
+    strategy: str,
+    metadata_boosts: MetadataBoostSettings,
+    reranker: RerankerProvider,
+    reranker_model: str | None,
+) -> list[RetrievalSearchResult]:
+    if strategy == "none" or not results:
+        return results
+
+    ranked = results
+    if strategy in {"cross_encoder", "cross_encoder_metadata_boost"}:
+        if not reranker_model:
+            raise RuntimeError("reranking.model is required for cross-encoder reranking.")
+        rerank_scores = reranker.score(query, ranked, reranker_model)
+        ranked = [
+            _with_score(
+                result,
+                score_name="rerank",
+                score=score,
+                final_score=score,
+            )
+            for result, score in zip(ranked, rerank_scores, strict=True)
+        ]
+        ranked = sorted(ranked, key=lambda result: result.final_score, reverse=True)
+
+    if strategy in {"metadata_boost", "cross_encoder_metadata_boost"}:
+        ranked = [_with_metadata_boost(result, metadata_boosts) for result in ranked]
+        ranked = sorted(ranked, key=lambda result: result.final_score, reverse=True)
+
+    return [result.model_copy(update={"rank": rank}) for rank, result in enumerate(ranked, start=1)]
+
+
+def _with_score(
+    result: RetrievalSearchResult,
+    *,
+    score_name: str,
+    score: float,
+    final_score: float,
+) -> RetrievalSearchResult:
+    score_breakdown = {**result.score_breakdown, score_name: score}
+    return result.model_copy(
+        update={"final_score": final_score, "score_breakdown": score_breakdown}
+    )
+
+
+def _with_metadata_boost(
+    result: RetrievalSearchResult,
+    boosts: MetadataBoostSettings,
+) -> RetrievalSearchResult:
+    boost = metadata_boost_score(result, boosts)
+    score_breakdown = {**result.score_breakdown, "metadata_boost": boost}
+    return result.model_copy(
+        update={
+            "final_score": result.final_score + boost,
+            "score_breakdown": score_breakdown,
+        }
+    )
+
+
+def metadata_boost_score(
+    result: RetrievalSearchResult,
+    boosts: MetadataBoostSettings,
+) -> float:
+    score = 0.0
+    if result.section:
+        score += _boost_weight(boosts.section)
+    if result.metadata.get("document_kind"):
+        score += _boost_weight(boosts.document_kind)
+    if result.metadata.get("patent_sections"):
+        score += _boost_weight(boosts.patent_section)
+    if result.metadata.get("has_table") or result.metadata.get("has_figure"):
+        score += _boost_weight(boosts.table_figure)
+    return score
+
+
+def _boost_weight(level: str) -> float:
+    return {
+        "low": 0.05,
+        "medium": 0.15,
+        "high": 0.3,
+    }[level]
 
 
 def _trim_old_runs(session: Session, repository_id: str) -> None:
