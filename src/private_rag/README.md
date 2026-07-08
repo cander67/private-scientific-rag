@@ -1,6 +1,6 @@
 # Backend Package
 
-The backend package contains the FastAPI app, configuration, database wiring, repository metadata, document ingestion/source inspection, full-text search, vector search, and future retrieval/RAG services.
+The backend package contains the FastAPI app, configuration, database wiring, repository metadata, document ingestion/source inspection, full-text search, vector search, and future hybrid retrieval/reranking/RAG services.
 
 Module boundaries:
 
@@ -40,5 +40,6 @@ Current status:
 - PRD3 local document ingestion and source inspection are complete.
 - PRD4 full-text search is complete: sparse index rebuild, full-text query API, metadata filters, exact-match evaluation, and frontend Search Lab are available.
 - PRD5 vector search with Qdrant is implemented and ready for review: latest-index rebuild, vector query API, metadata filters, embedding run metadata, deterministic CI tests, semantic recall evaluation, and frontend Search Lab vector mode are available.
+- PRD6 hybrid search and reranking is planned next: hybrid orchestration, Reciprocal Rank Fusion, selectable reranking, retrieval run/result persistence, evaluation, and Search Lab controls.
 
 PDF parsing tries `pypdf`, then PyMuPDF, gates image-only/no-native-text pages as `needs_ocr`, then uses Docling and a conservative built-in fallback for remaining non-image PDFs. PRD3 intentionally does not run a full OCR pipeline; PRD13 owns OCRmyPDF/Tesseract and fallback OCR. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12.

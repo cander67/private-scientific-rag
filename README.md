@@ -8,7 +8,7 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1, PRD2, PRD3, and PRD4 are complete. PRD5 vector search is implemented with Qdrant and local SentenceTransformers embeddings. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search for exact scientific terms, and dense vector search over repository chunks.
+PRD1, PRD2, PRD3, and PRD4 are complete. PRD5 vector search is implemented with Qdrant and local SentenceTransformers embeddings and is ready for review. PRD6 hybrid search and reranking is the next planned implementation. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search for exact scientific terms, and dense vector search over repository chunks.
 
 Full OCR execution is planned in PRD13, structured table extraction in PRD14, and bulk patent downloads/raw patent-data feeds in PRD12.
 
