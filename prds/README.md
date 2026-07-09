@@ -8,7 +8,9 @@ Current status:
 - Complete: PRD2 repository settings and reproducibility.
 - Complete: PRD3 document ingestion and source inspection.
 - Complete: PRD4 full-text search.
-- Ready for review: PRD5 vector search with Qdrant.
+- Complete: PRD5 vector search with Qdrant.
+- Ready for review: PRD6 hybrid search and reranking.
+- Backlog: PRD17 search metadata quality and result labeling.
 
 The intended flow is:
 
@@ -29,6 +31,7 @@ Shared decisions:
 - Supported local hosts: macOS, Windows-native Python/Ollama, and Linux/Ubuntu.
 - Public repo posture: no secrets, no private data, no generated indexes, no model files, and no restricted document corpus in Git.
 - Patent scope: PRD3 supports user-uploaded patent PDFs. Bulk downloads, raw patent feeds, and cross-jurisdiction patent-data normalization are deferred to PRD12.
+- Search metadata scope: PRD17 will distinguish chunk-level facts, document-level hints, parser hints, and active filters so Search Lab result labels are trustworthy.
 - Test fixture posture: default CI uses `tests/fixtures/`, not `documents/golden_corpus/`.
 
 PRD files:
@@ -37,8 +40,8 @@ PRD files:
 2. [Repository settings and reproducibility](02-repository-settings-reproducibility.md) - complete
 3. [Document ingestion and source inspection](03-document-ingestion-source-inspection.md) - complete
 4. [Full-text search](04-full-text-search.md) - complete
-5. [Vector search with Qdrant](05-vector-search-qdrant.md) - ready for review
-6. [Hybrid search and reranking](06-hybrid-search-reranking.md)
+5. [Vector search with Qdrant](05-vector-search-qdrant.md) - complete
+6. [Hybrid search and reranking](06-hybrid-search-reranking.md) - implemented, ready for review
 7. [Local RAG chat with citations](07-local-rag-chat-citations.md)
 8. [Prompt sandbox and evaluation](08-prompt-sandbox-evaluation.md)
 9. [Export, import, and recreate repository](09-export-import-recreate.md)
@@ -49,3 +52,4 @@ PRD files:
 14. [Structured table extraction](14-structured-table-extraction.md)
 15. [Additional embedding models](15-additional-embedding-models.md)
 16. [Immutable embedding indexes](16-immutable-embedding-indexes.md)
+17. [Search metadata quality and result labeling](17-search-metadata-quality-result-labeling.md)

@@ -1,5 +1,7 @@
 # PRD 6: Hybrid Search and Reranking
 
+**Status:** Implemented, ready for review.
+
 ## Goal
 
 Combine full-text and vector retrieval with Reciprocal Rank Fusion, then apply selectable reranking strategies.
@@ -45,6 +47,20 @@ Combine full-text and vector retrieval with Reciprocal Rank Fusion, then apply s
 - Unit test reranker strategy selection.
 - Integration test hybrid search with and without reranking.
 - Evaluation compares full-text, vector, hybrid, and reranked hybrid.
+
+## Implemented Defaults and Tradeoffs
+
+- One unified retrieval endpoint supports full-text, vector, and hybrid modes; direct full-text and vector routes remain available for rebuilds and diagnostics.
+- Hybrid retrieval over-fetches a candidate pool that defaults to `top_k * 5`, merges duplicate chunks, and applies RRF with an adjustable constant that defaults to `60`.
+- Reranking supports none, cross-encoder, metadata boost, and combined cross-encoder plus metadata boost strategies. Metadata boost strength is selectable as High, Medium, or Low.
+- Cross-encoder reranking defaults to `cross-encoder/ms-marco-MiniLM-L6-v2` and requires a local model download. Missing model data produces setup guidance.
+- Retrieval settings and result score breakdowns are persisted for inspection. Only the five newest runs per repository are retained.
+- Deterministic fixtures compare all retrieval modes in default CI. Real Qdrant and cross-encoder checks are opt-in local tests.
+
+## Deferred
+
+- Diversity/MMR remains a future reranking option.
+- Live Qdrant and cross-encoder checks are not part of default CI because they require local services or downloaded model data.
 
 ## Documentation References
 

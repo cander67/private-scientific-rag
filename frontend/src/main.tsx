@@ -88,8 +88,16 @@ type VectorRebuildResponse = {
   distance: "cosine" | "dot" | "euclid";
 };
 
-type SearchMode = "full-text" | "vector";
-type SearchRebuildResponse = FullTextRebuildResponse | VectorRebuildResponse;
+type HybridRebuildResponse = {
+  repository_id: string;
+  indexed_chunks: number;
+  model: string;
+};
+
+type SearchMode = "full-text" | "vector" | "hybrid";
+type RerankerStrategy = "none" | "cross_encoder" | "metadata_boost" | "cross_encoder_metadata_boost";
+type BoostLevel = "low" | "medium" | "high";
+type SearchRebuildResponse = FullTextRebuildResponse | VectorRebuildResponse | HybridRebuildResponse;
 
 type FullTextSearchResult = {
   mode: "full-text";
@@ -150,7 +158,51 @@ type VectorSearchResult = {
   collection_name: string;
 };
 
-type SearchResult = FullTextSearchResult | VectorSearchResult;
+type RetrievalSearchResult = {
+  mode: SearchMode;
+  rank: number;
+  final_score: number;
+  score_breakdown: {
+    bm25?: number | null;
+    dense?: number | null;
+    rrf?: number | null;
+    rerank?: number | null;
+    metadata_boost?: number | null;
+  };
+  source_ranks: {
+    full_text?: number | null;
+    vector?: number | null;
+  };
+  repository_id: string;
+  document_id: string;
+  document_version_id: string;
+  chunk_id: string;
+  chunk_index: number;
+  document_title: string;
+  section: string | null;
+  page_start: number | null;
+  page_end: number | null;
+  line_start: number | null;
+  line_end: number | null;
+  snippet?: string | null;
+  text_preview?: string | null;
+  matched_fields: string[];
+  metadata: {
+    source_type?: string;
+    document_kind?: string | null;
+    tags?: string[];
+    has_table?: boolean;
+    has_figure?: boolean;
+    patent_sections?: string[];
+  };
+  embedding_run_id?: string | null;
+  embedding_provider?: string | null;
+  embedding_model?: string | null;
+  vector_size?: number | null;
+  collection_name?: string | null;
+};
+
+type SearchResult = RetrievalSearchResult;
 
 type FullTextSearchResponse = {
   query: string;
@@ -169,6 +221,18 @@ type VectorSearchResponse = {
   vector_size: number;
   distance: string;
   results: VectorSearchResult[];
+};
+
+type RetrievalSearchResponse = {
+  run_id: string;
+  query: string;
+  repository_id: string;
+  mode: "full_text" | "vector" | "hybrid";
+  top_k: number;
+  candidate_pool_size: number;
+  rrf_constant: number;
+  reranker_strategy: RerankerStrategy;
+  results: RetrievalSearchResult[];
 };
 
 function App() {
@@ -194,6 +258,10 @@ function App() {
   const [searchHasFigure, setSearchHasFigure] = useState(false);
   const [searchPatentSection, setSearchPatentSection] = useState("");
   const [searchMode, setSearchMode] = useState<SearchMode>("full-text");
+  const [rerankerStrategy, setRerankerStrategy] = useState<RerankerStrategy>("none");
+  const [candidatePoolSize, setCandidatePoolSize] = useState(50);
+  const [rrfConstant, setRrfConstant] = useState(60);
+  const [metadataBoostLevel, setMetadataBoostLevel] = useState<BoostLevel>("medium");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchMessage, setSearchMessage] = useState("Rebuild the full-text index, then run a query.");
@@ -388,16 +456,36 @@ function App() {
     setSearchBusy(true);
     setSearchMessage(`Rebuilding ${searchModeLabel(searchMode)} index`);
     try {
-      const endpoint = searchMode === "vector" ? "vector" : "full-text";
-      const response = await fetch(`${API_BASE}/repositories/${repository.id}/${endpoint}/rebuild`, {
-        method: "POST",
-      });
-      if (!response.ok) {
-        throw new Error("rebuild failed");
+      if (searchMode === "hybrid") {
+        const sparseResponse = await fetch(`${API_BASE}/repositories/${repository.id}/full-text/rebuild`, {
+          method: "POST",
+        });
+        const vectorResponse = await fetch(`${API_BASE}/repositories/${repository.id}/vector/rebuild`, {
+          method: "POST",
+        });
+        if (!sparseResponse.ok || !vectorResponse.ok) {
+          throw new Error("hybrid rebuild failed");
+        }
+        const sparsePayload = (await sparseResponse.json()) as FullTextRebuildResponse;
+        const vectorPayload = (await vectorResponse.json()) as VectorRebuildResponse;
+        setLastRebuild({
+          repository_id: repository.id,
+          indexed_chunks: Math.max(sparsePayload.indexed_chunks, vectorPayload.indexed_chunks),
+          model: vectorPayload.model,
+        });
+        setSearchMessage(`Indexed ${vectorPayload.indexed_chunks} vector chunks`);
+      } else {
+        const endpoint = searchMode === "vector" ? "vector" : "full-text";
+        const response = await fetch(`${API_BASE}/repositories/${repository.id}/${endpoint}/rebuild`, {
+          method: "POST",
+        });
+        if (!response.ok) {
+          throw new Error("rebuild failed");
+        }
+        const payload = (await response.json()) as SearchRebuildResponse;
+        setLastRebuild(payload);
+        setSearchMessage(`Indexed ${payload.indexed_chunks} chunks`);
       }
-      const payload = (await response.json()) as SearchRebuildResponse;
-      setLastRebuild(payload);
-      setSearchMessage(`Indexed ${payload.indexed_chunks} chunks`);
     } catch {
       setSearchMessage(`${searchModeLabel(searchMode)} rebuild failed`);
     } finally {
@@ -412,13 +500,22 @@ function App() {
     setSearchBusy(true);
     setSearchMessage(`Searching ${searchModeLabel(searchMode)} index`);
     try {
-      const endpoint = searchMode === "vector" ? "vector" : "full-text";
-      const response = await fetch(`${API_BASE}/repositories/${repository.id}/${endpoint}/search`, {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/retrieval/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: searchQuery,
-          limit: searchLimit,
+          mode: apiSearchMode(searchMode),
+          top_k: searchLimit,
+          candidate_pool_size: candidatePoolSize,
+          rrf_constant: rrfConstant,
+          reranker_strategy: rerankerStrategy,
+          metadata_boosts: {
+            section: metadataBoostLevel,
+            patent_section: metadataBoostLevel,
+            document_kind: metadataBoostLevel,
+            table_figure: metadataBoostLevel,
+          },
           filters: {
             document_id: searchDocumentId || null,
             section: searchSection || null,
@@ -433,15 +530,9 @@ function App() {
       if (!response.ok) {
         throw new Error("search failed");
       }
-      if (searchMode === "vector") {
-        const payload = (await response.json()) as VectorSearchResponse;
-        setSearchResults(payload.results.map((result) => ({ ...result, mode: "vector" })));
-        setSearchMessage(`${payload.results.length} results`);
-      } else {
-        const payload = (await response.json()) as FullTextSearchResponse;
-        setSearchResults(payload.results.map((result) => ({ ...result, mode: "full-text" })));
-        setSearchMessage(`${payload.results.length} results`);
-      }
+      const payload = (await response.json()) as RetrievalSearchResponse;
+      setSearchResults(payload.results.map((result) => ({ ...result, mode: searchMode })));
+      setSearchMessage(`${payload.results.length} results · run ${payload.run_id.slice(0, 8)}`);
     } catch {
       setSearchMessage(`${searchModeLabel(searchMode)} search failed. Rebuild the index and try again.`);
       setSearchResults([]);
@@ -566,6 +657,10 @@ function App() {
                 documents={documents}
                 repositoryReady={Boolean(repository)}
                 mode={searchMode}
+                rerankerStrategy={rerankerStrategy}
+                candidatePoolSize={candidatePoolSize}
+                rrfConstant={rrfConstant}
+                metadataBoostLevel={metadataBoostLevel}
                 query={searchQuery}
                 limit={searchLimit}
                 documentId={searchDocumentId}
@@ -585,6 +680,10 @@ function App() {
                   setLastRebuild(null);
                   setSearchMessage(`Rebuild the ${searchModeLabel(mode)} index, then run a query.`);
                 }}
+                onRerankerStrategyChange={setRerankerStrategy}
+                onCandidatePoolSizeChange={setCandidatePoolSize}
+                onRrfConstantChange={setRrfConstant}
+                onMetadataBoostLevelChange={setMetadataBoostLevel}
                 onQueryChange={setSearchQuery}
                 onLimitChange={setSearchLimit}
                 onDocumentChange={setSearchDocumentId}
@@ -917,6 +1016,10 @@ function SearchLab({
   documents,
   repositoryReady,
   mode,
+  rerankerStrategy,
+  candidatePoolSize,
+  rrfConstant,
+  metadataBoostLevel,
   query,
   limit,
   documentId,
@@ -931,6 +1034,10 @@ function SearchLab({
   message,
   lastRebuild,
   onModeChange,
+  onRerankerStrategyChange,
+  onCandidatePoolSizeChange,
+  onRrfConstantChange,
+  onMetadataBoostLevelChange,
   onQueryChange,
   onLimitChange,
   onDocumentChange,
@@ -947,6 +1054,10 @@ function SearchLab({
   documents: DocumentSummary[];
   repositoryReady: boolean;
   mode: SearchMode;
+  rerankerStrategy: RerankerStrategy;
+  candidatePoolSize: number;
+  rrfConstant: number;
+  metadataBoostLevel: BoostLevel;
   query: string;
   limit: number;
   documentId: string;
@@ -961,6 +1072,10 @@ function SearchLab({
   message: string;
   lastRebuild: SearchRebuildResponse | null;
   onModeChange: (value: SearchMode) => void;
+  onRerankerStrategyChange: (value: RerankerStrategy) => void;
+  onCandidatePoolSizeChange: (value: number) => void;
+  onRrfConstantChange: (value: number) => void;
+  onMetadataBoostLevelChange: (value: BoostLevel) => void;
   onQueryChange: (value: string) => void;
   onLimitChange: (value: number) => void;
   onDocumentChange: (value: string) => void;
@@ -1024,15 +1139,25 @@ function SearchLab({
               <button type="button" aria-pressed={mode === "vector"} onClick={() => onModeChange("vector")}>
                 Vector
               </button>
-              <button type="button" disabled>
+              <button type="button" aria-pressed={mode === "hybrid"} onClick={() => onModeChange("hybrid")}>
                 Hybrid
               </button>
             </div>
           </div>
           <div>
-            <label className="field">Reranking strategy</label>
-            <select disabled>
-              <option>None - planned for PRD6</option>
+            <label className="field" htmlFor="reranker-strategy">
+              Reranking strategy
+            </label>
+            <select
+              id="reranker-strategy"
+              value={rerankerStrategy}
+              onChange={(event) => onRerankerStrategyChange(event.target.value as RerankerStrategy)}
+            >
+              <option value="none">None</option>
+              <option value="cross_encoder">Cross-encoder</option>
+              <option value="metadata_boost">Metadata boost</option>
+              <option value="cross_encoder_metadata_boost">Cross-encoder + metadata boost</option>
+              <option disabled>Diversity/MMR - future</option>
             </select>
           </div>
         </div>
@@ -1052,6 +1177,52 @@ function SearchLab({
                   {value}
                 </option>
               ))}
+            </select>
+          </div>
+          <div>
+            <label className="field" htmlFor="candidate-pool-size">
+              Candidate pool
+            </label>
+            <select
+              id="candidate-pool-size"
+              value={candidatePoolSize}
+              onChange={(event) => onCandidatePoolSizeChange(Number(event.target.value))}
+            >
+              {[25, 50, 100, 150, 250].map((value) => (
+                <option value={value} key={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="field" htmlFor="rrf-constant">
+              RRF constant
+            </label>
+            <select
+              id="rrf-constant"
+              value={rrfConstant}
+              onChange={(event) => onRrfConstantChange(Number(event.target.value))}
+            >
+              {[10, 30, 60, 100].map((value) => (
+                <option value={value} key={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="field" htmlFor="metadata-boost-level">
+              Metadata boost
+            </label>
+            <select
+              id="metadata-boost-level"
+              value={metadataBoostLevel}
+              onChange={(event) => onMetadataBoostLevelChange(event.target.value as BoostLevel)}
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
             </select>
           </div>
           <div>
@@ -1209,7 +1380,7 @@ function SearchResultCard({
           View source
         </button>
       </div>
-      {result.mode === "full-text" ? (
+      {result.snippet ? (
         <p
           className="search-snippet"
           dangerouslySetInnerHTML={{ __html: result.snippet }}
@@ -1218,29 +1389,65 @@ function SearchResultCard({
         <p className="search-snippet">{result.text_preview}</p>
       )}
       <div className="scores">
+        {result.score_breakdown.bm25 != null && (
+          <div className="score">
+            <span>BM25</span>
+            <b>{Math.abs(result.score_breakdown.bm25).toFixed(4)}</b>
+          </div>
+        )}
+        {result.score_breakdown.dense != null && (
+          <div className="score">
+            <span>Dense</span>
+            <b>{result.score_breakdown.dense.toFixed(4)}</b>
+          </div>
+        )}
+        {result.score_breakdown.rrf != null && (
+          <div className="score">
+            <span>RRF</span>
+            <b>{result.score_breakdown.rrf.toFixed(4)}</b>
+          </div>
+        )}
+        {result.score_breakdown.rerank != null && (
+          <div className="score">
+            <span>Rerank</span>
+            <b>{result.score_breakdown.rerank.toFixed(4)}</b>
+          </div>
+        )}
+        {result.score_breakdown.metadata_boost != null && (
+          <div className="score">
+            <span>Boost</span>
+            <b>{result.score_breakdown.metadata_boost.toFixed(2)}</b>
+          </div>
+        )}
         <div className="score">
-          <span>{result.mode === "full-text" ? "BM25" : "Dense"}</span>
-          <b>{Math.abs(result.score).toFixed(4)}</b>
+          <span>Final</span>
+          <b>{result.final_score.toFixed(4)}</b>
         </div>
         <div className="score">
           <span>Rank</span>
           <b>{result.rank}</b>
         </div>
-        {result.mode === "full-text" ? (
+        {result.matched_fields.length > 0 ? (
           <div className="score">
             <span>Fields</span>
             <b>{result.matched_fields.join(", ")}</b>
           </div>
-        ) : (
+        ) : result.embedding_model ? (
           <div className="score">
             <span>Embedding</span>
             <b>{shortModelName(result.embedding_model)}</b>
           </div>
-        )}
+        ) : null}
       </div>
-      {result.mode === "vector" && (
+      {(result.source_ranks.full_text || result.source_ranks.vector) && (
         <p className="hint">
-          {result.embedding_provider} · {result.vector_size}d · {result.distance} · run{" "}
+          full-text rank {result.source_ranks.full_text ?? "—"} · vector rank{" "}
+          {result.source_ranks.vector ?? "—"}
+        </p>
+      )}
+      {result.embedding_model && result.embedding_run_id && (
+        <p className="hint">
+          {result.embedding_provider} · {result.vector_size}d · {result.collection_name} · run{" "}
           {result.embedding_run_id.slice(0, 8)}
         </p>
       )}
@@ -1459,7 +1666,11 @@ function searchProvenanceLabel(result: SearchResult) {
 }
 
 function searchModeLabel(mode: SearchMode) {
-  return mode === "vector" ? "vector" : "full-text";
+  return mode === "vector" ? "vector" : mode === "hybrid" ? "hybrid" : "full-text";
+}
+
+function apiSearchMode(mode: SearchMode) {
+  return mode === "full-text" ? "full_text" : mode;
 }
 
 function isVectorRebuild(rebuild: SearchRebuildResponse): rebuild is VectorRebuildResponse {

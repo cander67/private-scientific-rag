@@ -1,0 +1,24 @@
+{
+  "documents": [
+    {
+      "filename": "battery-cathodes.txt",
+      "content_type": "text/plain",
+      "content": "Abstract\nLithium iron phosphate cathodes retain capacity during battery cycling.\nMethods\nConductive carbon improves LiFePO4 electrode performance.\n"
+    },
+    {
+      "filename": "uv-adhesives.txt",
+      "content_type": "text/plain",
+      "content": "Abstract\nUV curable epoxy acrylate binders improve adhesive strength.\nClaims\nA polymer binder increases electrode adhesion after ultraviolet curing.\n"
+    }
+  ],
+  "queries": [
+    {
+      "query": "Lithium iron phosphate",
+      "expected_terms": ["Lithium iron phosphate cathodes", "LiFePO4 electrode"]
+    },
+    {
+      "query": "epoxy acrylate",
+      "expected_terms": ["UV curable epoxy acrylate", "electrode adhesion"]
+    }
+  ]
+}

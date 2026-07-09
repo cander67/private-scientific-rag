@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -9,12 +10,16 @@ from private_rag.db.base import Base
 from private_rag.db.session import ensure_sqlite_parent
 from private_rag.ingestion import models as ingestion_models  # noqa: F401
 from private_rag.repositories import models as repository_models  # noqa: F401
+from private_rag.retrieval import models as retrieval_models  # noqa: F401
 from private_rag.vector import models as vector_models  # noqa: F401
 
 config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+if database_url := os.getenv("PRIVATE_RAG_DATABASE_URL"):
+    config.set_main_option("sqlalchemy.url", database_url)
 
 target_metadata = Base.metadata
 

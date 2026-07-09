@@ -8,9 +8,9 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1, PRD2, PRD3, and PRD4 are complete. PRD5 vector search is implemented with Qdrant and local SentenceTransformers embeddings. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search for exact scientific terms, and dense vector search over repository chunks.
+PRD1 through PRD5 are complete. PRD5 vector search is closed with Qdrant and local SentenceTransformers embeddings implemented. PRD6 hybrid search and reranking is implemented and ready for review. PRD17 has been added to the backlog for search metadata quality and result labeling. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, and retrieval evaluation.
 
-Full OCR execution is planned in PRD13, structured table extraction in PRD14, and bulk patent downloads/raw patent-data feeds in PRD12.
+Full OCR execution is planned in PRD13, structured table extraction in PRD14, bulk patent downloads/raw patent-data feeds in PRD12, and clearer chunk-level versus document-level search labels in PRD17.
 
 The current scaffold provides:
 
@@ -19,8 +19,10 @@ The current scaffold provides:
 - Document upload, PDF parser fallback chain, page-thumbnail generation, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
 - SQLite FTS5 rebuild and full-text search API for repository chunks, with BM25 scores, snippets, matched fields, metadata filters, citation-ready provenance, and CI exact-match recall evaluation.
 - Qdrant-backed vector index rebuild and vector search API for repository chunks, with local SentenceTransformers MiniLM embeddings, latest-index replacement, metadata filters, embedding run metadata, and CI semantic recall evaluation with deterministic fake embeddings.
-- React/Vite frontend document manager, source inspector, and Search Lab for full-text and vector query inspection, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
-- SQLAlchemy/Alembic migration wiring for repository/settings and document-ingestion tables.
+- Unified retrieval search API for full-text, vector, and hybrid modes, with candidate-pool/RRF/reranker settings capture, Reciprocal Rank Fusion score breakdowns, selectable cross-encoder/metadata-boost reranking, and max-five recent retrieval history persistence.
+- Deterministic comparison evaluation for full-text, vector, hybrid, and reranked hybrid retrieval, plus opt-in live Qdrant and cross-encoder checks.
+- React/Vite frontend document manager, source inspector, and Search Lab for full-text, vector, hybrid, and reranked retrieval inspection, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
+- SQLAlchemy/Alembic migration wiring for repository settings, document ingestion, vector embedding runs, and retrieval history/results.
 - Qdrant Docker Compose service.
 - Pytest, Ruff, Mypy, and CI configuration.
 - Public-repo safety defaults.
@@ -57,6 +59,8 @@ docker compose up -d qdrant
 ```
 
 Vector rebuilds use the repository embedding/vector settings. The default embedding model is `sentence-transformers/all-MiniLM-L6-v2` with 384-dimensional cosine vectors.
+
+Unified retrieval defaults to a candidate pool of `top_k * 5` and an RRF constant of `60`; both can be adjusted per request. Cross-encoder reranking uses `cross-encoder/ms-marco-MiniLM-L6-v2` by default and requires the model to be downloaded into the local SentenceTransformers cache. See [test documentation](tests/README.md) for the download command and separate deterministic, live-vector, and live-cross-encoder test commands.
 
 Run the backend:
 
