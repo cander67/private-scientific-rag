@@ -46,8 +46,44 @@ class ModelSettings(BaseModel):
     ollama_chat_model: str
 
 
+DEFAULT_RAG_CHAT_PROMPT_ID = "rag-chat-default-v1"
+DEFAULT_RAG_CHAT_PROMPT = """You are a local scientific RAG assistant. Answer only from the provided repository context.
+Use inline citations in square brackets for every factual claim, such as [1] or [2].
+If the context does not support an answer, say that the repository context does not contain enough evidence."""
+
+
+class PromptLibraryEntry(BaseModel):
+    id: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+
+
 class PromptSettings(BaseModel):
     version: str = "default-v1"
+    active_chat_prompt_id: str = DEFAULT_RAG_CHAT_PROMPT_ID
+    library: list[PromptLibraryEntry] = Field(
+        default_factory=lambda: [
+            PromptLibraryEntry(
+                id=DEFAULT_RAG_CHAT_PROMPT_ID,
+                name="Repository-grounded chat",
+                text=DEFAULT_RAG_CHAT_PROMPT,
+            )
+        ]
+    )
+
+    @model_validator(mode="after")
+    def validate_active_prompt(self) -> PromptSettings:
+        prompt_ids = {entry.id for entry in self.library}
+        if self.active_chat_prompt_id not in prompt_ids:
+            raise ValueError("active_chat_prompt_id must reference a prompt library entry")
+        return self
+
+    @property
+    def active_chat_prompt(self) -> PromptLibraryEntry:
+        for entry in self.library:
+            if entry.id == self.active_chat_prompt_id:
+                return entry
+        raise ValueError("active_chat_prompt_id must reference a prompt library entry")
 
 
 class ExportSettings(BaseModel):
