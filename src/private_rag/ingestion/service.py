@@ -227,7 +227,9 @@ def delete_document(session: Session, repository_id: str, document_id: str) -> b
 def delete_all_documents(session: Session, repository_id: str) -> int | None:
     if session.get(Repository, repository_id) is None:
         return None
-    documents = session.scalars(select(Document).where(Document.repository_id == repository_id)).all()
+    documents = session.scalars(
+        select(Document).where(Document.repository_id == repository_id)
+    ).all()
     for document in documents:
         for version in document.versions:
             _delete_version_artifacts(version)

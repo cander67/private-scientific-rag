@@ -8,7 +8,7 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 through PRD6 are complete. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, and retrieval evaluation. PRD7 is in progress to add local Ollama-backed retrieval-augmented chat with citations.
+PRD1 through PRD7 are implemented and ready for review. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, and local Ollama-backed retrieval-augmented chat with citations.
 
 Later PRDs include OCR execution (PRD13), structured table extraction (PRD14), bulk patent downloads/raw patent-data feeds (PRD12), and clearer chunk-level versus document-level search labels (PRD17). Support for additional embedding models and immutable document storage are also planned.
 
@@ -63,7 +63,7 @@ Vector rebuilds use the repository embedding/vector settings. The default embedd
 
 Unified retrieval defaults to a candidate pool of `top_k * 5` and an RRF constant of `60`; both can be adjusted per request. Cross-encoder reranking uses `cross-encoder/ms-marco-MiniLM-L6-v2` by default and requires the model to be downloaded into the local SentenceTransformers cache. See [test documentation](tests/README.md) for the download command and separate deterministic, live-vector, and live-cross-encoder test commands.
 
-Chat uses its own retrieval settings rather than inheriting Search Lab state. It does not rebuild indexes automatically. Before chatting, rebuild the full-text and vector indexes for the repository and confirm the local Ollama model is reachable from the Chat Workspace readiness panel. The default chat model is `gemma3:4b`.
+Chat uses its own retrieval settings rather than inheriting Search Lab state. It does not rebuild indexes automatically. Before chatting, rebuild the full-text and vector indexes for the repository and confirm the local Ollama model is reachable from the Chat Workspace readiness panel. The default chat model is `gemma3:4b`; default chat retrieval is hybrid with cross-encoder reranking. Repository chat prompts live in repository settings, and the UI keeps chat-owned retrieval controls, readiness checks, session management, and citation source navigation inside Chat Workspace.
 
 Run the backend:
 
