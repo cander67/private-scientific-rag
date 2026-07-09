@@ -11,7 +11,7 @@ type RepositoryResponse = {
   };
 };
 
-type View = "documents" | "source" | "search";
+type View = "documents" | "source" | "search" | "chat";
 
 type DocumentVersion = {
   id: string;
@@ -235,6 +235,64 @@ type RetrievalSearchResponse = {
   results: RetrievalSearchResult[];
 };
 
+type ChatCitation = {
+  citation_id: number;
+  token: string;
+  document_id: string;
+  document_version_id: string;
+  chunk_id: string;
+  chunk_index: number;
+  document_title: string;
+  section: string | null;
+  page_start: number | null;
+  page_end: number | null;
+  line_start: number | null;
+  line_end: number | null;
+  metadata: {
+    source_type?: string;
+    document_kind?: string | null;
+    tags?: string[];
+    has_table?: boolean;
+    has_figure?: boolean;
+    patent_sections?: string[];
+  };
+  retrieval_rank: number;
+  score_breakdown: Record<string, number | null>;
+};
+
+type ChatMessage = {
+  id: string;
+  session_id: string;
+  sequence: number;
+  role: "user" | "assistant";
+  content: string;
+  retrieval_run_id: string | null;
+  citations: ChatCitation[];
+  created_at: string;
+};
+
+type ChatSession = {
+  id: string;
+  repository_id: string;
+  title: string;
+  model: string;
+  retrieval_settings: {
+    mode?: string;
+    top_k?: number;
+    reranker_strategy?: string;
+  };
+  prompt_id: string;
+  created_at: string;
+  updated_at: string;
+  messages: ChatMessage[];
+};
+
+type ChatQuestionResponse = {
+  session: ChatSession;
+  user_message: ChatMessage;
+  assistant_message: ChatMessage;
+};
+
 function App() {
   const [repository, setRepository] = useState<RepositoryResponse["repository"] | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
@@ -266,6 +324,12 @@ function App() {
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchMessage, setSearchMessage] = useState("Rebuild the full-text index, then run a query.");
   const [lastRebuild, setLastRebuild] = useState<SearchRebuildResponse | null>(null);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatMessage, setChatMessage] = useState("Create a chat session or ask a question.");
+  const [activeCitation, setActiveCitation] = useState<ChatCitation | null>(null);
 
   useEffect(() => {
     const onHashChange = () => setActiveView(viewFromHash(window.location.hash));
@@ -284,6 +348,7 @@ function App() {
   useEffect(() => {
     if (repository) {
       void loadDocuments(repository.id);
+      void loadChatSessions(repository.id);
     }
   }, [repository]);
 
@@ -309,6 +374,11 @@ function App() {
   const selectedChunk = useMemo(
     () => inspection?.chunks.find((chunk) => chunk.id === selectedChunkId) ?? inspection?.chunks[0] ?? null,
     [inspection, selectedChunkId],
+  );
+
+  const activeChatSession = useMemo(
+    () => chatSessions.find((chatSession) => chatSession.id === activeChatSessionId) ?? chatSessions[0] ?? null,
+    [chatSessions, activeChatSessionId],
   );
 
   const contextChunks = useMemo(() => {
@@ -375,6 +445,91 @@ function App() {
       setInspection(payload);
     } catch {
       setMessage("Could not inspect document");
+    }
+  }
+
+  async function loadChatSessions(repositoryId: string) {
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repositoryId}/chat/sessions`);
+      if (!response.ok) {
+        throw new Error("chat sessions unavailable");
+      }
+      const payload = (await response.json()) as ChatSession[];
+      setChatSessions(payload);
+      setActiveChatSessionId((current) => current ?? payload[0]?.id ?? null);
+      setChatMessage(payload.length > 0 ? "Ready" : "No chat sessions yet");
+    } catch {
+      setChatMessage("Could not load chat sessions");
+    }
+  }
+
+  async function createChatSession() {
+    if (!repository) {
+      return null;
+    }
+    setChatBusy(true);
+    setChatMessage("Creating chat session");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/chat/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: "Repository chat" }),
+      });
+      if (!response.ok) {
+        throw new Error("create chat failed");
+      }
+      const payload = (await response.json()) as ChatSession;
+      setChatSessions((current) => [payload, ...current]);
+      setActiveChatSessionId(payload.id);
+      setChatMessage("Ready");
+      return payload;
+    } catch {
+      setChatMessage("Could not create chat session");
+      return null;
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  async function askChatQuestion() {
+    if (!repository || !chatInput.trim()) {
+      return;
+    }
+    const content = chatInput.trim();
+    setChatBusy(true);
+    setChatInput("");
+    setChatMessage("Retrieving context and asking the local model");
+    try {
+      const chatSession = activeChatSession ?? (await createChatSession());
+      if (!chatSession) {
+        throw new Error("missing chat session");
+      }
+      const response = await fetch(
+        `${API_BASE}/repositories/${repository.id}/chat/sessions/${chatSession.id}/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error("chat question failed");
+      }
+      const payload = (await response.json()) as ChatQuestionResponse;
+      setChatSessions((current) =>
+        current.map((session) => (session.id === payload.session.id ? payload.session : session)),
+      );
+      setActiveChatSessionId(payload.session.id);
+      setChatMessage(
+        `${payload.assistant_message.citations.length} citations · run ${
+          payload.assistant_message.retrieval_run_id?.slice(0, 8) ?? "local"
+        }`,
+      );
+    } catch {
+      setChatInput(content);
+      setChatMessage("Chat failed. Check indexes, reranker model, and Ollama setup.");
+    } finally {
+      setChatBusy(false);
     }
   }
 
@@ -543,7 +698,13 @@ function App() {
 
   function navigateTo(view: View) {
     window.location.hash =
-      view === "documents" ? "documents" : view === "source" ? "source-viewer" : "search-lab";
+      view === "documents"
+        ? "documents"
+        : view === "source"
+          ? "source-viewer"
+          : view === "chat"
+            ? "chat-workspace"
+            : "search-lab";
     setActiveView(view);
     setNavOpen(false);
   }
@@ -554,11 +715,26 @@ function App() {
     navigateTo("source");
   }
 
+  function openChatCitation(citation: ChatCitation) {
+    setSelectedDocumentId(citation.document_id);
+    setSelectedChunkId(citation.chunk_id);
+    setActiveCitation(null);
+    navigateTo("source");
+  }
+
   const title =
-    activeView === "search" ? "Search Lab" : activeView === "source" ? "Source Viewer" : "Document Manager";
+    activeView === "search"
+      ? "Search Lab"
+      : activeView === "source"
+        ? "Source Viewer"
+        : activeView === "chat"
+          ? "Chat Workspace"
+          : "Document Manager";
   const subtitle =
     activeView === "search"
       ? "Inspect full-text retrieval with BM25 scores and citation provenance"
+      : activeView === "chat"
+        ? `${repository?.name ?? "Default Repository"} · ${activeChatSession?.model ?? "local model"} · ${chatMessage}`
       : `${repository?.name ?? "Default Repository"} · ${message}`;
 
   return (
@@ -601,7 +777,13 @@ function App() {
               Search Lab
             </a>
             <a>Prompt Sandbox</a>
-            <a>Chat Workspace</a>
+            <a
+              className={activeView === "chat" ? "active" : ""}
+              href="#chat-workspace"
+              onClick={() => navigateTo("chat")}
+            >
+              Chat Workspace
+            </a>
             <span className="nav-label">Manage</span>
             <a>Settings / Models</a>
             <a>Recreate Repository</a>
@@ -696,6 +878,22 @@ function App() {
                 onRebuild={() => void rebuildSearchIndex()}
                 onSearch={() => void runSearch()}
                 onOpenResult={openSearchResult}
+              />
+            ) : activeView === "chat" ? (
+              <ChatWorkspace
+                sessions={chatSessions}
+                activeSession={activeChatSession}
+                input={chatInput}
+                busy={chatBusy}
+                message={chatMessage}
+                activeCitation={activeCitation}
+                onInputChange={setChatInput}
+                onCreateSession={() => void createChatSession()}
+                onSelectSession={setActiveChatSessionId}
+                onAsk={() => void askChatQuestion()}
+                onCitationClick={setActiveCitation}
+                onCloseCitation={() => setActiveCitation(null)}
+                onOpenCitation={openChatCitation}
               />
             ) : (
               <>
@@ -1009,6 +1207,200 @@ function App() {
         </main>
       </div>
     </>
+  );
+}
+
+function ChatWorkspace({
+  sessions,
+  activeSession,
+  input,
+  busy,
+  message,
+  activeCitation,
+  onInputChange,
+  onCreateSession,
+  onSelectSession,
+  onAsk,
+  onCitationClick,
+  onCloseCitation,
+  onOpenCitation,
+}: {
+  sessions: ChatSession[];
+  activeSession: ChatSession | null;
+  input: string;
+  busy: boolean;
+  message: string;
+  activeCitation: ChatCitation | null;
+  onInputChange: (value: string) => void;
+  onCreateSession: () => void;
+  onSelectSession: (value: string) => void;
+  onAsk: () => void;
+  onCitationClick: (citation: ChatCitation) => void;
+  onCloseCitation: () => void;
+  onOpenCitation: (citation: ChatCitation) => void;
+}) {
+  return (
+    <>
+      <div className="chat-layout">
+        <aside className="card card-pad-sm session-list">
+          <div className="row row-between session-head">
+            <div className="eyebrow">Sessions</div>
+            <button className="btn btn-sm btn-ghost" type="button" onClick={onCreateSession} disabled={busy}>
+              New
+            </button>
+          </div>
+          {sessions.length > 0 ? (
+            sessions.map((session) => (
+              <button
+                className={session.id === activeSession?.id ? "session-item active" : "session-item"}
+                type="button"
+                key={session.id}
+                onClick={() => onSelectSession(session.id)}
+              >
+                <span>{session.title}</span>
+                <small>
+                  {formatDate(session.updated_at)} · {session.messages.length} msgs
+                </small>
+              </button>
+            ))
+          ) : (
+            <p className="muted">No saved chats yet.</p>
+          )}
+        </aside>
+
+        <section className="chat-main">
+          <div className="banner banner-accent chat-snapshot">
+            <div>
+              <strong>Retrieval snapshot</strong>
+              <span>
+                {activeSession
+                  ? `${activeSession.retrieval_settings.mode ?? "hybrid"} · ${
+                      activeSession.retrieval_settings.reranker_strategy ?? "cross_encoder"
+                    } · top-k ${activeSession.retrieval_settings.top_k ?? 6} · ${
+                      activeSession.model
+                    }`
+                  : "hybrid · cross_encoder · gemma3:4b"}
+              </span>
+            </div>
+          </div>
+
+          <div className="chat-thread">
+            {activeSession?.messages.length ? (
+              activeSession.messages.map((chatMessage) => (
+                <ChatBubble
+                  message={chatMessage}
+                  key={chatMessage.id}
+                  onCitationClick={onCitationClick}
+                />
+              ))
+            ) : (
+              <div className="empty-inline">
+                <h3>Start a repository chat</h3>
+                <p>Questions use fresh hybrid retrieval and cite stored source chunks.</p>
+              </div>
+            )}
+          </div>
+
+          <div className="chat-input">
+            <textarea
+              rows={2}
+              value={input}
+              onChange={(event) => onInputChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  onAsk();
+                }
+              }}
+              placeholder="Ask a question grounded in this repository..."
+              disabled={busy}
+            />
+            <button className="btn btn-primary" type="button" onClick={onAsk} disabled={busy || !input.trim()}>
+              Send
+            </button>
+          </div>
+          <p className="hint">{message}</p>
+        </section>
+      </div>
+
+      {activeCitation && (
+        <div className="overlay open" role="dialog" aria-modal="true">
+          <div className="modal citation-modal">
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow">Citation {activeCitation.token}</div>
+                <h2>{activeCitation.document_title}</h2>
+              </div>
+              <button className="close-x" type="button" onClick={onCloseCitation} aria-label="Close citation">
+                x
+              </button>
+            </div>
+            <div className="source-card">
+              <div className="meta">
+                {citationProvenanceLabel(activeCitation)} · chunk {activeCitation.chunk_index + 1} ·
+                retrieval rank {activeCitation.retrieval_rank}
+              </div>
+              <dl className="kv">
+                <dt>document</dt>
+                <dd>{activeCitation.document_id}</dd>
+                <dt>version</dt>
+                <dd>{activeCitation.document_version_id}</dd>
+                <dt>chunk</dt>
+                <dd>{activeCitation.chunk_id}</dd>
+                <dt>section</dt>
+                <dd>{activeCitation.section ?? "—"}</dd>
+              </dl>
+              <div className="row result-meta">
+                {activeCitation.metadata.source_type && (
+                  <span className="badge">{activeCitation.metadata.source_type}</span>
+                )}
+                {activeCitation.metadata.document_kind && (
+                  <span className="badge">{activeCitation.metadata.document_kind}</span>
+                )}
+                {activeCitation.metadata.has_table && <span className="badge">table</span>}
+                {activeCitation.metadata.has_figure && <span className="badge">figure</span>}
+              </div>
+            </div>
+            <div className="row modal-actions">
+              <button className="btn btn-primary" type="button" onClick={() => onOpenCitation(activeCitation)}>
+                Open in Source Viewer
+              </button>
+              <button className="btn btn-ghost" type="button" onClick={onCloseCitation}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ChatBubble({
+  message,
+  onCitationClick,
+}: {
+  message: ChatMessage;
+  onCitationClick: (citation: ChatCitation) => void;
+}) {
+  return (
+    <div className={message.role === "user" ? "msg user" : "msg assistant"}>
+      <p>{message.content}</p>
+      {message.citations.length > 0 && (
+        <div className="chat-citations">
+          {message.citations.map((citation) => (
+            <button
+              className="cite"
+              type="button"
+              key={`${message.id}-${citation.citation_id}`}
+              onClick={() => onCitationClick(citation)}
+              title={`${citation.document_title}, ${citationProvenanceLabel(citation)}`}
+            >
+              {citation.token}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1665,6 +2057,16 @@ function searchProvenanceLabel(result: SearchResult) {
   return result.section ?? "document";
 }
 
+function citationProvenanceLabel(citation: ChatCitation) {
+  if (citation.page_start) {
+    return `p. ${citation.page_start}${citation.page_end && citation.page_end !== citation.page_start ? `-${citation.page_end}` : ""}`;
+  }
+  if (citation.line_start) {
+    return `lines ${citation.line_start}${citation.line_end && citation.line_end !== citation.line_start ? `-${citation.line_end}` : ""}`;
+  }
+  return citation.section ?? "document";
+}
+
 function searchModeLabel(mode: SearchMode) {
   return mode === "vector" ? "vector" : mode === "hybrid" ? "hybrid" : "full-text";
 }
@@ -1683,6 +2085,9 @@ function shortModelName(model: string) {
 }
 
 function viewFromHash(hash: string): View {
+  if (hash === "#chat-workspace") {
+    return "chat";
+  }
   if (hash === "#search-lab") {
     return "search";
   }

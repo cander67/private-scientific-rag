@@ -518,7 +518,8 @@ td .name {
 input[type="search"],
 input[type="text"],
 input:not([type]),
-select {
+select,
+textarea {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -529,10 +530,16 @@ select {
 }
 
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+textarea {
+  min-height: 48px;
+  resize: vertical;
 }
 
 .search-row {
@@ -653,6 +660,203 @@ select:focus {
 
 .result-meta {
   margin-top: var(--s3);
+}
+
+.chat-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--s4);
+  align-items: start;
+}
+
+.session-list {
+  position: sticky;
+  top: 92px;
+}
+
+.session-head .eyebrow {
+  margin-bottom: 0;
+}
+
+.session-item {
+  width: 100%;
+  display: block;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  margin-bottom: 3px;
+  padding: 9px 10px;
+  text-align: left;
+}
+
+.session-item:hover,
+.session-item.active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.session-item span,
+.session-item small {
+  display: block;
+}
+
+.session-item span {
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.session-item small {
+  color: var(--text-faint);
+  font-size: 0.74rem;
+  margin-top: 2px;
+}
+
+.chat-main {
+  min-width: 0;
+}
+
+.chat-snapshot {
+  margin-bottom: var(--s4);
+}
+
+.chat-snapshot strong,
+.chat-snapshot span {
+  display: block;
+}
+
+.chat-snapshot span {
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.chat-thread {
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.msg {
+  max-width: min(760px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: var(--s4);
+}
+
+.msg p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.msg.user {
+  align-self: flex-end;
+  background: var(--accent-soft);
+}
+
+.msg.assistant {
+  align-self: flex-start;
+}
+
+.chat-citations {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+
+.cite {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--accent-strong);
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 2px 8px;
+}
+
+.cite:hover {
+  border-color: var(--accent);
+}
+
+.chat-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--s3);
+  align-items: end;
+  margin-top: var(--s4);
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 20, 23, 0.42);
+  padding: var(--s4);
+}
+
+.overlay.open {
+  display: flex;
+}
+
+.modal {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: var(--s5);
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s4);
+  margin-bottom: var(--s4);
+}
+
+.modal-head h2 {
+  font-size: 1rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.close-x {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.source-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: var(--s4);
+}
+
+.source-card .meta {
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  margin-bottom: var(--s3);
+}
+
+.modal-actions {
+  margin-top: var(--s4);
 }
 
 .skeleton {
@@ -918,7 +1122,16 @@ select:focus {
   }
 
   .grid-side,
-  .viewer {
+  .viewer,
+  .chat-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .session-list {
+    position: static;
+  }
+
+  .chat-input {
     grid-template-columns: 1fr;
   }
 }
