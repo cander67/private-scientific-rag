@@ -11,6 +11,7 @@ Module boundaries:
 - `search/`: SQLite FTS5 schema management, sparse index rebuilds, query normalization, field weighting, result shaping, and exact-match recall evaluation.
 - `vector/`: embedding provider boundary, Qdrant vector-store boundary, latest embedding-run metadata, vector index rebuild/search orchestration, and semantic recall evaluation.
 - `retrieval/`: unified retrieval request/response schemas, retrieval run/result persistence, and orchestration across full-text, vector, hybrid, and reranked search modes.
+- `chat/`: local Ollama chat boundary, model registry, chat session/message persistence, RAG prompt assembly, readiness checks, and citation mapping.
 - `services/`: local service checks and future domain services.
 - `ingestion/`: document upload models, PDF parser fallback chain, parser/chunker service, source file storage, and provenance schemas.
 - Ingestion keeps original source files, parsed artifacts, chunks, and provenance metadata distinct.
@@ -34,6 +35,15 @@ Current API surface:
 - `POST /repositories/{repository_id}/vector/rebuild`: replaces the latest Qdrant vector index for one repository using the configured embedding model.
 - `POST /repositories/{repository_id}/vector/search`: searches the latest vector index and returns dense score, embedding run/model/index settings, metadata filters, document/chunk metadata, and citation-ready provenance.
 - `POST /repositories/{repository_id}/retrieval/search`: searches through the unified retrieval contract. Full-text, vector, and hybrid modes are available, with a default candidate pool of `top_k * 5`, adjustable RRF constant defaulting to `60`, selectable reranker strategy, cross-encoder score contribution, High/Medium/Low metadata boost settings, normalized score breakdowns, and max-five recent retrieval run/result persistence.
+- `GET /repositories/{repository_id}/chat/models`: lists local chat model registry entries and the default model.
+- `POST /repositories/{repository_id}/chat/models/smoke`: checks that the configured local Ollama model can respond.
+- `GET /repositories/{repository_id}/chat/readiness`: reports full-text index, vector index, and local model readiness for chat.
+- `GET /repositories/{repository_id}/chat/sessions`: lists repository chat sessions.
+- `POST /repositories/{repository_id}/chat/sessions`: creates a repository chat session with chat-owned retrieval settings.
+- `GET /repositories/{repository_id}/chat/sessions/{chat_session_id}`: loads persisted chat messages and citation metadata.
+- `POST /repositories/{repository_id}/chat/sessions/{chat_session_id}/messages`: asks a repository-grounded question using the session/request retrieval settings and persists the user/assistant messages.
+- `DELETE /repositories/{repository_id}/chat/sessions/{chat_session_id}`: deletes one chat session.
+- `DELETE /repositories/{repository_id}/chat/sessions`: clears repository chat sessions.
 
 Current status:
 
@@ -43,7 +53,9 @@ Current status:
 - PRD4 full-text search is complete: sparse index rebuild, full-text query API, metadata filters, exact-match evaluation, and frontend Search Lab are available.
 - PRD5 vector search with Qdrant is complete: latest-index rebuild, vector query API, metadata filters, embedding run metadata, deterministic CI tests, semantic recall evaluation, and frontend Search Lab vector mode are available.
 - PRD6 hybrid search and reranking is complete: unified retrieval search, retrieval run/result persistence, five-history retention, hybrid orchestration, Reciprocal Rank Fusion, selectable reranking, comparison evaluation, and Search Lab controls are available.
-- PRD7 local RAG chat with citations is in progress.
+- PRD7 local RAG chat with citations is in progress: Ollama chat boundary, model registry, readiness checks, chat session persistence, prompt library settings, chat-owned retrieval controls, citation mapping, and Chat Workspace are available.
+
+Repository chat prompts live in repository settings under `prompt.library`, with `prompt.active_chat_prompt_id` selecting the active prompt. The default prompt requires repository-grounded answers, inline citations, and explicit uncertainty when context is insufficient. Chat retrieval settings are stored on each chat session and may be overridden per question; they do not inherit frontend Search Lab state and do not trigger automatic index rebuilds.
 
 The default cross-encoder is `cross-encoder/ms-marco-MiniLM-L6-v2`. It must be downloaded into the local SentenceTransformers cache before live reranking; a missing model returns setup guidance instead of silently falling back. Diversity/MMR remains a future strategy. Default CI uses deterministic providers, while real Qdrant and cross-encoder checks are explicit opt-in tests documented in `tests/README.md`.
 
