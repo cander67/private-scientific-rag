@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import "./styles.css";
 
@@ -305,6 +305,7 @@ type ChatReadinessItem = {
 
 type ChatReadiness = {
   repository_id: string;
+  parsed_chunks: number;
   full_text: ChatReadinessItem;
   vector: ChatReadinessItem;
   local_model: ChatReadinessItem;
@@ -354,6 +355,8 @@ function App() {
     reranker_strategy: "cross_encoder",
   });
   const [chatReadiness, setChatReadiness] = useState<ChatReadiness | null>(null);
+  const [chatReadinessBusy, setChatReadinessBusy] = useState(false);
+  const [chatReadinessCheckedAt, setChatReadinessCheckedAt] = useState<string | null>(null);
   const [chatRebuildBusy, setChatRebuildBusy] = useState<"full-text" | "vector" | null>(null);
   const [pendingSourceTarget, setPendingSourceTarget] = useState<{
     documentId: string;
@@ -508,23 +511,40 @@ function App() {
     }
   }
 
-  async function loadChatReadiness(repositoryId: string) {
+  async function loadChatReadiness(repositoryId: string, announce = false) {
+    if (announce) {
+      setChatReadinessBusy(true);
+      setChatMessage("Checking chat readiness");
+    }
     try {
       const response = await fetch(`${API_BASE}/repositories/${repositoryId}/chat/readiness`);
       if (!response.ok) {
         throw new Error("readiness unavailable");
       }
       setChatReadiness((await response.json()) as ChatReadiness);
+      setChatReadinessCheckedAt(new Date().toISOString());
+      if (announce) {
+        setChatMessage("Readiness check complete");
+      }
     } catch {
       setChatReadiness(null);
+      if (announce) {
+        setChatMessage("Could not check chat readiness");
+      }
+    } finally {
+      if (announce) {
+        setChatReadinessBusy(false);
+      }
     }
   }
 
-  async function createChatSession() {
+  async function createChatSession(manageBusy = true) {
     if (!repository) {
       return null;
     }
-    setChatBusy(true);
+    if (manageBusy) {
+      setChatBusy(true);
+    }
     setChatMessage("Creating chat session");
     try {
       const response = await fetch(`${API_BASE}/repositories/${repository.id}/chat/sessions`, {
@@ -547,7 +567,9 @@ function App() {
       setChatMessage("Could not create chat session");
       return null;
     } finally {
-      setChatBusy(false);
+      if (manageBusy) {
+        setChatBusy(false);
+      }
     }
   }
 
@@ -560,7 +582,7 @@ function App() {
     setChatInput("");
     setChatMessage("Retrieving context and asking the local model");
     try {
-      const chatSession = activeChatSession ?? (await createChatSession());
+      const chatSession = activeChatSession ?? (await createChatSession(false));
       if (!chatSession) {
         throw new Error("missing chat session");
       }
@@ -1022,6 +1044,8 @@ function App() {
                 activeCitation={activeCitation}
                 retrievalSettings={chatRetrievalSettings}
                 readiness={chatReadiness}
+                readinessBusy={chatReadinessBusy}
+                readinessCheckedAt={chatReadinessCheckedAt}
                 rebuildBusy={chatRebuildBusy}
                 onInputChange={setChatInput}
                 onCreateSession={() => void createChatSession()}
@@ -1032,7 +1056,7 @@ function App() {
                 onRetrievalSettingsChange={setChatRetrievalSettings}
                 onRebuildFullText={() => void rebuildChatIndex("full-text")}
                 onRebuildVector={() => void rebuildChatIndex("vector")}
-                onCheckReadiness={() => repository && void loadChatReadiness(repository.id)}
+                onCheckReadiness={() => repository && void loadChatReadiness(repository.id, true)}
                 onCitationClick={setActiveCitation}
                 onCloseCitation={() => setActiveCitation(null)}
                 onOpenCitation={openChatCitation}
@@ -1361,6 +1385,8 @@ function ChatWorkspace({
   activeCitation,
   retrievalSettings,
   readiness,
+  readinessBusy,
+  readinessCheckedAt,
   rebuildBusy,
   onInputChange,
   onCreateSession,
@@ -1384,6 +1410,8 @@ function ChatWorkspace({
   activeCitation: ChatCitation | null;
   retrievalSettings: ChatRetrievalSettings;
   readiness: ChatReadiness | null;
+  readinessBusy: boolean;
+  readinessCheckedAt: string | null;
   rebuildBusy: "full-text" | "vector" | null;
   onInputChange: (value: string) => void;
   onCreateSession: () => void;
@@ -1399,6 +1427,16 @@ function ChatWorkspace({
   onCloseCitation: () => void;
   onOpenCitation: (citation: ChatCitation) => void;
 }) {
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  const readyForSelectedMode = chatReadyForSelectedMode(readiness, retrievalSettings);
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (thread) {
+      thread.scrollTop = thread.scrollHeight;
+    }
+  }, [activeSession?.messages.length, busy]);
+
   return (
     <>
       <div className="chat-layout">
@@ -1452,10 +1490,22 @@ function ChatWorkspace({
             <div className="row row-between">
               <div>
                 <div className="eyebrow">Chat retrieval</div>
-                <h2>{readiness?.ready_for_chat ? "Ready for chat" : "Check local readiness"}</h2>
+                <h2>{readyForSelectedMode ? "Ready for chat" : "Repository context not ready"}</h2>
+                <p className="hint chat-check-status">
+                  {readinessBusy
+                    ? "Checking indexes and local model"
+                    : readinessCheckedAt
+                      ? `Last checked ${formatTime(readinessCheckedAt)}`
+                      : "Run Check to refresh readiness"}
+                </p>
               </div>
-              <button className="btn btn-sm" type="button" onClick={onCheckReadiness} disabled={busy}>
-                Check
+              <button
+                className="btn btn-sm"
+                type="button"
+                onClick={onCheckReadiness}
+                disabled={busy || readinessBusy}
+              >
+                {readinessBusy ? "Checking" : "Check"}
               </button>
             </div>
             <div className="grid grid-3 chat-settings-controls">
@@ -1520,7 +1570,7 @@ function ChatWorkspace({
                 </select>
               </div>
             </div>
-            <div className="readiness-grid">
+            <div className="readiness-grid" data-parsed-chunks={readiness?.parsed_chunks ?? 0}>
               <ReadinessPill label="Full-text" item={readiness?.full_text ?? null} />
               <ReadinessPill label="Vector" item={readiness?.vector ?? null} />
               <ReadinessPill label="Local model" item={readiness?.local_model ?? null} />
@@ -1530,7 +1580,7 @@ function ChatWorkspace({
                 className="btn btn-sm"
                 type="button"
                 onClick={onRebuildFullText}
-                disabled={busy || rebuildBusy !== null}
+                disabled={busy || rebuildBusy !== null || (readiness?.parsed_chunks ?? 0) === 0}
               >
                 {rebuildBusy === "full-text" ? "Rebuilding full-text" : "Rebuild full-text"}
               </button>
@@ -1538,7 +1588,7 @@ function ChatWorkspace({
                 className="btn btn-sm"
                 type="button"
                 onClick={onRebuildVector}
-                disabled={busy || rebuildBusy !== null}
+                disabled={busy || rebuildBusy !== null || (readiness?.parsed_chunks ?? 0) === 0}
               >
                 {rebuildBusy === "vector" ? "Rebuilding vector" : "Rebuild vector"}
               </button>
@@ -1548,7 +1598,7 @@ function ChatWorkspace({
             </div>
           </div>
 
-          <div className="chat-thread">
+          <div className="chat-thread" ref={threadRef}>
             {activeSession?.messages.length ? (
               activeSession.messages.map((chatMessage) => (
                 <ChatBubble
@@ -1576,24 +1626,26 @@ function ChatWorkspace({
             )}
           </div>
 
-          <div className="chat-input">
-            <textarea
-              rows={2}
-              value={input}
-              onChange={(event) => onInputChange(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                  onAsk();
-                }
-              }}
-              placeholder="Ask a question grounded in this repository..."
-              disabled={busy}
-            />
-            <button className="btn btn-primary" type="button" onClick={onAsk} disabled={busy || !input.trim()}>
-              Send
-            </button>
+          <div className="chat-composer">
+            <div className="chat-input">
+              <textarea
+                rows={2}
+                value={input}
+                onChange={(event) => onInputChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                    onAsk();
+                  }
+                }}
+                placeholder="Ask a question grounded in this repository..."
+                disabled={busy}
+              />
+              <button className="btn btn-primary" type="button" onClick={onAsk} disabled={busy || !input.trim()}>
+                {busy ? "Sending" : "Send"}
+              </button>
+            </div>
+            <p className="hint">{busy ? "Local model is still working..." : message}</p>
           </div>
-          <p className="hint">{message}</p>
         </section>
       </div>
 
@@ -2337,6 +2389,30 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" }).format(
     new Date(value),
   );
+}
+
+function formatTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(value));
+}
+
+function chatReadyForSelectedMode(
+  readiness: ChatReadiness | null,
+  settings: ChatRetrievalSettings,
+) {
+  if (!readiness || readiness.parsed_chunks <= 0 || !readiness.local_model.ready) {
+    return false;
+  }
+  if (settings.mode === "full_text") {
+    return readiness.full_text.ready;
+  }
+  if (settings.mode === "vector") {
+    return readiness.vector.ready;
+  }
+  return readiness.full_text.ready && readiness.vector.ready;
 }
 
 function searchProvenanceLabel(result: SearchResult) {

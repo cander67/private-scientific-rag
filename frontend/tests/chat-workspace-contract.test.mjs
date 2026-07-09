@@ -38,18 +38,36 @@ test("Chat Workspace renders citation cards and source navigation", () => {
 
 test("Chat Workspace exposes retrieval readiness and explicit rebuild controls", () => {
   assert.match(source, /chat\/readiness/);
+  assert.match(source, /parsed_chunks/);
   assert.match(source, /ReadinessPill/);
+  assert.match(source, /chatReadyForSelectedMode/);
+  assert.match(source, /Repository context not ready/);
   assert.match(source, /Rebuild full-text/);
   assert.match(source, /Rebuild vector/);
   assert.match(source, /chat-mode/);
   assert.match(source, /chat-reranker/);
   assert.match(source, /chat-top-k/);
+  assert.match(source, /Last checked/);
+  assert.match(source, /Checking indexes and local model/);
 });
 
 test("Chat Workspace supports thinking state and session deletion", () => {
   assert.match(source, /Local LLM is thinking/);
+  assert.match(source, /Local model is still working/);
   assert.match(source, /thinking-dots/);
   assert.match(source, /deleteChatSession/);
   assert.match(source, /clearChatSessions/);
   assert.match(source, /Clear all/);
+});
+
+test("Chat Workspace keeps messages scrollable with composer at the bottom", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(source, /useRef/);
+  assert.match(source, /threadRef/);
+  assert.match(source, /chat-composer/);
+  assert.match(styles, /\.chat-thread[\s\S]*overflow-y: auto/);
+  assert.match(styles, /\.chat-main[\s\S]*flex-direction: column/);
+  assert.match(styles, /\.chat-thread[\s\S]*flex: 1/);
+  assert.match(styles, /\.chat-composer/);
 });
