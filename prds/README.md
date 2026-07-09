@@ -10,6 +10,7 @@ Current status:
 - Complete: PRD4 full-text search.
 - Complete: PRD5 vector search with Qdrant.
 - Ready for review: PRD6 hybrid search and reranking.
+- Backlog: PRD17 search metadata quality and result labeling.
 
 The intended flow is:
 
@@ -30,6 +31,7 @@ Shared decisions:
 - Supported local hosts: macOS, Windows-native Python/Ollama, and Linux/Ubuntu.
 - Public repo posture: no secrets, no private data, no generated indexes, no model files, and no restricted document corpus in Git.
 - Patent scope: PRD3 supports user-uploaded patent PDFs. Bulk downloads, raw patent feeds, and cross-jurisdiction patent-data normalization are deferred to PRD12.
+- Search metadata scope: PRD17 will distinguish chunk-level facts, document-level hints, parser hints, and active filters so Search Lab result labels are trustworthy.
 - Test fixture posture: default CI uses `tests/fixtures/`, not `documents/golden_corpus/`.
 
 PRD files:
@@ -50,3 +52,4 @@ PRD files:
 14. [Structured table extraction](14-structured-table-extraction.md)
 15. [Additional embedding models](15-additional-embedding-models.md)
 16. [Immutable embedding indexes](16-immutable-embedding-indexes.md)
+17. [Search metadata quality and result labeling](17-search-metadata-quality-result-labeling.md)

@@ -6,6 +6,8 @@ Current implementation status: PRD5 is complete and closed. PRD6 is implemented 
 
 Search Lab supports manual full-text and vector index rebuilds, query execution through the unified retrieval API, full-text/vector/hybrid mode selection, reranking strategy selection, candidate-pool and RRF controls, metadata boost level selection, top-k selection, document/section/source filters, table/figure/patent metadata filters, BM25/dense/RRF/rerank/boost/final score display, snippets or chunk previews, matched fields where available, and source navigation for matched chunks.
 
+PRD17 is in the backlog to clarify Search Lab result labels by separating chunk-level facts, document-level hints, parser hints, and active filters.
+
 The candidate pool defaults to `top_k * 5`, RRF defaults to `60`, and metadata boosts use user-selectable High/Medium/Low levels. Cross-encoder reranking requires its configured model in the backend's local model cache. Diversity/MMR is intentionally displayed as a future option.
 
 Bulk patent-data workflows are planned separately in PRD12.
