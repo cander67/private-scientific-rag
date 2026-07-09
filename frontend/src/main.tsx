@@ -298,6 +298,7 @@ type ChatQuestionResponse = {
 
 type ChatReadinessItem = {
   ready: boolean;
+  status: "ready" | "missing" | "partial" | "stale";
   message: string;
   indexed_chunks: number | null;
   model: string | null;
@@ -742,18 +743,66 @@ function App() {
     if (!repository || !selectedDocumentId) {
       return;
     }
+    await deleteDocument(selectedDocumentId);
+  }
+
+  async function deleteDocument(documentId: string) {
+    if (!repository) {
+      return;
+    }
+    const document = documents.find((item) => item.id === documentId);
+    const confirmed = window.confirm(`Delete ${document?.display_name ?? "this document"}?`);
+    if (!confirmed) {
+      return;
+    }
     setBusy(true);
     setMessage("Deleting document");
     try {
-      await fetch(`${API_BASE}/repositories/${repository.id}/documents/${selectedDocumentId}`, {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/documents/${documentId}`, {
         method: "DELETE",
       });
-      setSelectedDocumentId(null);
-      setInspection(null);
+      if (!response.ok) {
+        throw new Error("delete failed");
+      }
+      if (selectedDocumentId === documentId) {
+        setSelectedDocumentId(null);
+        setInspection(null);
+      }
       await loadDocuments(repository.id);
+      await loadChatReadiness(repository.id);
       setMessage("Deleted");
     } catch {
       setMessage("Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteAllDocuments() {
+    if (!repository || documents.length === 0) {
+      return;
+    }
+    const confirmed = window.confirm("Delete all documents in this repository?");
+    if (!confirmed) {
+      return;
+    }
+    setBusy(true);
+    setMessage("Deleting all documents");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/documents`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error("delete all failed");
+      }
+      setSelectedDocumentId(null);
+      setInspection(null);
+      setSelectedChunkId(null);
+      await loadDocuments(repository.id);
+      await loadChatReadiness(repository.id);
+      setMessage("All documents deleted");
+    } catch {
+      setMessage("Delete all failed");
     } finally {
       setBusy(false);
     }
@@ -967,16 +1016,26 @@ function App() {
             </div>
             <div className="topbar-actions">
               {activeView === "documents" && (
-                <label className="btn btn-primary upload-button">
-                  Upload documents
-                  <input
-                    type="file"
-                    multiple
-                    accept=".pdf,.txt,.md,.markdown,.ann,application/pdf,text/plain,text/markdown"
-                    onChange={(event) => void uploadFiles(event.target.files)}
-                    disabled={busy || !repository}
-                  />
-                </label>
+                <>
+                  <label className="btn btn-primary upload-button">
+                    Upload documents
+                    <input
+                      type="file"
+                      multiple
+                      accept=".pdf,.txt,.md,.markdown,.ann,application/pdf,text/plain,text/markdown"
+                      onChange={(event) => void uploadFiles(event.target.files)}
+                      disabled={busy || !repository}
+                    />
+                  </label>
+                  <button
+                    className="btn btn-ghost danger-action"
+                    type="button"
+                    onClick={() => void deleteAllDocuments()}
+                    disabled={busy || documents.length === 0}
+                  >
+                    Delete all
+                  </button>
+                </>
               )}
               <button
                 className="theme-toggle"
@@ -1158,16 +1217,26 @@ function App() {
                                       : "—"}
                                   </td>
                                   <td>
-                                    <button
-                                      className="btn btn-sm btn-ghost"
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedDocumentId(document.id);
-                                        navigateTo("source");
-                                      }}
-                                    >
-                                      Inspect
-                                    </button>
+                                    <div className="row table-actions">
+                                      <button
+                                        className="btn btn-sm btn-ghost"
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedDocumentId(document.id);
+                                          navigateTo("source");
+                                        }}
+                                      >
+                                        Inspect
+                                      </button>
+                                      <button
+                                        className="btn btn-sm btn-ghost danger-action"
+                                        type="button"
+                                        onClick={() => void deleteDocument(document.id)}
+                                        disabled={busy}
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               ))
@@ -1440,53 +1509,53 @@ function ChatWorkspace({
   return (
     <>
       <div className="chat-layout">
-        <aside className="card card-pad-sm session-list">
-          <div className="row row-between session-head">
-            <div className="eyebrow">Sessions</div>
-            <div className="row session-actions">
-              <button className="btn btn-sm btn-ghost" type="button" onClick={onCreateSession} disabled={busy}>
-                New
-              </button>
-              <button
-                className="btn btn-sm btn-ghost danger-action"
-                type="button"
-                onClick={onClearSessions}
-                disabled={busy || sessions.length === 0}
-              >
-                Clear all
-              </button>
-            </div>
-          </div>
-          {sessions.length > 0 ? (
-            sessions.map((session) => (
-              <div
-                className={session.id === activeSession?.id ? "session-item active" : "session-item"}
-                key={session.id}
-              >
-                <button type="button" onClick={() => onSelectSession(session.id)}>
-                  <span>{session.title}</span>
-                  <small>
-                    {formatDate(session.updated_at)} · {session.messages.length} msgs
-                  </small>
+        <aside className="chat-side">
+          <div className="card card-pad-sm session-list">
+            <div className="row row-between session-head">
+              <div className="eyebrow">Sessions</div>
+              <div className="row session-actions">
+                <button className="btn btn-sm btn-ghost" type="button" onClick={onCreateSession} disabled={busy}>
+                  New
                 </button>
                 <button
-                  className="session-delete"
+                  className="btn btn-sm btn-ghost danger-action"
                   type="button"
-                  onClick={() => onDeleteSession(session.id)}
-                  disabled={busy}
-                  aria-label={`Delete ${session.title}`}
+                  onClick={onClearSessions}
+                  disabled={busy || sessions.length === 0}
                 >
-                  x
+                  Clear all
                 </button>
               </div>
-            ))
-          ) : (
-            <p className="muted">No saved chats yet.</p>
-          )}
-        </aside>
+            </div>
+            {sessions.length > 0 ? (
+              sessions.map((session) => (
+                <div
+                  className={session.id === activeSession?.id ? "session-item active" : "session-item"}
+                  key={session.id}
+                >
+                  <button type="button" onClick={() => onSelectSession(session.id)}>
+                    <span>{session.title}</span>
+                    <small>
+                      {formatDate(session.updated_at)} · {session.messages.length} msgs
+                    </small>
+                  </button>
+                  <button
+                    className="session-delete"
+                    type="button"
+                    onClick={() => onDeleteSession(session.id)}
+                    disabled={busy}
+                    aria-label={`Delete ${session.title}`}
+                  >
+                    x
+                  </button>
+                </div>
+              ))
+            ) : (
+              <p className="muted">No saved chats yet.</p>
+            )}
+          </div>
 
-        <section className="chat-main">
-          <div className="card chat-settings-panel">
+          <div className="card card-pad-sm chat-settings-panel">
             <div className="row row-between">
               <div>
                 <div className="eyebrow">Chat retrieval</div>
@@ -1597,8 +1666,13 @@ function ChatWorkspace({
               </span>
             </div>
           </div>
+        </aside>
 
-          <div className="chat-thread" ref={threadRef}>
+        <section className="chat-main">
+          <div
+            className={activeSession?.messages.length || busy ? "chat-thread" : "chat-thread chat-thread-empty"}
+            ref={threadRef}
+          >
             {activeSession?.messages.length ? (
               activeSession.messages.map((chatMessage) => (
                 <ChatBubble
@@ -1633,7 +1707,12 @@ function ChatWorkspace({
                 value={input}
                 onChange={(event) => onInputChange(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
                     onAsk();
                   }
                 }}
@@ -1710,10 +1789,12 @@ function ChatWorkspace({
 
 function ReadinessPill({ label, item }: { label: string; item: ChatReadinessItem | null }) {
   const ready = item?.ready === true;
+  const status = item?.status ?? "missing";
+  const statusLabel = status === "partial" ? "Partial" : status === "stale" ? "Stale" : ready ? "Ready" : "Needed";
   return (
-    <div className={ready ? "readiness-pill ready" : "readiness-pill missing"}>
+    <div className={`readiness-pill ${status}`} data-readiness-status={status}>
       <span>{label}</span>
-      <b>{ready ? "Ready" : "Needed"}</b>
+      <b>{statusLabel}</b>
       <small>{item?.message ?? "Not checked yet"}</small>
     </div>
   );

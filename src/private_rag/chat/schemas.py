@@ -9,6 +9,7 @@ from private_rag.chat.llm import ChatModelInfo
 from private_rag.retrieval.schemas import RerankerStrategy, RetrievalMode
 
 ChatRole = Literal["user", "assistant"]
+ChatReadinessStatus = Literal["ready", "missing", "partial", "stale"]
 
 
 class ChatRetrievalSettings(BaseModel):
@@ -89,6 +90,7 @@ class ChatModelSmokeResponse(BaseModel):
 
 class ChatReadinessItem(BaseModel):
     ready: bool
+    status: ChatReadinessStatus
     message: str
     indexed_chunks: int | None = None
     model: str | None = None

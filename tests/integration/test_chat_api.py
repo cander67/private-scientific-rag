@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Generator
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -15,7 +15,9 @@ from private_rag.api.routes.vector import get_embedding_provider, get_vector_sto
 from private_rag.chat.llm import ChatCompletion, ChatMessage
 from private_rag.db.base import Base
 from private_rag.retrieval.schemas import RetrievalSearchResult
+from private_rag.search.service import FTS_TABLE
 from private_rag.vector.embeddings import DeterministicEmbeddingProvider
+from private_rag.vector.models import EmbeddingRun
 from private_rag.vector.store import InMemoryVectorStore
 
 
@@ -41,7 +43,7 @@ class _FakeReranker:
         return [1.0 - index * 0.01 for index, _ in enumerate(results)]
 
 
-def _client_with_chat_fakes() -> tuple[TestClient, _FakeLLM]:
+def _client_with_chat_fakes_and_database() -> tuple[TestClient, _FakeLLM, sessionmaker[Session]]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -63,7 +65,12 @@ def _client_with_chat_fakes() -> tuple[TestClient, _FakeLLM]:
     app.dependency_overrides[get_embedding_provider] = lambda: embedder
     app.dependency_overrides[get_reranker_provider] = lambda: _FakeReranker()
     app.dependency_overrides[get_chat_llm] = lambda: llm
-    return TestClient(app), llm
+    return TestClient(app), llm, session_factory
+
+
+def _client_with_chat_fakes() -> tuple[TestClient, _FakeLLM]:
+    client, llm, _ = _client_with_chat_fakes_and_database()
+    return client, llm
 
 
 def _default_repository_id(client: TestClient) -> str:
@@ -220,17 +227,21 @@ def test_chat_readiness_reports_index_and_model_state() -> None:
         initial_response.json()["full_text"]["message"] == "No parsed chunks are available to index"
     )
     assert initial_response.json()["full_text"]["ready"] is False
+    assert initial_response.json()["full_text"]["status"] == "missing"
     assert (
         initial_response.json()["vector"]["message"]
         == "No parsed chunks are available to embed/index"
     )
     assert initial_response.json()["vector"]["ready"] is False
+    assert initial_response.json()["vector"]["status"] == "missing"
     assert initial_response.json()["local_model"]["ready"] is True
     assert initial_response.json()["ready_for_chat"] is False
     assert ready_response.status_code == 200
     assert ready_response.json()["parsed_chunks"] == 1
     assert ready_response.json()["full_text"]["ready"] is True
+    assert ready_response.json()["full_text"]["status"] == "ready"
     assert ready_response.json()["vector"]["ready"] is True
+    assert ready_response.json()["vector"]["status"] == "ready"
     assert ready_response.json()["ready_for_chat"] is True
 
 
@@ -254,10 +265,121 @@ def test_chat_readiness_distinguishes_parsed_but_unindexed_repository() -> None:
     payload = response.json()
     assert payload["parsed_chunks"] == 1
     assert payload["full_text"]["ready"] is False
+    assert payload["full_text"]["status"] == "missing"
     assert payload["full_text"]["message"] == "Full-text index has not been rebuilt"
     assert payload["vector"]["ready"] is False
+    assert payload["vector"]["status"] == "missing"
     assert payload["vector"]["message"] == "Vector index has not been rebuilt"
     assert payload["ready_for_chat"] is False
+
+
+def test_chat_readiness_reports_partial_and_stale_indexes() -> None:
+    client, _, session_factory = _client_with_chat_fakes_and_database()
+    repository_id = _default_repository_id(client)
+    client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "chat-indexed.txt",
+                b"Abstract\nThe first indexed chunk mentions LiFePO4.\n",
+                "text/plain",
+            )
+        },
+    )
+    client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    client.post(f"/repositories/{repository_id}/vector/rebuild")
+    client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "chat-unindexed-new.txt",
+                b"Abstract\nThe second parsed chunk is not indexed yet.\n",
+                "text/plain",
+            )
+        },
+    )
+
+    partial_response = client.get(f"/repositories/{repository_id}/chat/readiness")
+    with session_factory() as session:
+        for index in range(2):
+            session.execute(
+                text(
+                    f"""
+                    INSERT INTO {FTS_TABLE} (
+                        repository_id, document_id, document_version_id, chunk_id, chunk_index,
+                        document_title, section, source_type, document_kind, tags,
+                        has_table, has_figure, patent_sections,
+                        page_start, page_end, line_start, line_end,
+                        title, headings, body, captions, tables, claims, examples
+                    )
+                    VALUES (
+                        :repository_id, :document_id, :document_version_id, :chunk_id, :chunk_index,
+                        :document_title, :section, :source_type, :document_kind, :tags,
+                        :has_table, :has_figure, :patent_sections,
+                        :page_start, :page_end, :line_start, :line_end,
+                        :title, :headings, :body, :captions, :tables, :claims, :examples
+                    )
+                    """
+                ),
+                {
+                    "repository_id": repository_id,
+                    "document_id": f"stale-document-{index}",
+                    "document_version_id": f"stale-version-{index}",
+                    "chunk_id": f"stale-chunk-{index}",
+                    "chunk_index": 100 + index,
+                    "document_title": "stale.txt",
+                    "section": "Abstract",
+                    "source_type": "text",
+                    "document_kind": None,
+                    "tags": "",
+                    "has_table": 0,
+                    "has_figure": 0,
+                    "patent_sections": "",
+                    "page_start": None,
+                    "page_end": None,
+                    "line_start": 1,
+                    "line_end": 1,
+                    "title": "stale.txt",
+                    "headings": "Abstract",
+                    "body": "Stale indexed chunk",
+                    "captions": "",
+                    "tables": "",
+                    "claims": "",
+                    "examples": "",
+                },
+            )
+        embedding_run = session.scalar(
+            text("SELECT id FROM embedding_runs WHERE repository_id = :repository_id"),
+            {"repository_id": repository_id},
+        )
+        assert embedding_run is not None
+        session.query(EmbeddingRun).filter(EmbeddingRun.repository_id == repository_id).update(
+            {"chunk_count": 3}
+        )
+        session.commit()
+    stale_response = client.get(f"/repositories/{repository_id}/chat/readiness")
+
+    assert partial_response.status_code == 200
+    partial_payload = partial_response.json()
+    assert partial_payload["parsed_chunks"] == 2
+    assert partial_payload["full_text"]["ready"] is False
+    assert partial_payload["full_text"]["status"] == "partial"
+    assert partial_payload["full_text"]["message"] == "1 of 2 full-text chunks indexed"
+    assert partial_payload["vector"]["ready"] is False
+    assert partial_payload["vector"]["status"] == "partial"
+    assert partial_payload["vector"]["message"] == "1 of 2 vector chunks indexed"
+    assert partial_payload["ready_for_chat"] is False
+
+    assert stale_response.status_code == 200
+    stale_payload = stale_response.json()
+    assert stale_payload["parsed_chunks"] == 2
+    assert stale_payload["full_text"]["ready"] is False
+    assert stale_payload["full_text"]["status"] == "stale"
+    assert "rebuild recommended" in stale_payload["full_text"]["message"]
+    assert stale_payload["vector"]["ready"] is False
+    assert stale_payload["vector"]["status"] == "stale"
+    assert "rebuild recommended" in stale_payload["vector"]["message"]
+    assert stale_payload["ready_for_chat"] is False
 
 
 def test_chat_sessions_can_be_deleted_individually_and_cleared() -> None:

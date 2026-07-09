@@ -42,6 +42,9 @@ test("Chat Workspace exposes retrieval readiness and explicit rebuild controls",
   assert.match(source, /ReadinessPill/);
   assert.match(source, /chatReadyForSelectedMode/);
   assert.match(source, /Repository context not ready/);
+  assert.match(source, /data-readiness-status=\{status\}/);
+  assert.match(source, /status === "partial"/);
+  assert.match(source, /status === "stale"/);
   assert.match(source, /Rebuild full-text/);
   assert.match(source, /Rebuild vector/);
   assert.match(source, /chat-mode/);
@@ -60,14 +63,34 @@ test("Chat Workspace supports thinking state and session deletion", () => {
   assert.match(source, /Clear all/);
 });
 
-test("Chat Workspace keeps messages scrollable with composer at the bottom", async () => {
+test("Chat Workspace lets the composer hug chat output until scrolling is needed", async () => {
   const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
   assert.match(source, /useRef/);
   assert.match(source, /threadRef/);
   assert.match(source, /chat-composer/);
+  assert.match(source, /chat-thread chat-thread-empty/);
   assert.match(styles, /\.chat-thread[\s\S]*overflow-y: auto/);
   assert.match(styles, /\.chat-main[\s\S]*flex-direction: column/);
-  assert.match(styles, /\.chat-thread[\s\S]*flex: 1/);
+  assert.match(styles, /\.chat-main[\s\S]*max-height: calc\(100vh - 132px\)/);
+  assert.match(styles, /\.chat-main[\s\S]*overflow: hidden/);
+  assert.match(styles, /\.chat-thread[\s\S]*min-height: 0/);
+  assert.match(styles, /\.chat-thread[\s\S]*flex: 0 1 auto/);
+  assert.match(styles, /\.chat-thread-empty[\s\S]*flex: 0 0 auto/);
   assert.match(styles, /\.chat-composer/);
+});
+
+test("Chat Workspace submits on Enter and keeps Shift Enter for new lines", () => {
+  assert.match(source, /event\.key === "Enter"/);
+  assert.match(source, /!event\.shiftKey/);
+  assert.match(source, /event\.preventDefault\(\)/);
+  assert.match(source, /event\.nativeEvent\.isComposing/);
+});
+
+test("Chat retrieval panel lives below sessions in the left column", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(source, /className="chat-side"[\s\S]*className="card card-pad-sm session-list"[\s\S]*className="card card-pad-sm chat-settings-panel"/);
+  assert.match(styles, /\.chat-side[\s\S]*flex-direction: column/);
+  assert.match(styles, /\.chat-settings-controls[\s\S]*grid-template-columns: 1fr/);
 });

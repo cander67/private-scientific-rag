@@ -167,6 +167,31 @@ def test_upload_markdown_and_annotation_then_inspect_and_delete() -> None:
     assert deleted_inspection.status_code == 404
 
 
+def test_delete_all_repository_documents() -> None:
+    client = _client_with_database()
+    repository_id = client.get("/repositories/default").json()["repository"]["id"]
+    first_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("first.txt", b"first document\n", "text/plain")},
+    )
+    second_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("second.txt", b"second document\n", "text/plain")},
+    )
+
+    delete_response = client.delete(f"/repositories/{repository_id}/documents")
+    documents_response = client.get(f"/repositories/{repository_id}/documents")
+    first_inspection = client.get(
+        f"/repositories/{repository_id}/documents/{first_response.json()['document']['id']}"
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert delete_response.status_code == 204
+    assert documents_response.json() == []
+    assert first_inspection.status_code == 404
+
+
 def test_annotation_upload_links_to_matching_text_file() -> None:
     client = _client_with_database()
     repository_id = client.get("/repositories/default").json()["repository"]["id"]
