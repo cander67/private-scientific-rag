@@ -41,9 +41,9 @@ Current status:
 - PRD2 repository-aware settings and reproducibility are complete.
 - PRD3 local document ingestion and source inspection are complete.
 - PRD4 full-text search is complete: sparse index rebuild, full-text query API, metadata filters, exact-match evaluation, and frontend Search Lab are available.
-- PRD5 vector search with Qdrant is complete and closed: latest-index rebuild, vector query API, metadata filters, embedding run metadata, deterministic CI tests, semantic recall evaluation, and frontend Search Lab vector mode are available.
-- PRD6 hybrid search and reranking is implemented and ready for review: unified retrieval search, retrieval run/result persistence, five-history retention, hybrid orchestration, Reciprocal Rank Fusion, selectable reranking, comparison evaluation, and Search Lab controls are available.
-- PRD17 search metadata quality and result labeling is in the backlog: parsing, indexing, retrieval, and Search Lab should distinguish chunk-level facts from document-level hints, parser hints, and active filters.
+- PRD5 vector search with Qdrant is complete: latest-index rebuild, vector query API, metadata filters, embedding run metadata, deterministic CI tests, semantic recall evaluation, and frontend Search Lab vector mode are available.
+- PRD6 hybrid search and reranking is complete: unified retrieval search, retrieval run/result persistence, five-history retention, hybrid orchestration, Reciprocal Rank Fusion, selectable reranking, comparison evaluation, and Search Lab controls are available.
+- PRD7 local RAG chat with citations is in progress.
 
 The default cross-encoder is `cross-encoder/ms-marco-MiniLM-L6-v2`. It must be downloaded into the local SentenceTransformers cache before live reranking; a missing model returns setup guidance instead of silently falling back. Diversity/MMR remains a future strategy. Default CI uses deterministic providers, while real Qdrant and cross-encoder checks are explicit opt-in tests documented in `tests/README.md`.
 
