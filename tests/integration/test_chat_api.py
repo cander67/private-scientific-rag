@@ -145,3 +145,104 @@ def test_chat_session_persists_messages_and_mapped_citations() -> None:
         "user",
         "assistant",
     ]
+
+
+def test_chat_question_updates_session_retrieval_settings() -> None:
+    client, _ = _client_with_chat_fakes()
+    repository_id = _default_repository_id(client)
+    client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "chat-settings.txt",
+                b"Abstract\nLiFePO4 cathodes retain capacity during cycling.\n",
+                "text/plain",
+            )
+        },
+    )
+    client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    client.post(f"/repositories/{repository_id}/vector/rebuild")
+    session_response = client.post(
+        f"/repositories/{repository_id}/chat/sessions",
+        json={
+            "title": "Retrieval controls",
+            "retrieval_settings": {
+                "mode": "hybrid",
+                "top_k": 3,
+                "reranker_strategy": "none",
+            },
+        },
+    )
+
+    chat_session_id = session_response.json()["id"]
+    response = client.post(
+        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}/messages",
+        json={
+            "content": "What does the repository say about LiFePO4?",
+            "retrieval_settings": {
+                "mode": "hybrid",
+                "top_k": 5,
+                "reranker_strategy": "cross_encoder",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["session"]["retrieval_settings"] == {
+        "mode": "hybrid",
+        "top_k": 5,
+        "reranker_strategy": "cross_encoder",
+    }
+
+
+def test_chat_readiness_reports_index_and_model_state() -> None:
+    client, _ = _client_with_chat_fakes()
+    repository_id = _default_repository_id(client)
+
+    initial_response = client.get(f"/repositories/{repository_id}/chat/readiness")
+    client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "chat-readiness.txt",
+                b"Abstract\nLiFePO4 cathodes retain capacity during cycling.\n",
+                "text/plain",
+            )
+        },
+    )
+    client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    client.post(f"/repositories/{repository_id}/vector/rebuild")
+    ready_response = client.get(f"/repositories/{repository_id}/chat/readiness")
+
+    assert initial_response.status_code == 200
+    assert initial_response.json()["full_text"]["ready"] is False
+    assert initial_response.json()["vector"]["ready"] is False
+    assert initial_response.json()["local_model"]["ready"] is True
+    assert ready_response.status_code == 200
+    assert ready_response.json()["full_text"]["ready"] is True
+    assert ready_response.json()["vector"]["ready"] is True
+    assert ready_response.json()["ready_for_chat"] is True
+
+
+def test_chat_sessions_can_be_deleted_individually_and_cleared() -> None:
+    client, _ = _client_with_chat_fakes()
+    repository_id = _default_repository_id(client)
+    first = client.post(
+        f"/repositories/{repository_id}/chat/sessions",
+        json={"title": "First"},
+    ).json()
+    second = client.post(
+        f"/repositories/{repository_id}/chat/sessions",
+        json={"title": "Second"},
+    ).json()
+
+    delete_response = client.delete(f"/repositories/{repository_id}/chat/sessions/{first['id']}")
+    after_delete = client.get(f"/repositories/{repository_id}/chat/sessions")
+    clear_response = client.delete(f"/repositories/{repository_id}/chat/sessions")
+    after_clear = client.get(f"/repositories/{repository_id}/chat/sessions")
+
+    assert second["id"]
+    assert delete_response.status_code == 204
+    assert [session["title"] for session in after_delete.json()] == ["Second"]
+    assert clear_response.status_code == 204
+    assert after_clear.json() == []

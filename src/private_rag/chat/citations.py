@@ -40,6 +40,7 @@ def map_citations(
                 metadata=result.metadata,
                 retrieval_rank=result.rank,
                 score_breakdown=result.score_breakdown,
+                text_preview=result.snippet or result.text_preview,
             )
         )
     return citations

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select, text
 from sqlalchemy.orm import Session
 
 from private_rag.chat.citations import map_citations
@@ -11,6 +11,9 @@ from private_rag.chat.schemas import (
     ChatMessageRead,
     ChatModelRegistryResponse,
     ChatQuestionResponse,
+    ChatReadinessItem,
+    ChatReadinessResponse,
+    ChatRetrievalSettings,
     ChatSessionRead,
 )
 from private_rag.repositories.models import Repository
@@ -18,7 +21,9 @@ from private_rag.repositories.schemas import RepositorySettings
 from private_rag.retrieval.rerankers import RerankerProvider
 from private_rag.retrieval.schemas import RetrievalSearchRequest, RetrievalSearchResult
 from private_rag.retrieval.service import search_retrieval
+from private_rag.search.service import FTS_TABLE
 from private_rag.vector.embeddings import EmbeddingProvider
+from private_rag.vector.models import EmbeddingRun
 from private_rag.vector.store import VectorStore
 
 DEFAULT_CHAT_TOP_K = 6
@@ -35,6 +40,7 @@ def create_chat_session(
     repository_id: str,
     title: str | None,
     model: str | None,
+    retrieval_settings: ChatRetrievalSettings | None = None,
 ) -> ChatSessionRead | None:
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
@@ -44,7 +50,7 @@ def create_chat_session(
         repository_id=repository_id,
         title=title or "New chat",
         model=model or settings.model.ollama_chat_model,
-        retrieval_settings=_default_retrieval_settings(),
+        retrieval_settings=(retrieval_settings or ChatRetrievalSettings()).model_dump(mode="json"),
         prompt_id=settings.prompt.active_chat_prompt_id,
     )
     session.add(chat_session)
@@ -79,6 +85,35 @@ def get_chat_session(
     return _session_read(chat_session)
 
 
+def delete_chat_session(
+    session: Session,
+    *,
+    repository_id: str,
+    chat_session_id: str,
+) -> bool | None:
+    repository = session.get(Repository, repository_id)
+    if repository is None:
+        return None
+    chat_session = session.get(ChatSession, chat_session_id)
+    if chat_session is None or chat_session.repository_id != repository_id:
+        return False
+    session.delete(chat_session)
+    session.commit()
+    return True
+
+
+def clear_chat_sessions(session: Session, *, repository_id: str) -> int | None:
+    repository = session.get(Repository, repository_id)
+    if repository is None:
+        return None
+    session_ids = list(
+        session.scalars(select(ChatSession.id).where(ChatSession.repository_id == repository_id))
+    )
+    session.execute(delete(ChatSession).where(ChatSession.repository_id == repository_id))
+    session.commit()
+    return len(session_ids)
+
+
 def ask_chat_question(
     session: Session,
     *,
@@ -89,6 +124,7 @@ def ask_chat_question(
     embedder: EmbeddingProvider,
     reranker: RerankerProvider,
     llm: ChatLLM,
+    retrieval_settings: ChatRetrievalSettings | None = None,
 ) -> ChatQuestionResponse | None:
     chat_session = session.get(ChatSession, chat_session_id)
     repository = session.get(Repository, repository_id)
@@ -101,6 +137,13 @@ def ask_chat_question(
         return None
 
     settings = RepositorySettings.model_validate(repository.settings.settings)
+    resolved_retrieval_settings = retrieval_settings or ChatRetrievalSettings.model_validate(
+        chat_session.retrieval_settings
+    )
+    chat_session.retrieval_settings = resolved_retrieval_settings.model_dump(mode="json")
+    session.add(chat_session)
+    session.commit()
+    session.refresh(chat_session)
     user_message = _append_message(
         session,
         chat_session=chat_session,
@@ -115,9 +158,9 @@ def ask_chat_question(
         repository_id=repository_id,
         request=RetrievalSearchRequest(
             query=question,
-            mode="hybrid",
-            top_k=DEFAULT_CHAT_TOP_K,
-            reranker_strategy="cross_encoder",
+            mode=resolved_retrieval_settings.mode,
+            top_k=resolved_retrieval_settings.top_k,
+            reranker_strategy=resolved_retrieval_settings.reranker_strategy,
         ),
         store=store,
         embedder=embedder,
@@ -180,6 +223,60 @@ def build_chat_prompt(
     return messages
 
 
+def chat_readiness(
+    session: Session,
+    *,
+    repository_id: str,
+    llm: ChatLLM,
+    model: str,
+) -> ChatReadinessResponse | None:
+    repository = session.get(Repository, repository_id)
+    if repository is None:
+        return None
+
+    full_text_count = _full_text_count(session, repository_id)
+    embedding_run = session.scalar(
+        select(EmbeddingRun).where(EmbeddingRun.repository_id == repository_id)
+    )
+    vector_ready = embedding_run is not None and embedding_run.status == "indexed"
+    try:
+        completion = llm.smoke(model=model)
+        local_model = ChatReadinessItem(
+            ready=bool(completion.content.strip()),
+            message=f"{completion.model} responded",
+            model=completion.model,
+        )
+    except RuntimeError as exc:
+        local_model = ChatReadinessItem(ready=False, message=str(exc), model=model)
+
+    full_text = ChatReadinessItem(
+        ready=full_text_count > 0,
+        message=(
+            f"{full_text_count} full-text chunks indexed"
+            if full_text_count > 0
+            else "Full-text index has not been rebuilt"
+        ),
+        indexed_chunks=full_text_count,
+    )
+    vector = ChatReadinessItem(
+        ready=vector_ready,
+        message=(
+            f"{embedding_run.chunk_count} vector chunks indexed"
+            if embedding_run is not None and vector_ready
+            else "Vector index has not been rebuilt"
+        ),
+        indexed_chunks=embedding_run.chunk_count if embedding_run is not None else 0,
+        model=embedding_run.model if embedding_run is not None else None,
+    )
+    return ChatReadinessResponse(
+        repository_id=repository_id,
+        full_text=full_text,
+        vector=vector,
+        local_model=local_model,
+        ready_for_chat=full_text.ready and vector.ready and local_model.ready,
+    )
+
+
 def _context_line(*, index: int, result: RetrievalSearchResult) -> str:
     text = result.snippet or result.text_preview or ""
     page = _page_label(result.page_start, result.page_end)
@@ -224,11 +321,19 @@ def _append_message(
 
 
 def _default_retrieval_settings() -> dict[str, object]:
-    return {
-        "mode": "hybrid",
-        "top_k": DEFAULT_CHAT_TOP_K,
-        "reranker_strategy": "cross_encoder",
-    }
+    return ChatRetrievalSettings(top_k=DEFAULT_CHAT_TOP_K).model_dump(mode="json")
+
+
+def _full_text_count(session: Session, repository_id: str) -> int:
+    try:
+        value = session.scalar(
+            text(f"SELECT COUNT(*) FROM {FTS_TABLE} WHERE repository_id = :repository_id"),
+            {"repository_id": repository_id},
+        )
+    except Exception:
+        session.rollback()
+        return 0
+    return int(value or 0)
 
 
 def _session_read(
@@ -241,7 +346,7 @@ def _session_read(
         repository_id=chat_session.repository_id,
         title=chat_session.title,
         model=chat_session.model,
-        retrieval_settings=chat_session.retrieval_settings,
+        retrieval_settings=ChatRetrievalSettings.model_validate(chat_session.retrieval_settings),
         prompt_id=chat_session.prompt_id,
         created_at=chat_session.created_at,
         updated_at=chat_session.updated_at,

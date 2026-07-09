@@ -14,12 +14,16 @@ from private_rag.chat.schemas import (
     ChatModelSmokeResponse,
     ChatQuestionRequest,
     ChatQuestionResponse,
+    ChatReadinessResponse,
     ChatSessionCreate,
     ChatSessionRead,
 )
 from private_rag.chat.service import (
     ask_chat_question,
+    chat_readiness,
+    clear_chat_sessions,
     create_chat_session,
+    delete_chat_session,
     get_chat_session,
     list_chat_sessions,
     model_registry,
@@ -55,6 +59,23 @@ def smoke_chat_model(llm: ChatLLMDependency) -> ChatModelSmokeResponse:
     return ChatModelSmokeResponse(model=completion.model, ok=True, response=completion.content)
 
 
+@router.get("/readiness", response_model=ChatReadinessResponse)
+def read_chat_readiness(
+    repository_id: str,
+    session: DbSession,
+    llm: ChatLLMDependency,
+) -> ChatReadinessResponse:
+    response = chat_readiness(
+        session,
+        repository_id=repository_id,
+        llm=llm,
+        model=get_settings().default_llm,
+    )
+    if response is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return response
+
+
 @router.get("/sessions", response_model=list[ChatSessionRead])
 def read_chat_sessions(repository_id: str, session: DbSession) -> list[ChatSessionRead]:
     sessions = list_chat_sessions(session, repository_id=repository_id)
@@ -74,10 +95,18 @@ def create_repository_chat_session(
         repository_id=repository_id,
         title=request.title,
         model=request.model,
+        retrieval_settings=request.retrieval_settings,
     )
     if chat_session is None:
         raise HTTPException(status_code=404, detail="Repository not found")
     return chat_session
+
+
+@router.delete("/sessions", status_code=204)
+def clear_repository_chat_sessions(repository_id: str, session: DbSession) -> None:
+    deleted = clear_chat_sessions(session, repository_id=repository_id)
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
 
 
 @router.get("/sessions/{chat_session_id}", response_model=ChatSessionRead)
@@ -94,6 +123,23 @@ def read_chat_session(
     if chat_session is None:
         raise HTTPException(status_code=404, detail="Chat session not found")
     return chat_session
+
+
+@router.delete("/sessions/{chat_session_id}", status_code=204)
+def delete_repository_chat_session(
+    repository_id: str,
+    chat_session_id: str,
+    session: DbSession,
+) -> None:
+    deleted = delete_chat_session(
+        session,
+        repository_id=repository_id,
+        chat_session_id=chat_session_id,
+    )
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    if deleted is False:
+        raise HTTPException(status_code=404, detail="Chat session not found")
 
 
 @router.post("/sessions/{chat_session_id}/messages", response_model=ChatQuestionResponse)
@@ -117,6 +163,7 @@ def ask_repository_chat_question(
             embedder=embedder,
             reranker=reranker,
             llm=llm,
+            retrieval_settings=request.retrieval_settings,
         )
     except CrossEncoderModelMissingError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
