@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from private_rag.chat.citations import map_citations
@@ -16,6 +16,7 @@ from private_rag.chat.schemas import (
     ChatRetrievalSettings,
     ChatSessionRead,
 )
+from private_rag.ingestion.models import DocumentChunk
 from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
 from private_rag.retrieval.rerankers import RerankerProvider
@@ -234,11 +235,17 @@ def chat_readiness(
     if repository is None:
         return None
 
+    parsed_chunks = _parsed_chunk_count(session, repository_id)
     full_text_count = _full_text_count(session, repository_id)
     embedding_run = session.scalar(
         select(EmbeddingRun).where(EmbeddingRun.repository_id == repository_id)
     )
-    vector_ready = embedding_run is not None and embedding_run.status == "indexed"
+    vector_ready = (
+        parsed_chunks > 0
+        and embedding_run is not None
+        and embedding_run.status == "indexed"
+        and embedding_run.chunk_count > 0
+    )
     try:
         completion = llm.smoke(model=model)
         local_model = ChatReadinessItem(
@@ -250,30 +257,23 @@ def chat_readiness(
         local_model = ChatReadinessItem(ready=False, message=str(exc), model=model)
 
     full_text = ChatReadinessItem(
-        ready=full_text_count > 0,
-        message=(
-            f"{full_text_count} full-text chunks indexed"
-            if full_text_count > 0
-            else "Full-text index has not been rebuilt"
-        ),
+        ready=parsed_chunks > 0 and full_text_count > 0,
+        message=_full_text_readiness_message(parsed_chunks, full_text_count),
         indexed_chunks=full_text_count,
     )
     vector = ChatReadinessItem(
         ready=vector_ready,
-        message=(
-            f"{embedding_run.chunk_count} vector chunks indexed"
-            if embedding_run is not None and vector_ready
-            else "Vector index has not been rebuilt"
-        ),
+        message=_vector_readiness_message(parsed_chunks, embedding_run),
         indexed_chunks=embedding_run.chunk_count if embedding_run is not None else 0,
         model=embedding_run.model if embedding_run is not None else None,
     )
     return ChatReadinessResponse(
         repository_id=repository_id,
+        parsed_chunks=parsed_chunks,
         full_text=full_text,
         vector=vector,
         local_model=local_model,
-        ready_for_chat=full_text.ready and vector.ready and local_model.ready,
+        ready_for_chat=parsed_chunks > 0 and full_text.ready and vector.ready and local_model.ready,
     )
 
 
@@ -334,6 +334,39 @@ def _full_text_count(session: Session, repository_id: str) -> int:
         session.rollback()
         return 0
     return int(value or 0)
+
+
+def _parsed_chunk_count(session: Session, repository_id: str) -> int:
+    value = session.scalar(
+        select(func.count())
+        .select_from(DocumentChunk)
+        .where(DocumentChunk.repository_id == repository_id)
+    )
+    return int(value or 0)
+
+
+def _full_text_readiness_message(parsed_chunks: int, indexed_chunks: int) -> str:
+    if parsed_chunks == 0:
+        return "No parsed chunks are available to index"
+    if indexed_chunks == 0:
+        return "Full-text index has not been rebuilt"
+    if indexed_chunks < parsed_chunks:
+        return f"{indexed_chunks} of {parsed_chunks} full-text chunks indexed"
+    return f"{indexed_chunks} full-text chunks indexed"
+
+
+def _vector_readiness_message(parsed_chunks: int, embedding_run: EmbeddingRun | None) -> str:
+    if parsed_chunks == 0:
+        return "No parsed chunks are available to embed/index"
+    if embedding_run is None:
+        return "Vector index has not been rebuilt"
+    if embedding_run.status != "indexed":
+        return f"Vector index status is {embedding_run.status}"
+    if embedding_run.chunk_count == 0:
+        return "Vector index exists but contains zero chunks"
+    if embedding_run.chunk_count < parsed_chunks:
+        return f"{embedding_run.chunk_count} of {parsed_chunks} vector chunks indexed"
+    return f"{embedding_run.chunk_count} vector chunks indexed"
 
 
 def _session_read(

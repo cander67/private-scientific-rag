@@ -215,13 +215,49 @@ def test_chat_readiness_reports_index_and_model_state() -> None:
     ready_response = client.get(f"/repositories/{repository_id}/chat/readiness")
 
     assert initial_response.status_code == 200
+    assert initial_response.json()["parsed_chunks"] == 0
+    assert (
+        initial_response.json()["full_text"]["message"] == "No parsed chunks are available to index"
+    )
     assert initial_response.json()["full_text"]["ready"] is False
+    assert (
+        initial_response.json()["vector"]["message"]
+        == "No parsed chunks are available to embed/index"
+    )
     assert initial_response.json()["vector"]["ready"] is False
     assert initial_response.json()["local_model"]["ready"] is True
+    assert initial_response.json()["ready_for_chat"] is False
     assert ready_response.status_code == 200
+    assert ready_response.json()["parsed_chunks"] == 1
     assert ready_response.json()["full_text"]["ready"] is True
     assert ready_response.json()["vector"]["ready"] is True
     assert ready_response.json()["ready_for_chat"] is True
+
+
+def test_chat_readiness_distinguishes_parsed_but_unindexed_repository() -> None:
+    client, _ = _client_with_chat_fakes()
+    repository_id = _default_repository_id(client)
+    client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "chat-unindexed.txt",
+                b"Abstract\nLiFePO4 cathodes retain capacity during cycling.\n",
+                "text/plain",
+            )
+        },
+    )
+
+    response = client.get(f"/repositories/{repository_id}/chat/readiness")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["parsed_chunks"] == 1
+    assert payload["full_text"]["ready"] is False
+    assert payload["full_text"]["message"] == "Full-text index has not been rebuilt"
+    assert payload["vector"]["ready"] is False
+    assert payload["vector"]["message"] == "Vector index has not been rebuilt"
+    assert payload["ready_for_chat"] is False
 
 
 def test_chat_sessions_can_be_deleted_individually_and_cleared() -> None:

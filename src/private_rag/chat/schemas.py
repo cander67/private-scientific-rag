@@ -96,6 +96,7 @@ class ChatReadinessItem(BaseModel):
 
 class ChatReadinessResponse(BaseModel):
     repository_id: str
+    parsed_chunks: int
     full_text: ChatReadinessItem
     vector: ChatReadinessItem
     local_model: ChatReadinessItem
