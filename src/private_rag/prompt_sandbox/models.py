@@ -46,8 +46,8 @@ class SandboxRun(Base):
         index=True,
     )
     prompt_version_id: Mapped[str] = mapped_column(
-        ForeignKey("sandbox_prompt_versions.id", ondelete="RESTRICT"),
-        nullable=False,
+        ForeignKey("sandbox_prompt_versions.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     comparison_id: Mapped[str | None] = mapped_column(
@@ -88,6 +88,7 @@ class SandboxComparison(Base):
     )
     query: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    expected_run_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

@@ -18,8 +18,12 @@ test("Prompt Sandbox creates and runs persisted comparisons", () => {
   assert.match(source, /type SandboxComparison =/);
   assert.match(source, /prompt-sandbox\/prompts/);
   assert.match(source, /prompt-sandbox\/comparisons/);
+  assert.match(source, /execute_immediately: false/);
+  assert.match(source, /prompt-sandbox\/comparisons\/\$\{comparisonId\}\/runs/);
   assert.match(source, /saveSandboxPrompt/);
+  assert.match(source, /deleteSandboxPrompt/);
   assert.match(source, /runSandboxComparison/);
+  assert.match(source, /runSandboxComparisonRun/);
   assert.match(source, /sandboxComparisonRunConfigs/);
   assert.match(source, /Full-text/);
   assert.match(source, /Vector/);
@@ -30,6 +34,12 @@ test("Prompt Sandbox creates and runs persisted comparisons", () => {
 test("Prompt Sandbox renders side-by-side run cards with context links", () => {
   assert.match(source, /function PromptSandbox/);
   assert.match(source, /function SandboxRunCard/);
+  assert.match(source, /type SandboxProgressRun/);
+  assert.match(source, /progressRunsFromConfigs/);
+  assert.match(source, /pending/);
+  assert.match(source, /running/);
+  assert.match(source, /completed/);
+  assert.match(source, /failed/);
   assert.match(source, /sandbox-run-grid/);
   assert.match(source, /sandbox-run-card/);
   assert.match(source, /context_entries/);
@@ -39,4 +49,16 @@ test("Prompt Sandbox renders side-by-side run cards with context links", () => {
   assert.match(source, /View source/);
   assert.match(styles, /\.sandbox-run-grid[\s\S]*grid-template-columns: repeat\(4/);
   assert.match(styles, /\.sandbox-run-card/);
+});
+
+test("Prompt Sandbox reflects user-testing remediation states", () => {
+  assert.match(source, /Delete version/);
+  assert.match(source, /method: "DELETE"/);
+  assert.match(source, /Running comparison\.\.\./);
+  assert.match(source, /aria-busy=\{busy\}/);
+  assert.match(source, /formatLatencySeconds/);
+  assert.match(source, /toFixed\(1\)} s/);
+  assert.match(styles, /\.btn-running:disabled[\s\S]*opacity: 1/);
+  assert.match(styles, /\.sandbox-run-card-running/);
+  assert.match(styles, /\.badge-running/);
 });

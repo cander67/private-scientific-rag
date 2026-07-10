@@ -119,6 +119,20 @@ def test_sandbox_prompt_versions_copy_to_and_from_chat_library_without_changing_
     assert settings["prompt"]["active_chat_prompt_id"] == original_active_prompt_id
     assert any(entry["id"] == copied["id"] for entry in settings["prompt"]["library"])
 
+    delete_response = client.delete(
+        f"/repositories/{repository_id}/prompt-sandbox/prompts/{prompt['id']}"
+    )
+    deleted_list_response = client.get(f"/repositories/{repository_id}/prompt-sandbox/prompts")
+    deleted_read_response = client.get(
+        f"/repositories/{repository_id}/prompt-sandbox/prompts/{prompt['id']}"
+    )
+    settings_after_delete = client.get(f"/repositories/{repository_id}/settings").json()["settings"]
+
+    assert delete_response.status_code == 204
+    assert deleted_list_response.json() == []
+    assert deleted_read_response.status_code == 404
+    assert settings_after_delete["prompt"]["active_chat_prompt_id"] == original_active_prompt_id
+
 
 def test_sandbox_run_persists_prompt_snapshot_context_answer_and_citations() -> None:
     client, llm = _client_with_database()
@@ -245,53 +259,54 @@ def test_sandbox_comparison_runs_same_query_across_retrieval_configs() -> None:
     )
     assert prompt_response.status_code == 200
     prompt = prompt_response.json()
+    comparison_runs = [
+        {
+            "label": "Full-text",
+            "prompt_version_id": prompt["id"],
+            "model": "gemma3:4b",
+            "retrieval_settings": {
+                "mode": "full_text",
+                "top_k": 3,
+                "reranker_strategy": "none",
+            },
+        },
+        {
+            "label": "Vector",
+            "prompt_version_id": prompt["id"],
+            "model": "gemma3:4b",
+            "retrieval_settings": {
+                "mode": "vector",
+                "top_k": 3,
+                "reranker_strategy": "none",
+            },
+        },
+        {
+            "label": "Hybrid",
+            "prompt_version_id": prompt["id"],
+            "model": "gemma3:4b",
+            "retrieval_settings": {
+                "mode": "hybrid",
+                "top_k": 3,
+                "reranker_strategy": "none",
+            },
+        },
+        {
+            "label": "Reranked hybrid",
+            "prompt_version_id": prompt["id"],
+            "model": "gemma3:4b",
+            "retrieval_settings": {
+                "mode": "hybrid",
+                "top_k": 3,
+                "reranker_strategy": "cross_encoder",
+            },
+        },
+    ]
 
     comparison_response = client.post(
         f"/repositories/{repository_id}/prompt-sandbox/comparisons",
         json={
             "query": "LiFePO4 cathodes retain capacity cycling",
-            "runs": [
-                {
-                    "label": "Full-text",
-                    "prompt_version_id": prompt["id"],
-                    "model": "gemma3:4b",
-                    "retrieval_settings": {
-                        "mode": "full_text",
-                        "top_k": 3,
-                        "reranker_strategy": "none",
-                    },
-                },
-                {
-                    "label": "Vector",
-                    "prompt_version_id": prompt["id"],
-                    "model": "gemma3:4b",
-                    "retrieval_settings": {
-                        "mode": "vector",
-                        "top_k": 3,
-                        "reranker_strategy": "none",
-                    },
-                },
-                {
-                    "label": "Hybrid",
-                    "prompt_version_id": prompt["id"],
-                    "model": "gemma3:4b",
-                    "retrieval_settings": {
-                        "mode": "hybrid",
-                        "top_k": 3,
-                        "reranker_strategy": "none",
-                    },
-                },
-                {
-                    "label": "Reranked hybrid",
-                    "prompt_version_id": prompt["id"],
-                    "model": "gemma3:4b",
-                    "retrieval_settings": {
-                        "mode": "hybrid",
-                        "top_k": 3,
-                        "reranker_strategy": "cross_encoder",
-                    },
-                },
-            ],
+            "runs": comparison_runs,
         },
     )
 
@@ -322,3 +337,53 @@ def test_sandbox_comparison_runs_same_query_across_retrieval_configs() -> None:
 
     assert reload_response.status_code == 200
     assert reload_response.json()["runs"] == comparison["runs"]
+
+    progressive_response = client.post(
+        f"/repositories/{repository_id}/prompt-sandbox/comparisons",
+        json={
+            "query": "LiFePO4 cathodes retain capacity cycling",
+            "runs": comparison_runs,
+            "execute_immediately": False,
+        },
+    )
+
+    assert progressive_response.status_code == 200
+    progressive = progressive_response.json()
+    assert progressive["status"] == "running"
+    assert progressive["expected_run_count"] == 4
+    assert progressive["runs"] == []
+
+    first_run_response = client.post(
+        f"/repositories/{repository_id}/prompt-sandbox/comparisons/{progressive['id']}/runs",
+        json={**comparison_runs[0], "comparison_index": 0},
+    )
+    partial_reload_response = client.get(
+        f"/repositories/{repository_id}/prompt-sandbox/comparisons/{progressive['id']}",
+    )
+
+    assert first_run_response.status_code == 200
+    first_run = first_run_response.json()
+    assert first_run["status"] == "completed"
+    assert first_run["label"] == "Full-text"
+    partial = partial_reload_response.json()
+    assert partial["status"] == "running"
+    assert [run["label"] for run in partial["runs"]] == ["Full-text"]
+
+    for index, run_config in enumerate(comparison_runs[1:], start=1):
+        run_response = client.post(
+            f"/repositories/{repository_id}/prompt-sandbox/comparisons/{progressive['id']}/runs",
+            json={**run_config, "comparison_index": index},
+        )
+        assert run_response.status_code == 200
+
+    completed_reload_response = client.get(
+        f"/repositories/{repository_id}/prompt-sandbox/comparisons/{progressive['id']}",
+    )
+    completed_progressive = completed_reload_response.json()
+    assert completed_progressive["status"] == "completed"
+    assert [run["label"] for run in completed_progressive["runs"]] == [
+        "Full-text",
+        "Vector",
+        "Hybrid",
+        "Reranked hybrid",
+    ]

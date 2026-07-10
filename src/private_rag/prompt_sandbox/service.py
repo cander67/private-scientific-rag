@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from time import perf_counter
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from private_rag.chat.citations import map_citations
@@ -13,6 +13,7 @@ from private_rag.prompt_sandbox.models import SandboxComparison, SandboxPromptVe
 from private_rag.prompt_sandbox.schemas import (
     SandboxComparisonCreate,
     SandboxComparisonRead,
+    SandboxComparisonRunExecute,
     SandboxPromptCopyToChatLibraryResponse,
     SandboxPromptVersionCreate,
     SandboxPromptVersionRead,
@@ -89,6 +90,24 @@ def get_sandbox_prompt_version(
     if prompt is None or prompt.repository_id != repository_id:
         return None
     return _prompt_read(prompt)
+
+
+def delete_sandbox_prompt_version(
+    session: Session,
+    *,
+    repository_id: str,
+    prompt_id: str,
+) -> bool | None:
+    repository = session.get(Repository, repository_id)
+    prompt = session.get(SandboxPromptVersion, prompt_id)
+    if repository is None:
+        return None
+    if prompt is None or prompt.repository_id != repository_id:
+        return False
+
+    session.delete(prompt)
+    session.commit()
+    return True
 
 
 def copy_sandbox_prompt_to_chat_library(
@@ -215,19 +234,25 @@ def create_sandbox_comparison(
         repository_id=repository_id,
         query=request.query,
         status="running",
+        expected_run_count=len(request.runs),
     )
     session.add(comparison)
     session.commit()
     session.refresh(comparison)
 
     runs: list[SandboxRunRead] = []
+    if not request.execute_immediately:
+        return _comparison_read(comparison, runs)
+
     for index, run_request in enumerate(request.runs):
-        run = create_sandbox_run(
+        run = create_sandbox_comparison_run(
             session,
             repository_id=repository_id,
-            request=SandboxRunCreate(
+            comparison_id=comparison.id,
+            request=SandboxComparisonRunExecute(
+                label=run_request.label,
+                comparison_index=index,
                 prompt_version_id=run_request.prompt_version_id,
-                query=request.query,
                 model=run_request.model,
                 retrieval_settings=run_request.retrieval_settings,
             ),
@@ -235,19 +260,61 @@ def create_sandbox_comparison(
             embedder=embedder,
             reranker=reranker,
             llm=llm,
-            comparison_id=comparison.id,
-            comparison_index=index,
-            label=run_request.label,
         )
         if run is None:
             return None
         runs.append(run)
 
-    comparison.status = "completed"
-    session.add(comparison)
-    session.commit()
-    session.refresh(comparison)
     return _comparison_read(comparison, runs)
+
+
+def create_sandbox_comparison_run(
+    session: Session,
+    *,
+    repository_id: str,
+    comparison_id: str,
+    request: SandboxComparisonRunExecute,
+    store: VectorStore,
+    embedder: EmbeddingProvider,
+    reranker: RerankerProvider,
+    llm: ChatLLM,
+) -> SandboxRunRead | None:
+    comparison = session.get(SandboxComparison, comparison_id)
+    if comparison is None or comparison.repository_id != repository_id:
+        return None
+
+    run = create_sandbox_run(
+        session,
+        repository_id=repository_id,
+        request=SandboxRunCreate(
+            prompt_version_id=request.prompt_version_id,
+            query=comparison.query,
+            model=request.model,
+            retrieval_settings=request.retrieval_settings,
+        ),
+        store=store,
+        embedder=embedder,
+        reranker=reranker,
+        llm=llm,
+        comparison_id=comparison.id,
+        comparison_index=request.comparison_index,
+        label=request.label,
+    )
+    if run is None:
+        return None
+
+    completed_count = session.scalar(
+        select(func.count())
+        .select_from(SandboxRun)
+        .where(SandboxRun.comparison_id == comparison.id)
+    )
+    if completed_count is not None and completed_count >= comparison.expected_run_count:
+        comparison.status = "completed"
+        session.add(comparison)
+        session.commit()
+        session.refresh(comparison)
+
+    return run
 
 
 def get_sandbox_run(
@@ -355,6 +422,7 @@ def _comparison_read(
         repository_id=comparison.repository_id,
         query=comparison.query,
         status=comparison.status,
+        expected_run_count=comparison.expected_run_count,
         runs=runs,
         created_at=comparison.created_at,
     )

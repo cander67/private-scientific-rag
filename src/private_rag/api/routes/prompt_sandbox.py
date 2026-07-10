@@ -9,6 +9,7 @@ from private_rag.api.routes.vector import EmbeddingProviderDependency, VectorSto
 from private_rag.prompt_sandbox.schemas import (
     SandboxComparisonCreate,
     SandboxComparisonRead,
+    SandboxComparisonRunExecute,
     SandboxPromptCopyToChatLibraryRequest,
     SandboxPromptCopyToChatLibraryResponse,
     SandboxPromptVersionCreate,
@@ -20,8 +21,10 @@ from private_rag.prompt_sandbox.service import (
     SandboxPromptSourceMissingError,
     copy_sandbox_prompt_to_chat_library,
     create_sandbox_comparison,
+    create_sandbox_comparison_run,
     create_sandbox_prompt_version,
     create_sandbox_run,
+    delete_sandbox_prompt_version,
     get_sandbox_comparison,
     get_sandbox_prompt_version,
     get_sandbox_run,
@@ -81,6 +84,23 @@ def read_sandbox_prompt_version(
     if prompt is None:
         raise HTTPException(status_code=404, detail="Sandbox prompt not found")
     return prompt
+
+
+@router.delete("/prompts/{prompt_id}", status_code=204)
+def delete_repository_sandbox_prompt_version(
+    repository_id: str,
+    prompt_id: str,
+    session: DbSession,
+) -> None:
+    deleted = delete_sandbox_prompt_version(
+        session,
+        repository_id=repository_id,
+        prompt_id=prompt_id,
+    )
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Sandbox prompt not found")
 
 
 @router.post(
@@ -180,6 +200,39 @@ def create_repository_sandbox_comparison(
     if comparison is None:
         raise HTTPException(status_code=404, detail="Sandbox comparison not found")
     return comparison
+
+
+@router.post("/comparisons/{comparison_id}/runs", response_model=SandboxRunRead)
+def create_repository_sandbox_comparison_run(
+    repository_id: str,
+    comparison_id: str,
+    request: SandboxComparisonRunExecute,
+    session: DbSession,
+    store: VectorStoreDependency,
+    embedder: EmbeddingProviderDependency,
+    reranker: RerankerProviderDependency,
+    llm: ChatLLMDependency,
+) -> SandboxRunRead:
+    try:
+        run = create_sandbox_comparison_run(
+            session,
+            repository_id=repository_id,
+            comparison_id=comparison_id,
+            request=request,
+            store=store,
+            embedder=embedder,
+            reranker=reranker,
+            llm=llm,
+        )
+    except CrossEncoderModelMissingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except VectorIndexMissingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (RuntimeError, VectorStoreError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if run is None:
+        raise HTTPException(status_code=404, detail="Sandbox comparison or prompt not found")
+    return run
 
 
 @router.get("/comparisons/{comparison_id}", response_model=SandboxComparisonRead)

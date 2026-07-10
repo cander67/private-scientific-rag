@@ -58,12 +58,21 @@ class SandboxComparisonRunCreate(BaseModel):
 class SandboxComparisonCreate(BaseModel):
     query: str = Field(min_length=1)
     runs: list[SandboxComparisonRunCreate] = Field(min_length=2)
+    execute_immediately: bool = True
+
+
+class SandboxComparisonRunExecute(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=120)
+    comparison_index: int = Field(ge=0)
+    prompt_version_id: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    retrieval_settings: ChatRetrievalSettings
 
 
 class SandboxRunRead(BaseModel):
     id: str
     repository_id: str
-    prompt_version_id: str
+    prompt_version_id: str | None
     comparison_id: str | None
     comparison_index: int | None
     label: str | None
@@ -86,5 +95,6 @@ class SandboxComparisonRead(BaseModel):
     repository_id: str
     query: str
     status: str
+    expected_run_count: int
     runs: list[SandboxRunRead]
     created_at: datetime

@@ -581,6 +581,11 @@ textarea {
   margin: var(--s4) 0;
 }
 
+.sandbox-prompt-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .sandbox-presets {
   display: flex;
   flex-wrap: wrap;
@@ -612,6 +617,15 @@ textarea {
   padding: var(--s4);
 }
 
+.sandbox-run-card-pending,
+.sandbox-run-card-running {
+  border-style: dashed;
+}
+
+.sandbox-run-card-running {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
 .sandbox-run-card h3 {
   font-size: 0.95rem;
   overflow-wrap: anywhere;
@@ -634,6 +648,53 @@ textarea {
 
 .sandbox-context .source-card {
   padding: var(--s3);
+}
+
+.btn-running {
+  position: relative;
+  opacity: 1;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.btn-running:disabled {
+  opacity: 1;
+}
+
+.btn-running::before {
+  content: "";
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: sandbox-spin 0.8s linear infinite;
+}
+
+.badge-pending,
+.badge-running,
+.badge-failed {
+  text-transform: capitalize;
+}
+
+.badge-running .dot {
+  animation: sandbox-pulse 1s ease-in-out infinite;
+}
+
+.badge-failed {
+  color: var(--danger);
+}
+
+@keyframes sandbox-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes sandbox-pulse {
+  50% {
+    transform: scale(1.6);
+    opacity: 0.45;
+  }
 }
 
 .segmented {
