@@ -200,3 +200,125 @@ def test_sandbox_run_persists_prompt_snapshot_context_answer_and_citations() -> 
     assert reloaded["prompt_snapshot"] == run["prompt_snapshot"]
     assert reloaded["context_entries"] == run["context_entries"]
     assert reloaded["answer"] == run["answer"]
+
+
+def test_sandbox_comparison_runs_same_query_across_retrieval_configs() -> None:
+    client, llm = _client_with_database()
+    created = client.get("/repositories/default").json()
+    repository_id = created["repository"]["id"]
+    settings = created["settings"]
+    settings["embedding"]["model"] = "test-deterministic"
+    settings["vector"]["vector_size"] = 8
+    assert (
+        client.put(
+            f"/repositories/{repository_id}/settings",
+            json={"settings": settings},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/repositories/{repository_id}/documents",
+            files={
+                "file": (
+                    "comparison-materials.txt",
+                    (
+                        b"Abstract\n"
+                        b"LiFePO4 cathodes retain capacity during cycling.\n"
+                        b"Methods\n"
+                        b"Conductive carbon improves LiFePO4 electrode performance.\n"
+                    ),
+                    "text/plain",
+                )
+            },
+        ).status_code
+        == 200
+    )
+    assert client.post(f"/repositories/{repository_id}/full-text/rebuild").status_code == 200
+    assert client.post(f"/repositories/{repository_id}/vector/rebuild").status_code == 200
+    prompt_response = client.post(
+        f"/repositories/{repository_id}/prompt-sandbox/prompts",
+        json={
+            "name": "Comparison prompt",
+            "body": "Answer only from retrieved context and cite each factual claim.",
+        },
+    )
+    assert prompt_response.status_code == 200
+    prompt = prompt_response.json()
+
+    comparison_response = client.post(
+        f"/repositories/{repository_id}/prompt-sandbox/comparisons",
+        json={
+            "query": "LiFePO4 cathodes retain capacity cycling",
+            "runs": [
+                {
+                    "label": "Full-text",
+                    "prompt_version_id": prompt["id"],
+                    "model": "gemma3:4b",
+                    "retrieval_settings": {
+                        "mode": "full_text",
+                        "top_k": 3,
+                        "reranker_strategy": "none",
+                    },
+                },
+                {
+                    "label": "Vector",
+                    "prompt_version_id": prompt["id"],
+                    "model": "gemma3:4b",
+                    "retrieval_settings": {
+                        "mode": "vector",
+                        "top_k": 3,
+                        "reranker_strategy": "none",
+                    },
+                },
+                {
+                    "label": "Hybrid",
+                    "prompt_version_id": prompt["id"],
+                    "model": "gemma3:4b",
+                    "retrieval_settings": {
+                        "mode": "hybrid",
+                        "top_k": 3,
+                        "reranker_strategy": "none",
+                    },
+                },
+                {
+                    "label": "Reranked hybrid",
+                    "prompt_version_id": prompt["id"],
+                    "model": "gemma3:4b",
+                    "retrieval_settings": {
+                        "mode": "hybrid",
+                        "top_k": 3,
+                        "reranker_strategy": "cross_encoder",
+                    },
+                },
+            ],
+        },
+    )
+
+    assert comparison_response.status_code == 200
+    comparison = comparison_response.json()
+    assert comparison["query"] == "LiFePO4 cathodes retain capacity cycling"
+    assert comparison["status"] == "completed"
+    assert [run["label"] for run in comparison["runs"]] == [
+        "Full-text",
+        "Vector",
+        "Hybrid",
+        "Reranked hybrid",
+    ]
+    assert {run["retrieval_settings"]["mode"] for run in comparison["runs"]} == {
+        "full_text",
+        "vector",
+        "hybrid",
+    }
+    assert comparison["runs"][3]["retrieval_settings"]["reranker_strategy"] == "cross_encoder"
+    assert all(run["comparison_id"] == comparison["id"] for run in comparison["runs"])
+    assert all(run["answer"].endswith("[1].") for run in comparison["runs"])
+    assert all(run["context_entries"] for run in comparison["runs"])
+    assert len(llm.calls) == 4
+
+    reload_response = client.get(
+        f"/repositories/{repository_id}/prompt-sandbox/comparisons/{comparison['id']}",
+    )
+
+    assert reload_response.status_code == 200
+    assert reload_response.json()["runs"] == comparison["runs"]

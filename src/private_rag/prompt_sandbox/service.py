@@ -9,8 +9,10 @@ from private_rag.chat.citations import map_citations
 from private_rag.chat.llm import ChatLLM
 from private_rag.chat.schemas import ChatCitation, ChatRetrievalSettings
 from private_rag.chat.service import build_chat_prompt
-from private_rag.prompt_sandbox.models import SandboxPromptVersion, SandboxRun
+from private_rag.prompt_sandbox.models import SandboxComparison, SandboxPromptVersion, SandboxRun
 from private_rag.prompt_sandbox.schemas import (
+    SandboxComparisonCreate,
+    SandboxComparisonRead,
     SandboxPromptCopyToChatLibraryResponse,
     SandboxPromptVersionCreate,
     SandboxPromptVersionRead,
@@ -128,6 +130,9 @@ def create_sandbox_run(
     embedder: EmbeddingProvider,
     reranker: RerankerProvider,
     llm: ChatLLM,
+    comparison_id: str | None = None,
+    comparison_index: int | None = None,
+    label: str | None = None,
 ) -> SandboxRunRead | None:
     repository = session.get(Repository, repository_id)
     prompt = session.get(SandboxPromptVersion, request.prompt_version_id)
@@ -166,6 +171,9 @@ def create_sandbox_run(
     run = SandboxRun(
         repository_id=repository_id,
         prompt_version_id=prompt.id,
+        comparison_id=comparison_id,
+        comparison_index=comparison_index,
+        label=label,
         query=request.query,
         model=completion.model,
         retrieval_settings=retrieval_request.model_dump(mode="json"),
@@ -189,6 +197,59 @@ def create_sandbox_run(
     return _run_read(run)
 
 
+def create_sandbox_comparison(
+    session: Session,
+    *,
+    repository_id: str,
+    request: SandboxComparisonCreate,
+    store: VectorStore,
+    embedder: EmbeddingProvider,
+    reranker: RerankerProvider,
+    llm: ChatLLM,
+) -> SandboxComparisonRead | None:
+    repository = session.get(Repository, repository_id)
+    if repository is None:
+        return None
+
+    comparison = SandboxComparison(
+        repository_id=repository_id,
+        query=request.query,
+        status="running",
+    )
+    session.add(comparison)
+    session.commit()
+    session.refresh(comparison)
+
+    runs: list[SandboxRunRead] = []
+    for index, run_request in enumerate(request.runs):
+        run = create_sandbox_run(
+            session,
+            repository_id=repository_id,
+            request=SandboxRunCreate(
+                prompt_version_id=run_request.prompt_version_id,
+                query=request.query,
+                model=run_request.model,
+                retrieval_settings=run_request.retrieval_settings,
+            ),
+            store=store,
+            embedder=embedder,
+            reranker=reranker,
+            llm=llm,
+            comparison_id=comparison.id,
+            comparison_index=index,
+            label=run_request.label,
+        )
+        if run is None:
+            return None
+        runs.append(run)
+
+    comparison.status = "completed"
+    session.add(comparison)
+    session.commit()
+    session.refresh(comparison)
+    return _comparison_read(comparison, runs)
+
+
 def get_sandbox_run(
     session: Session,
     *,
@@ -199,6 +260,25 @@ def get_sandbox_run(
     if run is None or run.repository_id != repository_id:
         return None
     return _run_read(run)
+
+
+def get_sandbox_comparison(
+    session: Session,
+    *,
+    repository_id: str,
+    comparison_id: str,
+) -> SandboxComparisonRead | None:
+    comparison = session.get(SandboxComparison, comparison_id)
+    if comparison is None or comparison.repository_id != repository_id:
+        return None
+    run_rows = list(
+        session.scalars(
+            select(SandboxRun)
+            .where(SandboxRun.comparison_id == comparison_id)
+            .order_by(SandboxRun.comparison_index, SandboxRun.created_at)
+        )
+    )
+    return _comparison_read(comparison, [_run_read(run) for run in run_rows])
 
 
 class SandboxPromptSourceMissingError(ValueError):
@@ -246,6 +326,9 @@ def _run_read(run: SandboxRun) -> SandboxRunRead:
         id=run.id,
         repository_id=run.repository_id,
         prompt_version_id=run.prompt_version_id,
+        comparison_id=run.comparison_id,
+        comparison_index=run.comparison_index,
+        label=run.label,
         query=run.query,
         model=run.model,
         retrieval_settings=ChatRetrievalSettings.model_validate(run.retrieval_settings),
@@ -260,4 +343,18 @@ def _run_read(run: SandboxRun) -> SandboxRunRead:
         latency_ms=run.latency_ms,
         status=run.status,
         created_at=run.created_at,
+    )
+
+
+def _comparison_read(
+    comparison: SandboxComparison,
+    runs: list[SandboxRunRead],
+) -> SandboxComparisonRead:
+    return SandboxComparisonRead(
+        id=comparison.id,
+        repository_id=comparison.repository_id,
+        query=comparison.query,
+        status=comparison.status,
+        runs=runs,
+        created_at=comparison.created_at,
     )

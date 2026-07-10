@@ -7,6 +7,8 @@ from private_rag.api.routes.repositories import DbSession
 from private_rag.api.routes.retrieval import RerankerProviderDependency
 from private_rag.api.routes.vector import EmbeddingProviderDependency, VectorStoreDependency
 from private_rag.prompt_sandbox.schemas import (
+    SandboxComparisonCreate,
+    SandboxComparisonRead,
     SandboxPromptCopyToChatLibraryRequest,
     SandboxPromptCopyToChatLibraryResponse,
     SandboxPromptVersionCreate,
@@ -17,8 +19,10 @@ from private_rag.prompt_sandbox.schemas import (
 from private_rag.prompt_sandbox.service import (
     SandboxPromptSourceMissingError,
     copy_sandbox_prompt_to_chat_library,
+    create_sandbox_comparison,
     create_sandbox_prompt_version,
     create_sandbox_run,
+    get_sandbox_comparison,
     get_sandbox_prompt_version,
     get_sandbox_run,
     list_sandbox_prompt_versions,
@@ -145,3 +149,50 @@ def read_sandbox_run(
     if run is None:
         raise HTTPException(status_code=404, detail="Sandbox run not found")
     return run
+
+
+@router.post("/comparisons", response_model=SandboxComparisonRead)
+def create_repository_sandbox_comparison(
+    repository_id: str,
+    request: SandboxComparisonCreate,
+    session: DbSession,
+    store: VectorStoreDependency,
+    embedder: EmbeddingProviderDependency,
+    reranker: RerankerProviderDependency,
+    llm: ChatLLMDependency,
+) -> SandboxComparisonRead:
+    try:
+        comparison = create_sandbox_comparison(
+            session,
+            repository_id=repository_id,
+            request=request,
+            store=store,
+            embedder=embedder,
+            reranker=reranker,
+            llm=llm,
+        )
+    except CrossEncoderModelMissingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except VectorIndexMissingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (RuntimeError, VectorStoreError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if comparison is None:
+        raise HTTPException(status_code=404, detail="Sandbox comparison not found")
+    return comparison
+
+
+@router.get("/comparisons/{comparison_id}", response_model=SandboxComparisonRead)
+def read_sandbox_comparison(
+    repository_id: str,
+    comparison_id: str,
+    session: DbSession,
+) -> SandboxComparisonRead:
+    comparison = get_sandbox_comparison(
+        session,
+        repository_id=repository_id,
+        comparison_id=comparison_id,
+    )
+    if comparison is None:
+        raise HTTPException(status_code=404, detail="Sandbox comparison not found")
+    return comparison

@@ -48,10 +48,25 @@ class SandboxRunCreate(BaseModel):
     retrieval_settings: ChatRetrievalSettings
 
 
+class SandboxComparisonRunCreate(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=120)
+    prompt_version_id: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    retrieval_settings: ChatRetrievalSettings
+
+
+class SandboxComparisonCreate(BaseModel):
+    query: str = Field(min_length=1)
+    runs: list[SandboxComparisonRunCreate] = Field(min_length=2)
+
+
 class SandboxRunRead(BaseModel):
     id: str
     repository_id: str
     prompt_version_id: str
+    comparison_id: str | None
+    comparison_index: int | None
+    label: str | None
     query: str
     model: str
     retrieval_settings: ChatRetrievalSettings
@@ -63,4 +78,13 @@ class SandboxRunRead(BaseModel):
     metrics: dict[str, object]
     latency_ms: int
     status: str
+    created_at: datetime
+
+
+class SandboxComparisonRead(BaseModel):
+    id: str
+    repository_id: str
+    query: str
+    status: str
+    runs: list[SandboxRunRead]
     created_at: datetime
