@@ -4,7 +4,9 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, model_validator
 
+from private_rag.chat.schemas import ChatCitation, ChatRetrievalSettings
 from private_rag.repositories.schemas import PromptLibraryEntry
+from private_rag.retrieval.schemas import RetrievalSearchResult
 
 
 class SandboxPromptVersionCreate(BaseModel):
@@ -37,3 +39,28 @@ class SandboxPromptCopyToChatLibraryRequest(BaseModel):
 
 class SandboxPromptCopyToChatLibraryResponse(PromptLibraryEntry):
     pass
+
+
+class SandboxRunCreate(BaseModel):
+    prompt_version_id: str = Field(min_length=1)
+    query: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    retrieval_settings: ChatRetrievalSettings
+
+
+class SandboxRunRead(BaseModel):
+    id: str
+    repository_id: str
+    prompt_version_id: str
+    query: str
+    model: str
+    retrieval_settings: ChatRetrievalSettings
+    prompt_snapshot: dict[str, object]
+    context_entries: list[RetrievalSearchResult]
+    retrieval_run_id: str | None
+    answer: str
+    citations: list[ChatCitation]
+    metrics: dict[str, object]
+    latency_ms: int
+    status: str
+    created_at: datetime
