@@ -564,6 +564,78 @@ textarea {
   margin-top: var(--s4);
 }
 
+.sandbox-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.sandbox-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: var(--s4);
+  align-items: start;
+}
+
+.sandbox-form {
+  margin: var(--s4) 0;
+}
+
+.sandbox-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin: var(--s4) 0;
+}
+
+.sandbox-results {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.sandbox-run-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(240px, 1fr));
+  gap: var(--s4);
+  align-items: start;
+}
+
+.sandbox-run-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: var(--s4);
+}
+
+.sandbox-run-card h3 {
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+  text-transform: capitalize;
+}
+
+.sandbox-answer {
+  min-height: 72px;
+  border-left: 3px solid var(--accent);
+  padding-left: var(--s3);
+}
+
+.sandbox-kv {
+  margin: 0;
+}
+
+.sandbox-context {
+  gap: var(--s3);
+}
+
+.sandbox-context .source-card {
+  padding: var(--s3);
+}
+
 .segmented {
   display: inline-flex;
   width: 100%;
@@ -1247,6 +1319,14 @@ textarea {
 }
 
 @media (max-width: 1100px) {
+  .sandbox-run-grid {
+    grid-template-columns: repeat(2, minmax(240px, 1fr));
+  }
+
+  .sandbox-controls {
+    grid-template-columns: 1fr;
+  }
+
   .viewer {
     grid-template-columns: 220px 1fr;
   }
@@ -1297,7 +1377,8 @@ textarea {
 
   .grid-side,
   .viewer,
-  .chat-layout {
+  .chat-layout,
+  .sandbox-run-grid {
     grid-template-columns: 1fr;
   }
 
