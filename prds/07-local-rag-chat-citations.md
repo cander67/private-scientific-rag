@@ -39,6 +39,15 @@ Build local-only RAG chat with repository-grounded answers, inline citations, an
 - Integration test chat with mocked Ollama client.
 - UI test citation card open/close behavior.
 
+## Implemented Defaults and Tradeoffs
+
+- Chat uses Ollama through a mockable local LLM boundary; the first default model is `gemma3:4b`.
+- Chat retrieval settings are owned by each chat session and can be adjusted in Chat Workspace. They do not inherit Search Lab settings.
+- Chat does not rebuild indexes automatically. Users explicitly rebuild full-text/vector indexes and check local model readiness in Chat Workspace.
+- Repository system prompts are stored in repository settings as a prompt library with an active chat prompt ID.
+- Assistant answers are expected to emit inline citation tokens like `[1]`; mapped citations are persisted with assistant messages and resolve to stored document/chunk metadata.
+- Live Ollama tests are opt-in and separate from default CI. Default CI uses mocked LLM calls and deterministic fixtures.
+
 ## Documentation References
 
 - Ollama documentation: https://docs.ollama.com/

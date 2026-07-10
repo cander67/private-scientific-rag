@@ -33,6 +33,11 @@ jobs:
     
     - name: Type check backend and tests
       run: uv run mypy src tests
+
+    - name: Validate database migrations
+      run: uv run alembic upgrade head
+      env:
+        PRIVATE_RAG_DATABASE_URL: sqlite:///./tmp/ci.sqlite
     
     - name: Run backend tests
       run: uv run pytest

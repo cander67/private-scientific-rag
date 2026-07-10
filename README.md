@@ -8,7 +8,7 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 through PRD6 are complete. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, and retrieval evaluation. PRD7 is in progress to add LLM support for retrieval-augmented generation.
+PRD1 through PRD7 are implemented and ready for review. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, and local Ollama-backed retrieval-augmented chat with citations.
 
 Later PRDs include OCR execution (PRD13), structured table extraction (PRD14), bulk patent downloads/raw patent-data feeds (PRD12), and clearer chunk-level versus document-level search labels (PRD17). Support for additional embedding models and immutable document storage are also planned.
 
@@ -20,8 +20,9 @@ The current scaffold provides:
 - SQLite FTS5 rebuild and full-text search API for repository chunks, with BM25 scores, snippets, matched fields, metadata filters, citation-ready provenance, and CI exact-match recall evaluation.
 - Qdrant-backed vector index rebuild and vector search API for repository chunks, with local SentenceTransformers MiniLM embeddings, latest-index replacement, metadata filters, embedding run metadata, and CI semantic recall evaluation with deterministic fake embeddings.
 - Unified retrieval search API for full-text, vector, and hybrid modes, with candidate-pool/RRF/reranker settings capture, Reciprocal Rank Fusion score breakdowns, selectable cross-encoder/metadata-boost reranking, and max-five recent retrieval history persistence.
+- Local RAG chat API for repository-scoped chat sessions, chat-owned retrieval settings, Ollama model smoke checks, readiness checks, structured citation mapping, and persisted chat messages.
 - Deterministic comparison evaluation for full-text, vector, hybrid, and reranked hybrid retrieval, plus opt-in live Qdrant and cross-encoder checks.
-- React/Vite frontend document manager, source inspector, and Search Lab for full-text, vector, hybrid, and reranked retrieval inspection, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
+- React/Vite frontend document manager, source inspector, Search Lab, and Chat Workspace for full-text, vector, hybrid, reranked retrieval inspection, and local cited chat, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
 - SQLAlchemy/Alembic migration wiring for repository settings, document ingestion, vector embedding runs, and retrieval history/results.
 - Qdrant Docker Compose service.
 - Pytest, Ruff, Mypy, and CI configuration.
@@ -61,6 +62,8 @@ docker compose up -d qdrant
 Vector rebuilds use the repository embedding/vector settings. The default embedding model is `sentence-transformers/all-MiniLM-L6-v2` with 384-dimensional cosine vectors.
 
 Unified retrieval defaults to a candidate pool of `top_k * 5` and an RRF constant of `60`; both can be adjusted per request. Cross-encoder reranking uses `cross-encoder/ms-marco-MiniLM-L6-v2` by default and requires the model to be downloaded into the local SentenceTransformers cache. See [test documentation](tests/README.md) for the download command and separate deterministic, live-vector, and live-cross-encoder test commands.
+
+Chat uses its own retrieval settings rather than inheriting Search Lab state. It does not rebuild indexes automatically. Before chatting, rebuild the full-text and vector indexes for the repository and confirm the local Ollama model is reachable from the Chat Workspace readiness panel. The default chat model is `gemma3:4b`; default chat retrieval is hybrid with cross-encoder reranking. Repository chat prompts live in repository settings, and the UI keeps chat-owned retrieval controls, readiness checks, session management, and citation source navigation inside Chat Workspace.
 
 Run the backend:
 

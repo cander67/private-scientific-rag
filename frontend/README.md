@@ -2,13 +2,17 @@
 
 The frontend is a React/Vite app. PRD1 provides the shell, and the static mockups describe the planned repository, document manager, source viewer, search, chat, prompt sandbox, settings, and export workflows.
 
-Current implementation status: PRD6 is complete and closed. PRD7 is in progress. The production frontend includes distinct document manager, source viewer, and Search Lab views for upload, document selection, PDF page thumbnails, chunk provenance inspection, `needs_ocr`/zero-chunk inspection states, reprocess, delete, and full-text, vector, hybrid, and reranked retrieval inspection.
+Current implementation status: PRD6 is complete and closed. PRD7 is implemented and ready for review. The production frontend includes distinct document manager, source viewer, Search Lab, and Chat Workspace views for upload, document selection, PDF page thumbnails, chunk provenance inspection, `needs_ocr`/zero-chunk inspection states, reprocess, row-level delete, delete-all, full-text/vector/hybrid/reranked retrieval inspection, and local RAG chat with citations.
 
 Search Lab supports manual full-text and vector index rebuilds, query execution through the unified retrieval API, full-text/vector/hybrid mode selection, reranking strategy selection, candidate-pool and RRF controls, metadata boost level selection, top-k selection, document/section/source filters, table/figure/patent metadata filters, BM25/dense/RRF/rerank/boost/final score display, snippets or chunk previews, matched fields where available, and source navigation for matched chunks.
+
+Chat Workspace uses separate chat retrieval settings rather than inheriting Search Lab controls. The retrieval panel lets users choose chat mode, reranker, and top-k; check full-text/vector/local-model readiness; explicitly rebuild full-text or vector indexes; and send questions to the local Ollama model. Chat does not rebuild indexes automatically. Chat sessions can be deleted individually or cleared for the repository. Citation cards include source metadata and preview text, and their source action opens the cited document/chunk in Source Viewer. The composer follows the end of the chat thread until the available page height is reached, then the message list scrolls while the query field remains visible.
 
 PRD17 is in the backlog to clarify Search Lab result labels by separating chunk-level facts, document-level hints, parser hints, and active filters.
 
 The candidate pool defaults to `top_k * 5`, RRF defaults to `60`, and metadata boosts use user-selectable High/Medium/Low levels. Cross-encoder reranking requires its configured model in the backend's local model cache. Diversity/MMR is intentionally displayed as a future option.
+
+Repository chat prompts are stored in backend repository settings as a prompt library with an active chat prompt ID. The default prompt instructs the local model to answer only from repository context, use inline citations, and say when the retrieved context does not contain enough evidence.
 
 Bulk patent-data workflows are planned separately in PRD12.
 

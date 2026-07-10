@@ -33,5 +33,15 @@ test("Document Manager and Source Viewer render as separate live views", () => {
   assert.match(source, /navigateTo\("source"\)/);
   assert.match(source, /activeView === "documents" && \(/);
   assert.match(source, /activeView === "source" && \(inspection \? \(/);
-  assert.match(source, /\{activeView === "documents" && \(\s*<label className="btn btn-primary upload-button">/);
+  assert.match(source, /activeView === "documents"[\s\S]*className="btn btn-primary upload-button"/);
+});
+
+test("Document Manager supports direct row delete and delete all actions", () => {
+  assert.match(source, /function deleteDocument/);
+  assert.match(source, /function deleteAllDocuments/);
+  assert.match(source, /Delete all/);
+  assert.match(source, /className="row table-actions"/);
+  assert.match(source, /onClick=\{\(\) => void deleteDocument\(document\.id\)\}/);
+  assert.match(source, /window\.confirm\(`Delete \$\{document\?\.display_name/);
+  assert.match(source, /DELETE/);
 });

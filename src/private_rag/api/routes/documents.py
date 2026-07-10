@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from private_rag.api.routes.repositories import DbSession
 from private_rag.ingestion.schemas import DocumentInspection, DocumentRead, DocumentUploadResponse
 from private_rag.ingestion.service import (
+    delete_all_documents,
     delete_document,
     document_page_image_path,
     inspect_document,
@@ -59,6 +60,16 @@ def inspect_repository_document(
     if inspection is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return inspection
+
+
+@router.delete("", status_code=204)
+def delete_repository_documents(
+    repository_id: str,
+    session: DbSession,
+) -> None:
+    deleted = delete_all_documents(session, repository_id)
+    if deleted is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
 
 
 @router.get("/{document_id}/versions/{version_id}/page-images/{page}")

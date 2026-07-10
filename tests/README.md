@@ -17,6 +17,8 @@ PRD5 vector search coverage uses deterministic fake embeddings and an in-memory 
 
 PRD6 retrieval coverage includes deterministic integration tests for the unified retrieval API and evaluation comparison. The tests exercise full-text mode, vector mode with fake embeddings and an in-memory vector store, hybrid RRF mode, normalized score breakdowns, retrieval run/result persistence, max-five recent history retention, strategy validation, cross-encoder reranking through a fake provider, metadata boost scoring, and comparison metrics for full-text, vector, hybrid, and reranked hybrid. Unit tests cover RRF merging for sparse-only, dense-only, overlapping, adjusted-constant cases, reranker score composition, and missing cross-encoder setup guidance.
 
+PRD7 chat coverage keeps CI deterministic by mocking the LLM at the chat boundary. Default tests cover repository prompt-library settings, prompt/context assembly, citation-token mapping, model registry responses, chat session/message persistence, hybrid retrieval wiring with a fake reranker, and assistant citation metadata persisted from a mocked LLM response. Live local LLM tests are separate opt-in commands.
+
 ## Live tests
 
 Default CI and `uv run pytest` exclude live tests. Run live checks only when the required local service or model is already available.
@@ -54,12 +56,57 @@ Run:
 RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_cross_encoder_live.py
 ```
 
+### Ollama chat live smoke
+
+Prerequisites:
+
+- Ollama is running at the configured `ollama_base_url` (`http://localhost:11434` by default).
+- The default chat model is installed. The PRD7 default is `gemma3:4b`.
+
+Download/cache the default chat model:
+
+```bash
+ollama pull gemma3:4b
+```
+
+Run the lightweight Ollama boundary check:
+
+```bash
+RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_ollama_live.py
+```
+
+### Local RAG chat live smoke
+
+This slower check creates a tiny fixture repository, rebuilds deterministic in-memory full-text/vector test indexes, calls the real local Ollama chat model, and verifies that the assistant response stores mapped citations. It keeps embedding and reranking deterministic so failures point mostly at the local LLM setup and chat path.
+
+Prerequisites are the same as the Ollama chat live smoke.
+
+Run:
+
+```bash
+RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_chat_rag_live.py
+```
+
 Golden corpus planning currently lives in `documents/golden_corpus/golden_corpus_manifest.md`; `golden_corpus_manifest_v1.md` is a frozen historical copy.
 
 Run all default tests:
 
 ```bash
 uv run pytest
+```
+
+Run all default tests plus all opted-in live tests in one coverage pass:
+
+```bash
+RUN_LIVE_TESTS=1 uv run pytest -m "not live or live"
+```
+
+Run backend tests by tier, including live tests when ready:
+
+```bash
+uv run pytest tests/unit
+uv run pytest tests/integration
+RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration
 ```
 
 Run the full backend quality gate:
@@ -69,6 +116,15 @@ uv run ruff format --check .
 uv run ruff check .
 uv run mypy src tests
 uv run pytest
+```
+
+Run the full backend quality gate with live tests included in the same coverage report:
+
+```bash
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src tests
+RUN_LIVE_TESTS=1 uv run pytest -m "not live or live"
 ```
 
 Run a specific group:

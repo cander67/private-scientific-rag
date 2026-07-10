@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import "./styles.css";
 
@@ -11,7 +11,7 @@ type RepositoryResponse = {
   };
 };
 
-type View = "documents" | "source" | "search";
+type View = "documents" | "source" | "search" | "chat";
 
 type DocumentVersion = {
   id: string;
@@ -235,6 +235,84 @@ type RetrievalSearchResponse = {
   results: RetrievalSearchResult[];
 };
 
+type ChatCitation = {
+  citation_id: number;
+  token: string;
+  document_id: string;
+  document_version_id: string;
+  chunk_id: string;
+  chunk_index: number;
+  document_title: string;
+  section: string | null;
+  page_start: number | null;
+  page_end: number | null;
+  line_start: number | null;
+  line_end: number | null;
+  metadata: {
+    source_type?: string;
+    document_kind?: string | null;
+    tags?: string[];
+    has_table?: boolean;
+    has_figure?: boolean;
+    patent_sections?: string[];
+  };
+  retrieval_rank: number;
+  score_breakdown: Record<string, number | null>;
+  text_preview: string | null;
+};
+
+type ChatRetrievalSettings = {
+  mode: "full_text" | "vector" | "hybrid";
+  top_k: number;
+  reranker_strategy: RerankerStrategy;
+};
+
+type ChatMessage = {
+  id: string;
+  session_id: string;
+  sequence: number;
+  role: "user" | "assistant";
+  content: string;
+  retrieval_run_id: string | null;
+  citations: ChatCitation[];
+  created_at: string;
+};
+
+type ChatSession = {
+  id: string;
+  repository_id: string;
+  title: string;
+  model: string;
+  retrieval_settings: ChatRetrievalSettings;
+  prompt_id: string;
+  created_at: string;
+  updated_at: string;
+  messages: ChatMessage[];
+};
+
+type ChatQuestionResponse = {
+  session: ChatSession;
+  user_message: ChatMessage;
+  assistant_message: ChatMessage;
+};
+
+type ChatReadinessItem = {
+  ready: boolean;
+  status: "ready" | "missing" | "partial" | "stale";
+  message: string;
+  indexed_chunks: number | null;
+  model: string | null;
+};
+
+type ChatReadiness = {
+  repository_id: string;
+  parsed_chunks: number;
+  full_text: ChatReadinessItem;
+  vector: ChatReadinessItem;
+  local_model: ChatReadinessItem;
+  ready_for_chat: boolean;
+};
+
 function App() {
   const [repository, setRepository] = useState<RepositoryResponse["repository"] | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
@@ -266,6 +344,25 @@ function App() {
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchMessage, setSearchMessage] = useState("Rebuild the full-text index, then run a query.");
   const [lastRebuild, setLastRebuild] = useState<SearchRebuildResponse | null>(null);
+  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
+  const [chatInput, setChatInput] = useState("");
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatMessage, setChatMessage] = useState("Create a chat session or ask a question.");
+  const [activeCitation, setActiveCitation] = useState<ChatCitation | null>(null);
+  const [chatRetrievalSettings, setChatRetrievalSettings] = useState<ChatRetrievalSettings>({
+    mode: "hybrid",
+    top_k: 6,
+    reranker_strategy: "cross_encoder",
+  });
+  const [chatReadiness, setChatReadiness] = useState<ChatReadiness | null>(null);
+  const [chatReadinessBusy, setChatReadinessBusy] = useState(false);
+  const [chatReadinessCheckedAt, setChatReadinessCheckedAt] = useState<string | null>(null);
+  const [chatRebuildBusy, setChatRebuildBusy] = useState<"full-text" | "vector" | null>(null);
+  const [pendingSourceTarget, setPendingSourceTarget] = useState<{
+    documentId: string;
+    chunkId: string;
+  } | null>(null);
 
   useEffect(() => {
     const onHashChange = () => setActiveView(viewFromHash(window.location.hash));
@@ -284,6 +381,8 @@ function App() {
   useEffect(() => {
     if (repository) {
       void loadDocuments(repository.id);
+      void loadChatSessions(repository.id);
+      void loadChatReadiness(repository.id);
     }
   }, [repository]);
 
@@ -294,12 +393,21 @@ function App() {
   }, [repository, selectedDocumentId]);
 
   useEffect(() => {
+    if (
+      pendingSourceTarget &&
+      inspection?.document.id === pendingSourceTarget.documentId &&
+      inspection.chunks.some((chunk) => chunk.id === pendingSourceTarget.chunkId)
+    ) {
+      setSelectedChunkId(pendingSourceTarget.chunkId);
+      setPendingSourceTarget(null);
+      return;
+    }
     setSelectedChunkId((current) =>
       current && inspection?.chunks.some((chunk) => chunk.id === current)
         ? current
         : (inspection?.chunks[0]?.id ?? null),
     );
-  }, [inspection]);
+  }, [inspection, pendingSourceTarget]);
 
   const selectedDocument = useMemo(
     () => documents.find((document) => document.id === selectedDocumentId) ?? null,
@@ -310,6 +418,17 @@ function App() {
     () => inspection?.chunks.find((chunk) => chunk.id === selectedChunkId) ?? inspection?.chunks[0] ?? null,
     [inspection, selectedChunkId],
   );
+
+  const activeChatSession = useMemo(
+    () => chatSessions.find((chatSession) => chatSession.id === activeChatSessionId) ?? chatSessions[0] ?? null,
+    [chatSessions, activeChatSessionId],
+  );
+
+  useEffect(() => {
+    if (activeChatSession) {
+      setChatRetrievalSettings(normalizeChatRetrievalSettings(activeChatSession.retrieval_settings));
+    }
+  }, [activeChatSession?.id]);
 
   const contextChunks = useMemo(() => {
     if (!inspection || !selectedChunk) {
@@ -378,6 +497,198 @@ function App() {
     }
   }
 
+  async function loadChatSessions(repositoryId: string) {
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repositoryId}/chat/sessions`);
+      if (!response.ok) {
+        throw new Error("chat sessions unavailable");
+      }
+      const payload = (await response.json()) as ChatSession[];
+      setChatSessions(payload);
+      setActiveChatSessionId((current) => current ?? payload[0]?.id ?? null);
+      setChatMessage(payload.length > 0 ? "Ready" : "No chat sessions yet");
+    } catch {
+      setChatMessage("Could not load chat sessions");
+    }
+  }
+
+  async function loadChatReadiness(repositoryId: string, announce = false) {
+    if (announce) {
+      setChatReadinessBusy(true);
+      setChatMessage("Checking chat readiness");
+    }
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repositoryId}/chat/readiness`);
+      if (!response.ok) {
+        throw new Error("readiness unavailable");
+      }
+      setChatReadiness((await response.json()) as ChatReadiness);
+      setChatReadinessCheckedAt(new Date().toISOString());
+      if (announce) {
+        setChatMessage("Readiness check complete");
+      }
+    } catch {
+      setChatReadiness(null);
+      if (announce) {
+        setChatMessage("Could not check chat readiness");
+      }
+    } finally {
+      if (announce) {
+        setChatReadinessBusy(false);
+      }
+    }
+  }
+
+  async function createChatSession(manageBusy = true) {
+    if (!repository) {
+      return null;
+    }
+    if (manageBusy) {
+      setChatBusy(true);
+    }
+    setChatMessage("Creating chat session");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/chat/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Repository chat",
+          retrieval_settings: chatRetrievalSettings,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("create chat failed");
+      }
+      const payload = (await response.json()) as ChatSession;
+      setChatSessions((current) => [payload, ...current]);
+      setActiveChatSessionId(payload.id);
+      setChatMessage("Ready");
+      return payload;
+    } catch {
+      setChatMessage("Could not create chat session");
+      return null;
+    } finally {
+      if (manageBusy) {
+        setChatBusy(false);
+      }
+    }
+  }
+
+  async function askChatQuestion() {
+    if (!repository || !chatInput.trim()) {
+      return;
+    }
+    const content = chatInput.trim();
+    setChatBusy(true);
+    setChatInput("");
+    setChatMessage("Retrieving context and asking the local model");
+    try {
+      const chatSession = activeChatSession ?? (await createChatSession(false));
+      if (!chatSession) {
+        throw new Error("missing chat session");
+      }
+      const response = await fetch(
+        `${API_BASE}/repositories/${repository.id}/chat/sessions/${chatSession.id}/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, retrieval_settings: chatRetrievalSettings }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error("chat question failed");
+      }
+      const payload = (await response.json()) as ChatQuestionResponse;
+      setChatSessions((current) =>
+        current.map((session) => (session.id === payload.session.id ? payload.session : session)),
+      );
+      setActiveChatSessionId(payload.session.id);
+      setChatRetrievalSettings(payload.session.retrieval_settings);
+      void loadChatReadiness(repository.id);
+      setChatMessage(
+        `${payload.assistant_message.citations.length} citations · run ${
+          payload.assistant_message.retrieval_run_id?.slice(0, 8) ?? "local"
+        }`,
+      );
+    } catch {
+      setChatInput(content);
+      setChatMessage("Chat failed. Check indexes, reranker model, and Ollama setup.");
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  async function deleteChatSession(chatSessionId: string) {
+    if (!repository) {
+      return;
+    }
+    setChatMessage("Deleting chat session");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/chat/sessions/${chatSessionId}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error("delete failed");
+      }
+      setChatSessions((current) => current.filter((session) => session.id !== chatSessionId));
+      setActiveChatSessionId((current) =>
+        current === chatSessionId ? chatSessions.find((session) => session.id !== chatSessionId)?.id ?? null : current,
+      );
+      setChatMessage("Chat session deleted");
+    } catch {
+      setChatMessage("Could not delete chat session");
+    }
+  }
+
+  async function clearChatSessions() {
+    if (!repository || chatSessions.length === 0) {
+      return;
+    }
+    const confirmed = window.confirm("Clear all chat sessions for this repository?");
+    if (!confirmed) {
+      return;
+    }
+    setChatMessage("Clearing chat sessions");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/chat/sessions`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error("clear failed");
+      }
+      setChatSessions([]);
+      setActiveChatSessionId(null);
+      setActiveCitation(null);
+      setChatMessage("All chat sessions cleared");
+    } catch {
+      setChatMessage("Could not clear chat sessions");
+    }
+  }
+
+  async function rebuildChatIndex(kind: "full-text" | "vector") {
+    if (!repository) {
+      return;
+    }
+    setChatRebuildBusy(kind);
+    setChatMessage(`Rebuilding ${kind} index`);
+    try {
+      const endpoint = kind === "vector" ? "vector" : "full-text";
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/${endpoint}/rebuild`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("rebuild failed");
+      }
+      const payload = (await response.json()) as SearchRebuildResponse;
+      setChatMessage(`Indexed ${payload.indexed_chunks} ${kind} chunks`);
+      await loadChatReadiness(repository.id);
+    } catch {
+      setChatMessage(`${kind} rebuild failed`);
+    } finally {
+      setChatRebuildBusy(null);
+    }
+  }
+
   async function uploadFiles(files: FileList | null) {
     if (!repository || !files || files.length === 0) {
       return;
@@ -432,18 +743,66 @@ function App() {
     if (!repository || !selectedDocumentId) {
       return;
     }
+    await deleteDocument(selectedDocumentId);
+  }
+
+  async function deleteDocument(documentId: string) {
+    if (!repository) {
+      return;
+    }
+    const document = documents.find((item) => item.id === documentId);
+    const confirmed = window.confirm(`Delete ${document?.display_name ?? "this document"}?`);
+    if (!confirmed) {
+      return;
+    }
     setBusy(true);
     setMessage("Deleting document");
     try {
-      await fetch(`${API_BASE}/repositories/${repository.id}/documents/${selectedDocumentId}`, {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/documents/${documentId}`, {
         method: "DELETE",
       });
-      setSelectedDocumentId(null);
-      setInspection(null);
+      if (!response.ok) {
+        throw new Error("delete failed");
+      }
+      if (selectedDocumentId === documentId) {
+        setSelectedDocumentId(null);
+        setInspection(null);
+      }
       await loadDocuments(repository.id);
+      await loadChatReadiness(repository.id);
       setMessage("Deleted");
     } catch {
       setMessage("Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteAllDocuments() {
+    if (!repository || documents.length === 0) {
+      return;
+    }
+    const confirmed = window.confirm("Delete all documents in this repository?");
+    if (!confirmed) {
+      return;
+    }
+    setBusy(true);
+    setMessage("Deleting all documents");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/documents`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        throw new Error("delete all failed");
+      }
+      setSelectedDocumentId(null);
+      setInspection(null);
+      setSelectedChunkId(null);
+      await loadDocuments(repository.id);
+      await loadChatReadiness(repository.id);
+      setMessage("All documents deleted");
+    } catch {
+      setMessage("Delete all failed");
     } finally {
       setBusy(false);
     }
@@ -543,7 +902,13 @@ function App() {
 
   function navigateTo(view: View) {
     window.location.hash =
-      view === "documents" ? "documents" : view === "source" ? "source-viewer" : "search-lab";
+      view === "documents"
+        ? "documents"
+        : view === "source"
+          ? "source-viewer"
+          : view === "chat"
+            ? "chat-workspace"
+            : "search-lab";
     setActiveView(view);
     setNavOpen(false);
   }
@@ -554,11 +919,26 @@ function App() {
     navigateTo("source");
   }
 
+  function openChatCitation(citation: ChatCitation) {
+    setPendingSourceTarget({ documentId: citation.document_id, chunkId: citation.chunk_id });
+    setSelectedDocumentId(citation.document_id);
+    setActiveCitation(null);
+    navigateTo("source");
+  }
+
   const title =
-    activeView === "search" ? "Search Lab" : activeView === "source" ? "Source Viewer" : "Document Manager";
+    activeView === "search"
+      ? "Search Lab"
+      : activeView === "source"
+        ? "Source Viewer"
+        : activeView === "chat"
+          ? "Chat Workspace"
+          : "Document Manager";
   const subtitle =
     activeView === "search"
       ? "Inspect full-text retrieval with BM25 scores and citation provenance"
+      : activeView === "chat"
+        ? `${repository?.name ?? "Default Repository"} · ${activeChatSession?.model ?? "local model"} · ${chatMessage}`
       : `${repository?.name ?? "Default Repository"} · ${message}`;
 
   return (
@@ -601,7 +981,13 @@ function App() {
               Search Lab
             </a>
             <a>Prompt Sandbox</a>
-            <a>Chat Workspace</a>
+            <a
+              className={activeView === "chat" ? "active" : ""}
+              href="#chat-workspace"
+              onClick={() => navigateTo("chat")}
+            >
+              Chat Workspace
+            </a>
             <span className="nav-label">Manage</span>
             <a>Settings / Models</a>
             <a>Recreate Repository</a>
@@ -630,16 +1016,26 @@ function App() {
             </div>
             <div className="topbar-actions">
               {activeView === "documents" && (
-                <label className="btn btn-primary upload-button">
-                  Upload documents
-                  <input
-                    type="file"
-                    multiple
-                    accept=".pdf,.txt,.md,.markdown,.ann,application/pdf,text/plain,text/markdown"
-                    onChange={(event) => void uploadFiles(event.target.files)}
-                    disabled={busy || !repository}
-                  />
-                </label>
+                <>
+                  <label className="btn btn-primary upload-button">
+                    Upload documents
+                    <input
+                      type="file"
+                      multiple
+                      accept=".pdf,.txt,.md,.markdown,.ann,application/pdf,text/plain,text/markdown"
+                      onChange={(event) => void uploadFiles(event.target.files)}
+                      disabled={busy || !repository}
+                    />
+                  </label>
+                  <button
+                    className="btn btn-ghost danger-action"
+                    type="button"
+                    onClick={() => void deleteAllDocuments()}
+                    disabled={busy || documents.length === 0}
+                  >
+                    Delete all
+                  </button>
+                </>
               )}
               <button
                 className="theme-toggle"
@@ -696,6 +1092,33 @@ function App() {
                 onRebuild={() => void rebuildSearchIndex()}
                 onSearch={() => void runSearch()}
                 onOpenResult={openSearchResult}
+              />
+            ) : activeView === "chat" ? (
+              <ChatWorkspace
+                sessions={chatSessions}
+                activeSession={activeChatSession}
+                input={chatInput}
+                busy={chatBusy}
+                message={chatMessage}
+                activeCitation={activeCitation}
+                retrievalSettings={chatRetrievalSettings}
+                readiness={chatReadiness}
+                readinessBusy={chatReadinessBusy}
+                readinessCheckedAt={chatReadinessCheckedAt}
+                rebuildBusy={chatRebuildBusy}
+                onInputChange={setChatInput}
+                onCreateSession={() => void createChatSession()}
+                onSelectSession={setActiveChatSessionId}
+                onDeleteSession={(chatSessionId) => void deleteChatSession(chatSessionId)}
+                onClearSessions={() => void clearChatSessions()}
+                onAsk={() => void askChatQuestion()}
+                onRetrievalSettingsChange={setChatRetrievalSettings}
+                onRebuildFullText={() => void rebuildChatIndex("full-text")}
+                onRebuildVector={() => void rebuildChatIndex("vector")}
+                onCheckReadiness={() => repository && void loadChatReadiness(repository.id, true)}
+                onCitationClick={setActiveCitation}
+                onCloseCitation={() => setActiveCitation(null)}
+                onOpenCitation={openChatCitation}
               />
             ) : (
               <>
@@ -794,16 +1217,26 @@ function App() {
                                       : "—"}
                                   </td>
                                   <td>
-                                    <button
-                                      className="btn btn-sm btn-ghost"
-                                      type="button"
-                                      onClick={() => {
-                                        setSelectedDocumentId(document.id);
-                                        navigateTo("source");
-                                      }}
-                                    >
-                                      Inspect
-                                    </button>
+                                    <div className="row table-actions">
+                                      <button
+                                        className="btn btn-sm btn-ghost"
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedDocumentId(document.id);
+                                          navigateTo("source");
+                                        }}
+                                      >
+                                        Inspect
+                                      </button>
+                                      <button
+                                        className="btn btn-sm btn-ghost danger-action"
+                                        type="button"
+                                        onClick={() => void deleteDocument(document.id)}
+                                        disabled={busy}
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               ))
@@ -1009,6 +1442,390 @@ function App() {
         </main>
       </div>
     </>
+  );
+}
+
+function ChatWorkspace({
+  sessions,
+  activeSession,
+  input,
+  busy,
+  message,
+  activeCitation,
+  retrievalSettings,
+  readiness,
+  readinessBusy,
+  readinessCheckedAt,
+  rebuildBusy,
+  onInputChange,
+  onCreateSession,
+  onSelectSession,
+  onDeleteSession,
+  onClearSessions,
+  onAsk,
+  onRetrievalSettingsChange,
+  onRebuildFullText,
+  onRebuildVector,
+  onCheckReadiness,
+  onCitationClick,
+  onCloseCitation,
+  onOpenCitation,
+}: {
+  sessions: ChatSession[];
+  activeSession: ChatSession | null;
+  input: string;
+  busy: boolean;
+  message: string;
+  activeCitation: ChatCitation | null;
+  retrievalSettings: ChatRetrievalSettings;
+  readiness: ChatReadiness | null;
+  readinessBusy: boolean;
+  readinessCheckedAt: string | null;
+  rebuildBusy: "full-text" | "vector" | null;
+  onInputChange: (value: string) => void;
+  onCreateSession: () => void;
+  onSelectSession: (value: string) => void;
+  onDeleteSession: (value: string) => void;
+  onClearSessions: () => void;
+  onAsk: () => void;
+  onRetrievalSettingsChange: (value: ChatRetrievalSettings) => void;
+  onRebuildFullText: () => void;
+  onRebuildVector: () => void;
+  onCheckReadiness: () => void;
+  onCitationClick: (citation: ChatCitation) => void;
+  onCloseCitation: () => void;
+  onOpenCitation: (citation: ChatCitation) => void;
+}) {
+  const threadRef = useRef<HTMLDivElement | null>(null);
+  const readyForSelectedMode = chatReadyForSelectedMode(readiness, retrievalSettings);
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (thread) {
+      thread.scrollTop = thread.scrollHeight;
+    }
+  }, [activeSession?.messages.length, busy]);
+
+  return (
+    <>
+      <div className="chat-layout">
+        <aside className="chat-side">
+          <div className="card card-pad-sm session-list">
+            <div className="row row-between session-head">
+              <div className="eyebrow">Sessions</div>
+              <div className="row session-actions">
+                <button className="btn btn-sm btn-ghost" type="button" onClick={onCreateSession} disabled={busy}>
+                  New
+                </button>
+                <button
+                  className="btn btn-sm btn-ghost danger-action"
+                  type="button"
+                  onClick={onClearSessions}
+                  disabled={busy || sessions.length === 0}
+                >
+                  Clear all
+                </button>
+              </div>
+            </div>
+            {sessions.length > 0 ? (
+              sessions.map((session) => (
+                <div
+                  className={session.id === activeSession?.id ? "session-item active" : "session-item"}
+                  key={session.id}
+                >
+                  <button type="button" onClick={() => onSelectSession(session.id)}>
+                    <span>{session.title}</span>
+                    <small>
+                      {formatDate(session.updated_at)} · {session.messages.length} msgs
+                    </small>
+                  </button>
+                  <button
+                    className="session-delete"
+                    type="button"
+                    onClick={() => onDeleteSession(session.id)}
+                    disabled={busy}
+                    aria-label={`Delete ${session.title}`}
+                  >
+                    x
+                  </button>
+                </div>
+              ))
+            ) : (
+              <p className="muted">No saved chats yet.</p>
+            )}
+          </div>
+
+          <div className="card card-pad-sm chat-settings-panel">
+            <div className="row row-between">
+              <div>
+                <div className="eyebrow">Chat retrieval</div>
+                <h2>{readyForSelectedMode ? "Ready for chat" : "Repository context not ready"}</h2>
+                <p className="hint chat-check-status">
+                  {readinessBusy
+                    ? "Checking indexes and local model"
+                    : readinessCheckedAt
+                      ? `Last checked ${formatTime(readinessCheckedAt)}`
+                      : "Run Check to refresh readiness"}
+                </p>
+              </div>
+              <button
+                className="btn btn-sm"
+                type="button"
+                onClick={onCheckReadiness}
+                disabled={busy || readinessBusy}
+              >
+                {readinessBusy ? "Checking" : "Check"}
+              </button>
+            </div>
+            <div className="grid grid-3 chat-settings-controls">
+              <div>
+                <label className="field" htmlFor="chat-mode">
+                  Mode
+                </label>
+                <select
+                  id="chat-mode"
+                  value={retrievalSettings.mode}
+                  onChange={(event) =>
+                    onRetrievalSettingsChange({
+                      ...retrievalSettings,
+                      mode: event.target.value as ChatRetrievalSettings["mode"],
+                    })
+                  }
+                >
+                  <option value="full_text">Full-text</option>
+                  <option value="vector">Vector</option>
+                  <option value="hybrid">Hybrid</option>
+                </select>
+              </div>
+              <div>
+                <label className="field" htmlFor="chat-reranker">
+                  Reranker
+                </label>
+                <select
+                  id="chat-reranker"
+                  value={retrievalSettings.reranker_strategy}
+                  onChange={(event) =>
+                    onRetrievalSettingsChange({
+                      ...retrievalSettings,
+                      reranker_strategy: event.target.value as RerankerStrategy,
+                    })
+                  }
+                >
+                  <option value="none">None</option>
+                  <option value="cross_encoder">Cross-encoder</option>
+                  <option value="metadata_boost">Metadata boost</option>
+                  <option value="cross_encoder_metadata_boost">Cross-encoder + metadata boost</option>
+                </select>
+              </div>
+              <div>
+                <label className="field" htmlFor="chat-top-k">
+                  Top-k
+                </label>
+                <select
+                  id="chat-top-k"
+                  value={retrievalSettings.top_k}
+                  onChange={(event) =>
+                    onRetrievalSettingsChange({
+                      ...retrievalSettings,
+                      top_k: Number(event.target.value),
+                    })
+                  }
+                >
+                  {[3, 5, 6, 10, 20].map((value) => (
+                    <option value={value} key={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="readiness-grid" data-parsed-chunks={readiness?.parsed_chunks ?? 0}>
+              <ReadinessPill label="Full-text" item={readiness?.full_text ?? null} />
+              <ReadinessPill label="Vector" item={readiness?.vector ?? null} />
+              <ReadinessPill label="Local model" item={readiness?.local_model ?? null} />
+            </div>
+            <div className="row chat-index-actions">
+              <button
+                className="btn btn-sm"
+                type="button"
+                onClick={onRebuildFullText}
+                disabled={busy || rebuildBusy !== null || (readiness?.parsed_chunks ?? 0) === 0}
+              >
+                {rebuildBusy === "full-text" ? "Rebuilding full-text" : "Rebuild full-text"}
+              </button>
+              <button
+                className="btn btn-sm"
+                type="button"
+                onClick={onRebuildVector}
+                disabled={busy || rebuildBusy !== null || (readiness?.parsed_chunks ?? 0) === 0}
+              >
+                {rebuildBusy === "vector" ? "Rebuilding vector" : "Rebuild vector"}
+              </button>
+              <span className="muted">
+                {activeSession?.model ?? "gemma3:4b"} · settings are saved on send
+              </span>
+            </div>
+          </div>
+        </aside>
+
+        <section className="chat-main">
+          <div
+            className={activeSession?.messages.length || busy ? "chat-thread" : "chat-thread chat-thread-empty"}
+            ref={threadRef}
+          >
+            {activeSession?.messages.length ? (
+              activeSession.messages.map((chatMessage) => (
+                <ChatBubble
+                  message={chatMessage}
+                  key={chatMessage.id}
+                  onCitationClick={onCitationClick}
+                />
+              ))
+            ) : (
+              <div className="empty-inline">
+                <h3>Start a repository chat</h3>
+                <p>Questions use fresh hybrid retrieval and cite stored source chunks.</p>
+              </div>
+            )}
+            {busy && (
+              <div className="msg assistant thinking">
+                <div className="eyebrow">Local model</div>
+                <p>Retrieving context and composing an answer</p>
+                <div className="thinking-dots" aria-label="Local LLM is thinking">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="chat-composer">
+            <div className="chat-input">
+              <textarea
+                rows={2}
+                value={input}
+                onChange={(event) => onInputChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing
+                  ) {
+                    event.preventDefault();
+                    onAsk();
+                  }
+                }}
+                placeholder="Ask a question grounded in this repository..."
+                disabled={busy}
+              />
+              <button className="btn btn-primary" type="button" onClick={onAsk} disabled={busy || !input.trim()}>
+                {busy ? "Sending" : "Send"}
+              </button>
+            </div>
+            <p className="hint">{busy ? "Local model is still working..." : message}</p>
+          </div>
+        </section>
+      </div>
+
+      {activeCitation && (
+        <div className="overlay open" role="dialog" aria-modal="true">
+          <div className="modal citation-modal">
+            <div className="modal-head">
+              <div>
+                <div className="eyebrow">Citation {activeCitation.token}</div>
+                <h2>{activeCitation.document_title}</h2>
+              </div>
+              <button className="close-x" type="button" onClick={onCloseCitation} aria-label="Close citation">
+                x
+              </button>
+            </div>
+            <div className="source-card">
+              <div className="meta">
+                {citationProvenanceLabel(activeCitation)} · chunk {activeCitation.chunk_index + 1} ·
+                retrieval rank {activeCitation.retrieval_rank}
+              </div>
+              {activeCitation.text_preview && (
+                <p
+                  className="citation-preview"
+                  dangerouslySetInnerHTML={{ __html: activeCitation.text_preview }}
+                />
+              )}
+              <dl className="kv">
+                <dt>document</dt>
+                <dd>{activeCitation.document_id}</dd>
+                <dt>version</dt>
+                <dd>{activeCitation.document_version_id}</dd>
+                <dt>chunk</dt>
+                <dd>{activeCitation.chunk_id}</dd>
+                <dt>section</dt>
+                <dd>{activeCitation.section ?? "—"}</dd>
+              </dl>
+              <div className="row result-meta">
+                {activeCitation.metadata.source_type && (
+                  <span className="badge">{activeCitation.metadata.source_type}</span>
+                )}
+                {activeCitation.metadata.document_kind && (
+                  <span className="badge">{activeCitation.metadata.document_kind}</span>
+                )}
+                {activeCitation.metadata.has_table && <span className="badge">table</span>}
+                {activeCitation.metadata.has_figure && <span className="badge">figure</span>}
+              </div>
+            </div>
+            <div className="row modal-actions">
+              <button className="btn btn-primary" type="button" onClick={() => onOpenCitation(activeCitation)}>
+                Open in Source Viewer
+              </button>
+              <button className="btn btn-ghost" type="button" onClick={onCloseCitation}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function ReadinessPill({ label, item }: { label: string; item: ChatReadinessItem | null }) {
+  const ready = item?.ready === true;
+  const status = item?.status ?? "missing";
+  const statusLabel = status === "partial" ? "Partial" : status === "stale" ? "Stale" : ready ? "Ready" : "Needed";
+  return (
+    <div className={`readiness-pill ${status}`} data-readiness-status={status}>
+      <span>{label}</span>
+      <b>{statusLabel}</b>
+      <small>{item?.message ?? "Not checked yet"}</small>
+    </div>
+  );
+}
+
+function ChatBubble({
+  message,
+  onCitationClick,
+}: {
+  message: ChatMessage;
+  onCitationClick: (citation: ChatCitation) => void;
+}) {
+  return (
+    <div className={message.role === "user" ? "msg user" : "msg assistant"}>
+      <p>{message.content}</p>
+      {message.citations.length > 0 && (
+        <div className="chat-citations">
+          {message.citations.map((citation) => (
+            <button
+              className="cite"
+              type="button"
+              key={`${message.id}-${citation.citation_id}`}
+              onClick={() => onCitationClick(citation)}
+              title={`${citation.document_title}, ${citationProvenanceLabel(citation)}`}
+            >
+              {citation.token}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1655,6 +2472,30 @@ function formatDate(value: string) {
   );
 }
 
+function formatTime(value: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(new Date(value));
+}
+
+function chatReadyForSelectedMode(
+  readiness: ChatReadiness | null,
+  settings: ChatRetrievalSettings,
+) {
+  if (!readiness || readiness.parsed_chunks <= 0 || !readiness.local_model.ready) {
+    return false;
+  }
+  if (settings.mode === "full_text") {
+    return readiness.full_text.ready;
+  }
+  if (settings.mode === "vector") {
+    return readiness.vector.ready;
+  }
+  return readiness.full_text.ready && readiness.vector.ready;
+}
+
 function searchProvenanceLabel(result: SearchResult) {
   if (result.page_start) {
     return `p. ${result.page_start}${result.page_end && result.page_end !== result.page_start ? `-${result.page_end}` : ""}`;
@@ -1663,6 +2504,16 @@ function searchProvenanceLabel(result: SearchResult) {
     return `lines ${result.line_start}${result.line_end && result.line_end !== result.line_start ? `-${result.line_end}` : ""}`;
   }
   return result.section ?? "document";
+}
+
+function citationProvenanceLabel(citation: ChatCitation) {
+  if (citation.page_start) {
+    return `p. ${citation.page_start}${citation.page_end && citation.page_end !== citation.page_start ? `-${citation.page_end}` : ""}`;
+  }
+  if (citation.line_start) {
+    return `lines ${citation.line_start}${citation.line_end && citation.line_end !== citation.line_start ? `-${citation.line_end}` : ""}`;
+  }
+  return citation.section ?? "document";
 }
 
 function searchModeLabel(mode: SearchMode) {
@@ -1682,7 +2533,18 @@ function shortModelName(model: string) {
   return parts[parts.length - 1] ?? model;
 }
 
+function normalizeChatRetrievalSettings(settings: Partial<ChatRetrievalSettings>): ChatRetrievalSettings {
+  return {
+    mode: settings.mode ?? "hybrid",
+    top_k: settings.top_k ?? 6,
+    reranker_strategy: settings.reranker_strategy ?? "cross_encoder",
+  };
+}
+
 function viewFromHash(hash: string): View {
+  if (hash === "#chat-workspace") {
+    return "chat";
+  }
   if (hash === "#search-lab") {
     return "search";
   }
