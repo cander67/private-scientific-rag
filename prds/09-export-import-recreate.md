@@ -1,5 +1,7 @@
 # PRD 9: Export, Import, and Recreate Repository
 
+**Status:** Ready next.
+
 ## Goal
 
 Export complete research bundles and recreate repositories from settings, manifests, source files, and local models across supported operating systems.

@@ -11,7 +11,8 @@ Current status:
 - Complete: PRD5 vector search with Qdrant.
 - Complete: PRD6 hybrid search and reranking.
 - Complete: PRD7 local RAG chat with citations.
-- In Progress: PRD8 prompt sandbox.
+- Complete: PRD8 prompt sandbox.
+- Ready Next: PRD9 export, import, and recreate repository.
 - Backlog: PRD17 search metadata quality and result labeling.
 - Backlog: PRD18 golden evaluation and evidence-backed promotion.
 
@@ -47,8 +48,8 @@ PRD files:
 5. [Vector search with Qdrant](05-vector-search-qdrant.md) - complete
 6. [Hybrid search and reranking](06-hybrid-search-reranking.md) - complete
 7. [Local RAG chat with citations](07-local-rag-chat-citations.md) - complete
-8. [Prompt sandbox](08-prompt-sandbox-evaluation.md) - in progress
-9. [Export, import, and recreate repository](09-export-import-recreate.md)
+8. [Prompt sandbox](08-prompt-sandbox-evaluation.md) - complete
+9. [Export, import, and recreate repository](09-export-import-recreate.md) - ready next
 10. [Structured scientific and multimodal parsing](10-structured-scientific-multimodal-parsing.md)
 11. [Chemistry and patent extensions](11-chemistry-patent-extensions.md)
 12. [Bulk patent data integration](12-bulk-patent-data-integration.md)

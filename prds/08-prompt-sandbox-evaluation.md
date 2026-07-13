@@ -1,5 +1,7 @@
 # PRD 8: Prompt Sandbox
 
+**Status:** Complete and closed.
+
 ## Goal
 
 Create a controlled space to compare prompts, search settings, rerankers, and models before changing normal chat behavior.
