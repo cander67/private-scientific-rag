@@ -10,8 +10,10 @@ Current status:
 - Complete: PRD4 full-text search.
 - Complete: PRD5 vector search with Qdrant.
 - Complete: PRD6 hybrid search and reranking.
-- In Progress: PRD7 local RAG chat with citations.
+- Complete: PRD7 local RAG chat with citations.
+- In Progress: PRD8 prompt sandbox.
 - Backlog: PRD17 search metadata quality and result labeling.
+- Backlog: PRD18 golden evaluation and evidence-backed promotion.
 
 The intended flow is:
 
@@ -33,6 +35,7 @@ Shared decisions:
 - Public repo posture: no secrets, no private data, no generated indexes, no model files, and no restricted document corpus in Git.
 - Patent scope: PRD3 supports user-uploaded patent PDFs. Bulk downloads, raw patent feeds, and cross-jurisdiction patent-data normalization are deferred to PRD12.
 - Search metadata scope: PRD17 will distinguish chunk-level facts, document-level hints, parser hints, and active filters so Search Lab result labels are trustworthy.
+- Evaluation scope: PRD18 owns golden query datasets, retrieval metrics, and evidence-backed promotion to chat defaults. PRD8 stays focused on the researcher-facing Prompt Sandbox.
 - Test fixture posture: default CI uses `tests/fixtures/`, not `documents/golden_corpus/`.
 
 PRD files:
@@ -43,8 +46,8 @@ PRD files:
 4. [Full-text search](04-full-text-search.md) - complete
 5. [Vector search with Qdrant](05-vector-search-qdrant.md) - complete
 6. [Hybrid search and reranking](06-hybrid-search-reranking.md) - complete
-7. [Local RAG chat with citations](07-local-rag-chat-citations.md) - in progress
-8. [Prompt sandbox and evaluation](08-prompt-sandbox-evaluation.md)
+7. [Local RAG chat with citations](07-local-rag-chat-citations.md) - complete
+8. [Prompt sandbox](08-prompt-sandbox-evaluation.md) - in progress
 9. [Export, import, and recreate repository](09-export-import-recreate.md)
 10. [Structured scientific and multimodal parsing](10-structured-scientific-multimodal-parsing.md)
 11. [Chemistry and patent extensions](11-chemistry-patent-extensions.md)
@@ -54,3 +57,4 @@ PRD files:
 15. [Additional embedding models](15-additional-embedding-models.md)
 16. [Immutable embedding indexes](16-immutable-embedding-indexes.md)
 17. [Search metadata quality and result labeling](17-search-metadata-quality-result-labeling.md)
+18. [Golden evaluation and evidence-backed promotion](18-golden-evaluation-evidence-promotion.md) - backlog
