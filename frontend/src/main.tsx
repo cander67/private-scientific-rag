@@ -2288,7 +2288,7 @@ function ExportCenter({
                 onChange={(event) => onIncludeSandboxChange(event.target.checked)}
               />
               <span>
-                <strong>Include PRD8 sandbox runs/comparisons</strong>
+                <strong>Include sandbox runs/comparisons</strong>
                 <small>{includeSandbox ? "Sandbox history will be packaged" : "Default export excludes sandbox runs"}</small>
               </span>
             </label>
