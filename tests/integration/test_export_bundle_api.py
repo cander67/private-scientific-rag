@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Generator
+from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -111,6 +112,138 @@ def test_export_bundle_can_exclude_sources_and_opt_into_sandbox(
         assert manifest["sources"][0]["bundle_path"] is None
         assert manifest["sources"][0]["included"] is False
         assert manifest["counts"]["sandbox_runs"] == 1
+
+
+def test_validate_bundle_endpoint_accepts_valid_bundle_and_reports_summary(
+    tmp_path: Path,
+) -> None:
+    client, session_factory, _ = _client_with_database()
+    repository_id, _ = _seed_repository(session_factory, tmp_path)
+    bundle = client.post(f"/repositories/{repository_id}/exports/bundle").content
+
+    response = client.post(
+        "/repositories/recreate/bundle/validate",
+        files={"file": ("export.zip", bundle, "application/zip")},
+        data={"available_models_json": json.dumps([])},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["can_recreate"] is True
+    assert payload["counts"]["sources"] == 1
+    assert payload["counts"]["chunks"] == 1
+    assert {issue["code"] for issue in payload["warnings"]} == {"missing_model"}
+    assert "source_hash_verified" in {issue["code"] for issue in payload["informational"]}
+    assert "parser_fingerprint" in {issue["code"] for issue in payload["informational"]}
+
+
+def test_validate_bundle_endpoint_reports_missing_payload(
+    tmp_path: Path,
+) -> None:
+    client, session_factory, _ = _client_with_database()
+    repository_id, _ = _seed_repository(session_factory, tmp_path)
+    bundle = _remove_zip_member(
+        client.post(f"/repositories/{repository_id}/exports/bundle").content,
+        "payloads/chunks.json",
+    )
+
+    response = client.post(
+        "/repositories/recreate/bundle/validate",
+        files={"file": ("export.zip", bundle, "application/zip")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["can_recreate"] is False
+    assert "missing_payload" in {issue["code"] for issue in payload["blocking_errors"]}
+
+
+def test_validate_bundle_endpoint_reports_included_source_hash_mismatch(
+    tmp_path: Path,
+) -> None:
+    client, session_factory, _ = _client_with_database()
+    repository_id, source_digest = _seed_repository(session_factory, tmp_path)
+    bundle = _replace_zip_member(
+        client.post(f"/repositories/{repository_id}/exports/bundle").content,
+        f"sources/{source_digest}/paper.txt",
+        b"changed bytes",
+    )
+
+    response = client.post(
+        "/repositories/recreate/bundle/validate",
+        files={"file": ("export.zip", bundle, "application/zip")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["can_recreate"] is False
+    assert "source_hash_mismatch" in {issue["code"] for issue in payload["blocking_errors"]}
+
+
+def test_validate_bundle_endpoint_accepts_external_source_mapping(
+    tmp_path: Path,
+) -> None:
+    client, session_factory, _ = _client_with_database()
+    repository_id, source_digest = _seed_repository(session_factory, tmp_path)
+    bundle = client.post(
+        f"/repositories/{repository_id}/exports/bundle",
+        params={"include_sources": "false"},
+    ).content
+    mapped_source = tmp_path / "renamed-paper.txt"
+    mapped_source.write_bytes(b"alpha beta gamma")
+
+    response = client.post(
+        "/repositories/recreate/bundle/validate",
+        files={"file": ("export.zip", bundle, "application/zip")},
+        data={
+            "available_models_json": json.dumps([]),
+            "source_mappings_json": json.dumps(
+                [{"sha256": source_digest, "path": str(mapped_source)}]
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["can_recreate"] is True
+    assert "external_source_renamed" in {issue["code"] for issue in payload["warnings"]}
+    assert "external_source_hash_verified" in {issue["code"] for issue in payload["informational"]}
+
+
+def test_validate_bundle_endpoint_reports_external_source_failures(
+    tmp_path: Path,
+) -> None:
+    client, session_factory, _ = _client_with_database()
+    repository_id, source_digest = _seed_repository(session_factory, tmp_path)
+    bundle = client.post(
+        f"/repositories/{repository_id}/exports/bundle",
+        params={"include_sources": "false"},
+    ).content
+    wrong_source = tmp_path / "paper.txt"
+    wrong_source.write_bytes(b"wrong")
+
+    missing_mapping_response = client.post(
+        "/repositories/recreate/bundle/validate",
+        files={"file": ("export.zip", bundle, "application/zip")},
+    )
+    mismatch_response = client.post(
+        "/repositories/recreate/bundle/validate",
+        files={"file": ("export.zip", bundle, "application/zip")},
+        data={
+            "source_mappings_json": json.dumps(
+                [{"sha256": source_digest, "path": str(wrong_source)}]
+            ),
+        },
+    )
+
+    assert missing_mapping_response.status_code == 200
+    assert mismatch_response.status_code == 200
+    assert "missing_external_source_mapping" in {
+        issue["code"] for issue in missing_mapping_response.json()["blocking_errors"]
+    }
+    assert "external_source_hash_mismatch" in {
+        issue["code"] for issue in mismatch_response.json()["blocking_errors"]
+    }
 
 
 def _seed_repository(
@@ -295,3 +428,23 @@ def _seed_repository(
 
         session.commit()
         return repository_id, source_digest
+
+
+def _remove_zip_member(data: bytes, removed_path: str) -> bytes:
+    buffer = BytesIO()
+    with ZipFile(BytesIO(data)) as source_archive, ZipFile(buffer, "w") as target_archive:
+        for name in source_archive.namelist():
+            if name != removed_path:
+                target_archive.writestr(name, source_archive.read(name))
+    return buffer.getvalue()
+
+
+def _replace_zip_member(data: bytes, replaced_path: str, replacement: bytes) -> bytes:
+    buffer = BytesIO()
+    with ZipFile(BytesIO(data)) as source_archive, ZipFile(buffer, "w") as target_archive:
+        for name in source_archive.namelist():
+            target_archive.writestr(
+                name,
+                replacement if name == replaced_path else source_archive.read(name),
+            )
+    return buffer.getvalue()

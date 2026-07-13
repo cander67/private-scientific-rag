@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from io import BytesIO
 from pathlib import Path
+from zipfile import ZipFile
 
 from private_rag.exports.schemas import ExportBundleManifest
-from private_rag.exports.service import sha256_file, source_bundle_path
+from private_rag.exports.service import (
+    MANIFEST_PATH,
+    sha256_file,
+    source_bundle_path,
+    validate_export_bundle_data,
+)
 
 
 def test_source_bundle_path_is_stable_and_sanitized() -> None:
@@ -38,3 +46,29 @@ def test_export_bundle_manifest_schema_accepts_phase_one_contract() -> None:
 
     assert manifest.bundle_schema_version == 1
     assert manifest.bundle_format == "private-rag-repository-export"
+
+
+def test_validate_export_bundle_rejects_invalid_zip() -> None:
+    result = validate_export_bundle_data(b"not a zip")
+
+    assert result.can_recreate is False
+    assert result.blocking_errors[0].code == "invalid_zip"
+
+
+def test_validate_export_bundle_rejects_unsupported_schema_version() -> None:
+    buffer = BytesIO()
+    with ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            MANIFEST_PATH,
+            json.dumps(
+                {
+                    "bundle_schema_version": 2,
+                    "bundle_format": "private-rag-repository-export",
+                }
+            ),
+        )
+
+    result = validate_export_bundle_data(buffer.getvalue())
+
+    assert result.can_recreate is False
+    assert result.blocking_errors[0].code == "unsupported_schema_version"

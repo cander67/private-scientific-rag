@@ -3,13 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path
-from typing import Any
-from zipfile import ZIP_DEFLATED, ZipFile
+from typing import Any, Literal
+from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,9 @@ from private_rag.exports.schemas import (
     ExportBundleManifest,
     ExportBundleOptions,
     ExportBundleSource,
+    ExportBundleSourceMapping,
+    ExportBundleValidationIssue,
+    ExportBundleValidationResponse,
 )
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
 from private_rag.prompt_sandbox.models import (
@@ -136,6 +140,101 @@ def build_export_bundle(
         data=zip_data,
         manifest=manifest,
     )
+
+
+def validate_export_bundle_data(
+    data: bytes,
+    available_models: Sequence[str] | None = None,
+    source_mappings: Sequence[ExportBundleSourceMapping] | None = None,
+) -> ExportBundleValidationResponse:
+    try:
+        with ZipFile(BytesIO(data)) as archive:
+            names = set(archive.namelist())
+            if MANIFEST_PATH not in names:
+                return _validation_response(
+                    errors=[
+                        _issue(
+                            "error",
+                            "missing_manifest",
+                            "Export bundle is missing manifest.json.",
+                            path=MANIFEST_PATH,
+                        )
+                    ]
+                )
+
+            try:
+                manifest_payload = json.loads(archive.read(MANIFEST_PATH))
+            except json.JSONDecodeError as exc:
+                return _validation_response(
+                    errors=[
+                        _issue(
+                            "error",
+                            "invalid_manifest_json",
+                            f"manifest.json is not valid JSON: {exc.msg}.",
+                            path=MANIFEST_PATH,
+                        )
+                    ]
+                )
+
+            unsupported_schema_issue = _unsupported_schema_issue(manifest_payload)
+            if unsupported_schema_issue is not None:
+                return _validation_response(errors=[unsupported_schema_issue])
+
+            try:
+                manifest = ExportBundleManifest.model_validate(manifest_payload)
+            except ValidationError as exc:
+                return _validation_response(
+                    errors=[
+                        _issue(
+                            "error",
+                            "invalid_manifest_schema",
+                            f"manifest.json does not match the export bundle schema: {exc.errors()[0]['msg']}.",
+                            path=MANIFEST_PATH,
+                        )
+                    ]
+                )
+
+            errors: list[ExportBundleValidationIssue] = []
+            warnings: list[ExportBundleValidationIssue] = []
+            informational: list[ExportBundleValidationIssue] = []
+            payloads = _read_payloads(archive, manifest, names, errors)
+            _validate_source_entries(
+                archive=archive,
+                names=names,
+                manifest=manifest,
+                source_mappings=source_mappings or [],
+                errors=errors,
+                warnings=warnings,
+                informational=informational,
+            )
+            _validate_models(
+                manifest=manifest,
+                available_models=available_models,
+                warnings=warnings,
+                informational=informational,
+            )
+            _validate_counts(manifest, payloads, errors)
+            _report_parser_fingerprints(payloads, informational)
+
+            return ExportBundleValidationResponse(
+                can_recreate=not errors,
+                manifest=manifest,
+                counts=dict(manifest.counts),
+                required_models=list(manifest.required_models),
+                blocking_errors=errors,
+                warnings=warnings,
+                informational=informational,
+            )
+    except BadZipFile:
+        return _validation_response(
+            errors=[
+                _issue(
+                    "error",
+                    "invalid_zip",
+                    "Export bundle is not a valid ZIP file.",
+                )
+            ]
+        )
 
 
 def source_bundle_path(sha256: str, filename: str) -> str:
@@ -484,3 +583,350 @@ def _safe_filename(filename: str) -> str:
 def _bundle_filename(repository_name: str) -> str:
     safe_name = _safe_filename(repository_name).removesuffix(".zip")
     return f"{safe_name or 'repository'}-export.zip"
+
+
+def _read_payloads(
+    archive: ZipFile,
+    manifest: ExportBundleManifest,
+    names: set[str],
+    errors: list[ExportBundleValidationIssue],
+) -> dict[str, Any]:
+    payloads: dict[str, Any] = {}
+    for payload_name, path in manifest.payloads.items():
+        if path not in names:
+            errors.append(
+                _issue(
+                    "error",
+                    "missing_payload",
+                    f"Bundle is missing payload '{payload_name}' at {path}.",
+                    path=path,
+                )
+            )
+            continue
+        try:
+            payloads[payload_name] = json.loads(archive.read(path))
+        except json.JSONDecodeError as exc:
+            errors.append(
+                _issue(
+                    "error",
+                    "invalid_payload_json",
+                    f"Payload '{payload_name}' is not valid JSON: {exc.msg}.",
+                    path=path,
+                )
+            )
+    return payloads
+
+
+def _validate_source_entries(
+    archive: ZipFile,
+    names: set[str],
+    manifest: ExportBundleManifest,
+    source_mappings: Sequence[ExportBundleSourceMapping],
+    errors: list[ExportBundleValidationIssue],
+    warnings: list[ExportBundleValidationIssue],
+    informational: list[ExportBundleValidationIssue],
+) -> None:
+    mappings_by_version = {
+        mapping.document_version_id: mapping
+        for mapping in source_mappings
+        if mapping.document_version_id is not None
+    }
+    mappings_by_hash = {mapping.sha256: mapping for mapping in source_mappings}
+    for source in manifest.sources:
+        if source.included:
+            _validate_included_source(archive, names, source, errors, informational)
+        else:
+            _validate_external_source_mapping(
+                source=source,
+                mapping=mappings_by_version.get(source.document_version_id)
+                or mappings_by_hash.get(source.sha256),
+                errors=errors,
+                warnings=warnings,
+                informational=informational,
+            )
+
+
+def _validate_included_source(
+    archive: ZipFile,
+    names: set[str],
+    source: ExportBundleSource,
+    errors: list[ExportBundleValidationIssue],
+    informational: list[ExportBundleValidationIssue],
+) -> None:
+    if source.bundle_path is None or source.bundle_path not in names:
+        errors.append(
+            _issue(
+                "error",
+                "missing_bundle_source",
+                f"Included source file is missing from the bundle: {source.original_filename}.",
+                path=source.bundle_path,
+                source_sha256=source.sha256,
+                document_version_id=source.document_version_id,
+            )
+        )
+        return
+
+    data = archive.read(source.bundle_path)
+    actual_sha256 = hashlib.sha256(data).hexdigest()
+    if actual_sha256 != source.sha256:
+        errors.append(
+            _issue(
+                "error",
+                "source_hash_mismatch",
+                f"Included source hash does not match manifest for {source.original_filename}.",
+                path=source.bundle_path,
+                source_sha256=source.sha256,
+                document_version_id=source.document_version_id,
+            )
+        )
+        return
+    if len(data) != source.byte_size:
+        errors.append(
+            _issue(
+                "error",
+                "source_size_mismatch",
+                f"Included source byte size does not match manifest for {source.original_filename}.",
+                path=source.bundle_path,
+                source_sha256=source.sha256,
+                document_version_id=source.document_version_id,
+            )
+        )
+        return
+    informational.append(
+        _issue(
+            "info",
+            "source_hash_verified",
+            f"Included source hash verified for {source.original_filename}.",
+            path=source.bundle_path,
+            source_sha256=source.sha256,
+            document_version_id=source.document_version_id,
+        )
+    )
+
+
+def _validate_external_source_mapping(
+    source: ExportBundleSource,
+    mapping: ExportBundleSourceMapping | None,
+    errors: list[ExportBundleValidationIssue],
+    warnings: list[ExportBundleValidationIssue],
+    informational: list[ExportBundleValidationIssue],
+) -> None:
+    if mapping is None:
+        errors.append(
+            _issue(
+                "error",
+                "missing_external_source_mapping",
+                f"Source file is not included and needs an external mapping: {source.original_filename}.",
+                source_sha256=source.sha256,
+                document_version_id=source.document_version_id,
+            )
+        )
+        return
+
+    mapped_path = Path(mapping.path).expanduser()
+    if not mapped_path.exists():
+        errors.append(
+            _issue(
+                "error",
+                "external_source_missing",
+                f"Mapped source file does not exist: {mapping.path}.",
+                path=mapping.path,
+                source_sha256=source.sha256,
+                document_version_id=source.document_version_id,
+            )
+        )
+        return
+
+    actual_sha256 = sha256_file(mapped_path)
+    if actual_sha256 != source.sha256:
+        errors.append(
+            _issue(
+                "error",
+                "external_source_hash_mismatch",
+                f"Mapped source hash does not match manifest for {source.original_filename}.",
+                path=mapping.path,
+                source_sha256=source.sha256,
+                document_version_id=source.document_version_id,
+            )
+        )
+        return
+
+    if mapped_path.name != source.original_filename:
+        warnings.append(
+            _issue(
+                "warning",
+                "external_source_renamed",
+                f"Mapped source filename differs from export metadata: {source.original_filename}.",
+                path=mapping.path,
+                source_sha256=source.sha256,
+                document_version_id=source.document_version_id,
+            )
+        )
+    informational.append(
+        _issue(
+            "info",
+            "external_source_hash_verified",
+            f"External source hash verified for {source.original_filename}.",
+            path=mapping.path,
+            source_sha256=source.sha256,
+            document_version_id=source.document_version_id,
+        )
+    )
+
+
+def _validate_models(
+    manifest: ExportBundleManifest,
+    available_models: Sequence[str] | None,
+    warnings: list[ExportBundleValidationIssue],
+    informational: list[ExportBundleValidationIssue],
+) -> None:
+    if available_models is None:
+        for model in manifest.required_models:
+            warnings.append(
+                _issue(
+                    "warning",
+                    "model_availability_unconfirmed",
+                    f"Required model availability was not checked: {model}.",
+                    setting="model",
+                )
+            )
+        return
+
+    available = set(available_models)
+    for model in manifest.required_models:
+        if model not in available:
+            warnings.append(
+                _issue(
+                    "warning",
+                    "missing_model",
+                    f"Required model is not available: {model}.",
+                    setting="model",
+                )
+            )
+        else:
+            informational.append(
+                _issue(
+                    "info",
+                    "model_available",
+                    f"Required model is available: {model}.",
+                    setting="model",
+                )
+            )
+
+
+def _validate_counts(
+    manifest: ExportBundleManifest,
+    payloads: Mapping[str, Any],
+    errors: list[ExportBundleValidationIssue],
+) -> None:
+    actual_counts = {
+        "sources": len(manifest.sources),
+        "included_sources": sum(1 for source in manifest.sources if source.included),
+        "documents": len(_payload_list(payloads, "documents", "documents")),
+        "document_versions": len(_payload_list(payloads, "documents", "versions")),
+        "chunks": len(_payload_list(payloads, "chunks", "chunks")),
+        "chat_sessions": len(_payload_list(payloads, "chat", "sessions")),
+        "chat_messages": len(_payload_list(payloads, "chat", "messages")),
+        "chat_citations": sum(
+            len(message.get("citations") or {})
+            for message in _payload_list(payloads, "chat", "messages")
+            if isinstance(message, dict)
+        ),
+        "retrieval_runs": len(_payload_list(payloads, "retrieval", "runs")),
+        "retrieval_results": len(_payload_list(payloads, "retrieval", "results")),
+        "sandbox_prompt_versions": len(_payload_list(payloads, "sandbox", "prompt_versions")),
+        "sandbox_runs": len(_payload_list(payloads, "sandbox", "runs")),
+        "sandbox_comparisons": len(_payload_list(payloads, "sandbox", "comparisons")),
+    }
+    for name, expected in manifest.counts.items():
+        actual = actual_counts.get(name)
+        if actual is not None and actual != expected:
+            errors.append(
+                _issue(
+                    "error",
+                    "count_mismatch",
+                    f"Manifest count for {name} is {expected}, but payload contains {actual}.",
+                )
+            )
+
+
+def _report_parser_fingerprints(
+    payloads: Mapping[str, Any],
+    informational: list[ExportBundleValidationIssue],
+) -> None:
+    versions = _payload_list(payloads, "documents", "versions")
+    seen: set[tuple[str, str, int]] = set()
+    for version in versions:
+        if not isinstance(version, dict):
+            continue
+        parser_name = str(version.get("parser_name") or "unknown")
+        parser_version = str(version.get("parser_version") or "unknown")
+        chunk_count = int(version.get("chunk_count") or 0)
+        fingerprint = (parser_name, parser_version, chunk_count)
+        if fingerprint in seen:
+            continue
+        seen.add(fingerprint)
+        informational.append(
+            _issue(
+                "info",
+                "parser_fingerprint",
+                f"Exported parser fingerprint: {parser_name} {parser_version}, {chunk_count} chunks.",
+            )
+        )
+
+
+def _payload_list(payloads: Mapping[str, Any], payload_name: str, field: str) -> list[Any]:
+    payload = payloads.get(payload_name)
+    if not isinstance(payload, dict):
+        return []
+    value = payload.get(field)
+    return value if isinstance(value, list) else []
+
+
+def _unsupported_schema_issue(payload: Any) -> ExportBundleValidationIssue | None:
+    if not isinstance(payload, dict):
+        return _issue(
+            "error",
+            "invalid_manifest_schema",
+            "manifest.json must contain a JSON object.",
+            path=MANIFEST_PATH,
+        )
+    schema_version = payload.get("bundle_schema_version")
+    if schema_version != 1:
+        return _issue(
+            "error",
+            "unsupported_schema_version",
+            f"Unsupported export bundle schema version: {schema_version}.",
+            path=MANIFEST_PATH,
+        )
+    return None
+
+
+def _validation_response(
+    errors: list[ExportBundleValidationIssue] | None = None,
+) -> ExportBundleValidationResponse:
+    blocking_errors = errors or []
+    return ExportBundleValidationResponse(
+        can_recreate=not blocking_errors,
+        blocking_errors=blocking_errors,
+    )
+
+
+def _issue(
+    severity: Literal["error", "warning", "info"],
+    code: str,
+    message: str,
+    path: str | None = None,
+    setting: str | None = None,
+    source_sha256: str | None = None,
+    document_version_id: str | None = None,
+) -> ExportBundleValidationIssue:
+    return ExportBundleValidationIssue(
+        severity=severity,
+        code=code,
+        message=message,
+        path=path,
+        setting=setting,
+        source_sha256=source_sha256,
+        document_version_id=document_version_id,
+    )

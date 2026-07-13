@@ -42,3 +42,33 @@ class ExportBundleBuildResult(BaseModel):
     filename: str
     data: bytes
     manifest: ExportBundleManifest
+
+
+class ExportBundleSourceMapping(BaseModel):
+    sha256: str
+    path: str
+    document_version_id: str | None = None
+
+
+class ExportBundleValidationIssue(BaseModel):
+    severity: Literal["error", "warning", "info"]
+    code: str
+    message: str
+    path: str | None = None
+    setting: str | None = None
+    source_sha256: str | None = None
+    document_version_id: str | None = None
+
+
+class ExportBundleValidationResponse(BaseModel):
+    can_recreate: bool
+    manifest: ExportBundleManifest | None = None
+    counts: dict[str, int] = Field(default_factory=dict)
+    required_models: list[str] = Field(default_factory=list)
+    blocking_errors: list[ExportBundleValidationIssue] = Field(default_factory=list)
+    warnings: list[ExportBundleValidationIssue] = Field(default_factory=list)
+    informational: list[ExportBundleValidationIssue] = Field(default_factory=list)
+
+    @property
+    def issues(self) -> list[ExportBundleValidationIssue]:
+        return [*self.blocking_errors, *self.warnings, *self.informational]
