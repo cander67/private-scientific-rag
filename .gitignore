@@ -48,6 +48,8 @@ example_code/
 data/
 models/
 exports/
+!src/private_rag/exports/
+!src/private_rag/exports/*.py
 logs/
 cache/
 .qdrant/

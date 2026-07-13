@@ -21,6 +21,8 @@ PRD7 chat coverage keeps CI deterministic by mocking the LLM at the chat boundar
 
 PRD8 Prompt Sandbox coverage keeps CI deterministic by mocking the LLM at the sandbox boundary. Default tests cover sandbox prompt version validation, repository-scoped create/list/read/copy/delete behavior, side-by-side comparison persistence, progressive per-run comparison execution, prompt snapshot preservation, retrieved context snapshots, generated answers, citations, latency, and frontend contract coverage for the Prompt Sandbox view. Golden query datasets, aggregate retrieval metrics, and evidence-backed promotion to chat defaults are deferred to PRD18.
 
+PRD9 export/import/recreate coverage has started with the Phase 1 portable bundle contract. Default tests cover deterministic source bundle paths and SHA-256 hashing, manifest schema validation, ZIP structure, default source inclusion, chat/retrieval/chunk/citation payload export, and opt-in sandbox payload export.
+
 ## Live tests
 
 Default CI and `uv run pytest` exclude live tests. Run live checks only when the required local service or model is already available.

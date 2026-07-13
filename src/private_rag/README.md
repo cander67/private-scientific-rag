@@ -12,6 +12,7 @@ Module boundaries:
 - `vector/`: embedding provider boundary, Qdrant vector-store boundary, latest embedding-run metadata, vector index rebuild/search orchestration, and semantic recall evaluation.
 - `retrieval/`: unified retrieval request/response schemas, retrieval run/result persistence, and orchestration across full-text, vector, hybrid, and reranked search modes.
 - `chat/`: local Ollama chat boundary, model registry, chat session/message persistence, RAG prompt assembly, readiness checks, and citation mapping.
+- `exports/`: portable repository ZIP bundle schemas and export assembly.
 - `services/`: local service checks and future domain services.
 - `ingestion/`: document upload models, PDF parser fallback chain, parser/chunker service, source file storage, and provenance schemas.
 - Ingestion keeps original source files, parsed artifacts, chunks, and provenance metadata distinct.
@@ -23,6 +24,7 @@ Current API surface:
 - `GET /repositories/{repository_id}/settings`: loads repository settings.
 - `PUT /repositories/{repository_id}/settings`: validates and saves repository settings.
 - `GET /repositories/{repository_id}/manifest`: exports a reproducibility manifest and stores a snapshot.
+- `POST /repositories/{repository_id}/exports/bundle`: exports a portable repository ZIP with manifest, settings, prompt library, document/chunk metadata, chat history, retrieval history, citations, and selected source files. PRD8 sandbox runs/comparisons are excluded by default and included only when explicitly requested.
 - `POST /repositories/recreate/validate`: reports missing source files, missing models, and incompatible settings before recreate work begins.
 - `POST /repositories/{repository_id}/documents`: uploads and parses a local document.
 - `GET /repositories/{repository_id}/documents`: lists uploaded documents.
@@ -56,7 +58,7 @@ Current status:
 - PRD6 hybrid search and reranking is complete: unified retrieval search, retrieval run/result persistence, five-history retention, hybrid orchestration, Reciprocal Rank Fusion, selectable reranking, comparison evaluation, and Search Lab controls are available.
 - PRD7 local RAG chat with citations is complete and closed: Ollama chat boundary, model registry, readiness checks, chat session persistence, prompt library settings, chat-owned retrieval controls, citation mapping, and Chat Workspace are available.
 - PRD8 Prompt Sandbox is complete and closed: repository-scoped sandbox prompt versions, copy-to/from chat prompt library, prompt deletion, persisted sandbox runs, progressive side-by-side retrieval comparisons, local-model generation, retrieved context snapshots, latency/status display, and the Prompt Sandbox workspace are available. Golden evaluation metrics and evidence-backed promotion are deferred to PRD18.
-- PRD9 export/import/recreate is in progress.
+- PRD9 export/import/recreate is in progress. Phase 1 adds the portable ZIP export bundle contract and backend export endpoint; recreate validation/execution and UI work follow in later phases.
 
 Repository chat prompts live in repository settings under `prompt.library`, with `prompt.active_chat_prompt_id` selecting the active prompt. The default prompt requires repository-grounded answers, inline citations, and explicit uncertainty when context is insufficient. Chat retrieval settings are stored on each chat session and may be overridden per question; they do not inherit frontend Search Lab state and do not trigger automatic index rebuilds. Readiness is explicit: full-text and vector status compare parsed chunks against indexed chunks, report missing/partial/stale/ready states, and require the selected retrieval mode plus a responding local model before chat is marked ready.
 

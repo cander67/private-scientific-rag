@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from private_rag import __version__
 from private_rag.api.routes.chat import router as chat_router
 from private_rag.api.routes.documents import router as documents_router
+from private_rag.api.routes.exports import router as exports_router
 from private_rag.api.routes.health import router as health_router
 from private_rag.api.routes.prompt_sandbox import router as prompt_sandbox_router
 from private_rag.api.routes.repositories import router as repositories_router
@@ -40,6 +41,7 @@ def create_app() -> FastAPI:
     app.include_router(retrieval_router)
     app.include_router(chat_router)
     app.include_router(prompt_sandbox_router)
+    app.include_router(exports_router)
     return app
 
 
