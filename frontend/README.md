@@ -2,7 +2,7 @@
 
 The frontend is a React/Vite app. PRD1 provides the shell, and the static mockups describe the planned repository, document manager, source viewer, search, chat, prompt sandbox, settings, and export workflows.
 
-Current implementation status: PRD1 through PRD8 are complete and closed. PRD9 export/import/recreate is next. The production frontend includes distinct document manager, source viewer, Search Lab, Chat Workspace, and Prompt Sandbox views for upload, document selection, PDF page thumbnails, chunk provenance inspection, `needs_ocr`/zero-chunk inspection states, reprocess, row-level delete, delete-all, full-text/vector/hybrid/reranked retrieval inspection, local RAG chat with citations, and prompt/retrieval/model comparison.
+Current implementation status: PRD1 through PRD8 are complete and closed. PRD9 export/import/recreate is in progress. The production frontend includes distinct document manager, source viewer, Search Lab, Chat Workspace, and Prompt Sandbox views for upload, document selection, PDF page thumbnails, chunk provenance inspection, `needs_ocr`/zero-chunk inspection states, reprocess, row-level delete, delete-all, full-text/vector/hybrid/reranked retrieval inspection, local RAG chat with citations, and prompt/retrieval/model comparison.
 
 Search Lab supports manual full-text and vector index rebuilds, query execution through the unified retrieval API, full-text/vector/hybrid mode selection, reranking strategy selection, candidate-pool and RRF controls, metadata boost level selection, top-k selection, document/section/source filters, table/figure/patent metadata filters, BM25/dense/RRF/rerank/boost/final score display, snippets or chunk previews, matched fields where available, and source navigation for matched chunks.
 

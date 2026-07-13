@@ -1,6 +1,6 @@
 # PRD 9: Export, Import, and Recreate Repository
 
-**Status:** Ready next.
+**Status:** In progress.
 
 ## Goal
 
@@ -23,6 +23,14 @@ Export complete research bundles and recreate repositories from settings, manife
 - Export Center UI.
 - Recreate Repository UI.
 - Cross-platform transfer docs.
+
+## Implementation Decisions
+
+- Recreate should prefer creating a new repository from an exported bundle, while also supporting restore into an existing empty repository.
+- Exported chat and retrieval history should be restored as active records so the recreated repository can build on prior work.
+- Bundles that exclude source files should support mapping external local files by deterministic SHA-256 hash and path, and recreate should report any missing or mismatched files clearly.
+- PRD8 sandbox runs and comparisons should not be included by default; they can be included through an explicit export option.
+- The first implementation should use progress-friendly synchronous export/recreate flows instead of persisted long-running jobs.
 
 ## Acceptance Criteria
 
