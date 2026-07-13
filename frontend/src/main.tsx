@@ -1893,6 +1893,10 @@ function PromptSandbox({
             value={promptBody}
             onChange={(event) => onPromptBodyChange(event.target.value)}
           />
+          <p className="hint">
+            Sandbox prompt versions are isolated from Chat Workspace defaults. Saving, deleting, or
+            running sandbox prompts will not change normal chat behavior.
+          </p>
         </div>
 
         <div className="card">
@@ -2025,8 +2029,12 @@ function SandboxRunCard({
       <dl className="kv sandbox-kv">
         <dt>model</dt>
         <dd>{run?.model ?? progressRun.model}</dd>
+        <dt>prompt</dt>
+        <dd>{run ? sandboxPromptSnapshotName(run.prompt_snapshot) : "pending"}</dd>
         <dt>top-k</dt>
         <dd>{progressRun.retrieval_settings.top_k}</dd>
+        <dt>context</dt>
+        <dd>{run?.context_entries.length ?? "—"}</dd>
         <dt>citations</dt>
         <dd>{run?.citations.length ?? "—"}</dd>
         <dt>run</dt>
@@ -3255,6 +3263,10 @@ function formatScore(value: number | null | undefined) {
 
 function formatLatencySeconds(latencyMs: number) {
   return `${(latencyMs / 1000).toFixed(1)} s`;
+}
+
+function sandboxPromptSnapshotName(snapshot: Record<string, unknown>) {
+  return typeof snapshot.name === "string" && snapshot.name.trim() ? snapshot.name : "Snapshot";
 }
 
 function viewFromHash(hash: string): View {

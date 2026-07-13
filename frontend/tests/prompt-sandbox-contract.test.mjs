@@ -44,6 +44,9 @@ test("Prompt Sandbox renders side-by-side run cards with context links", () => {
   assert.match(source, /sandbox-run-card/);
   assert.match(source, /context_entries/);
   assert.match(source, /score_breakdown/);
+  assert.match(source, /sandboxPromptSnapshotName/);
+  assert.match(source, /<dt>prompt<\/dt>/);
+  assert.match(source, /<dt>context<\/dt>/);
   assert.match(source, /onOpenContext/);
   assert.match(source, /openSandboxContext/);
   assert.match(source, /View source/);
@@ -53,6 +56,7 @@ test("Prompt Sandbox renders side-by-side run cards with context links", () => {
 
 test("Prompt Sandbox reflects user-testing remediation states", () => {
   assert.match(source, /Delete version/);
+  assert.match(source, /will not change normal chat behavior/);
   assert.match(source, /method: "DELETE"/);
   assert.match(source, /Running comparison\.\.\./);
   assert.match(source, /aria-busy=\{busy\}/);

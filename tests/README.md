@@ -19,6 +19,8 @@ PRD6 retrieval coverage includes deterministic integration tests for the unified
 
 PRD7 chat coverage keeps CI deterministic by mocking the LLM at the chat boundary. Default tests cover repository prompt-library settings, prompt/context assembly, citation-token mapping, model registry responses, chat session/message persistence, hybrid retrieval wiring with a fake reranker, and assistant citation metadata persisted from a mocked LLM response. Live local LLM tests are separate opt-in commands.
 
+PRD8 Prompt Sandbox coverage keeps CI deterministic by mocking the LLM at the sandbox boundary. Default tests cover sandbox prompt version validation, repository-scoped create/list/read/copy/delete behavior, side-by-side comparison persistence, progressive per-run comparison execution, prompt snapshot preservation, retrieved context snapshots, generated answers, citations, latency, and frontend contract coverage for the Prompt Sandbox view. Golden query datasets, aggregate retrieval metrics, and evidence-backed promotion to chat defaults are deferred to PRD18.
+
 ## Live tests
 
 Default CI and `uv run pytest` exclude live tests. Run live checks only when the required local service or model is already available.
@@ -86,6 +88,10 @@ Run:
 ```bash
 RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_chat_rag_live.py
 ```
+
+### Prompt Sandbox live note
+
+Prompt Sandbox product runs use the selected local chat model through the same local LLM boundary as Chat Workspace. PRD8 default CI uses mocked generation for determinism. A separate opt-in sandbox live smoke is deferred until PRD18 adds maintainer evaluation and promotion workflows.
 
 Golden corpus planning currently lives in `documents/golden_corpus/golden_corpus_manifest.md`; `golden_corpus_manifest_v1.md` is a frozen historical copy.
 
