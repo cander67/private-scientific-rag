@@ -6,11 +6,16 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import ValidationError
 
+from private_rag.api.routes.repositories import DbSession
+from private_rag.api.routes.vector import EmbeddingProviderDependency, VectorStoreDependency
 from private_rag.exports.schemas import (
     ExportBundleSourceMapping,
     ExportBundleValidationResponse,
+    RecreateBundleOptions,
+    RecreateBundleResponse,
 )
-from private_rag.exports.service import validate_export_bundle_data
+from private_rag.exports.service import recreate_export_bundle_data, validate_export_bundle_data
+from private_rag.vector.store import VectorStoreError
 
 router = APIRouter(prefix="/repositories/recreate", tags=["recreate"])
 
@@ -28,6 +33,36 @@ async def validate_recreate_bundle(
         available_models=available_models,
         source_mappings=source_mappings,
     )
+
+
+@router.post("/bundle", response_model=RecreateBundleResponse)
+async def recreate_from_bundle(
+    file: Annotated[UploadFile, File()],
+    session: DbSession,
+    store: VectorStoreDependency,
+    embedder: EmbeddingProviderDependency,
+    repository_name: Annotated[str | None, Form()] = None,
+    target_repository_id: Annotated[str | None, Form()] = None,
+    available_models_json: Annotated[str | None, Form()] = None,
+    source_mappings_json: Annotated[str | None, Form()] = None,
+) -> RecreateBundleResponse:
+    try:
+        return recreate_export_bundle_data(
+            session=session,
+            data=await file.read(),
+            store=store,
+            embedder=embedder,
+            options=RecreateBundleOptions(
+                repository_name=repository_name,
+                target_repository_id=target_repository_id,
+                available_models=_parse_available_models(available_models_json),
+                source_mappings=_parse_source_mappings(source_mappings_json),
+            ),
+        )
+    except VectorStoreError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 def _parse_available_models(raw: str | None) -> list[str] | None:

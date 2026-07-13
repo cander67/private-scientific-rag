@@ -72,3 +72,43 @@ class ExportBundleValidationResponse(BaseModel):
     @property
     def issues(self) -> list[ExportBundleValidationIssue]:
         return [*self.blocking_errors, *self.warnings, *self.informational]
+
+
+class RecreateBundleOptions(BaseModel):
+    repository_name: str | None = None
+    target_repository_id: str | None = None
+    available_models: list[str] | None = None
+    source_mappings: list[ExportBundleSourceMapping] = Field(default_factory=list)
+
+
+class RecreateSourceResult(BaseModel):
+    original_document_id: str
+    original_document_version_id: str
+    recreated_document_id: str | None = None
+    recreated_document_version_id: str | None = None
+    original_filename: str
+    source_sha256: str
+    source_path: str | None = None
+    expected_chunk_count: int
+    actual_chunk_count: int
+    status: str
+
+
+class RecreateIndexReport(BaseModel):
+    full_text_indexed_chunks: int = 0
+    vector_indexed_chunks: int = 0
+    vector_collection_name: str | None = None
+    vector_distance: str | None = None
+    vector_size: int | None = None
+    vector_model: str | None = None
+
+
+class RecreateBundleResponse(BaseModel):
+    status: Literal["completed", "failed"]
+    repository_id: str | None = None
+    repository_name: str | None = None
+    validation: ExportBundleValidationResponse
+    restored_counts: dict[str, int] = Field(default_factory=dict)
+    sources: list[RecreateSourceResult] = Field(default_factory=list)
+    indexes: RecreateIndexReport = Field(default_factory=RecreateIndexReport)
+    warnings: list[ExportBundleValidationIssue] = Field(default_factory=list)

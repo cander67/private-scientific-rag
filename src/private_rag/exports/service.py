@@ -11,10 +11,11 @@ from typing import Any, Literal
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from private_rag.chat.models import ChatMessageRow, ChatSession
+from private_rag.core.settings import Settings, get_settings
 from private_rag.exports.schemas import (
     ExportBundleBuildResult,
     ExportBundleManifest,
@@ -23,15 +24,26 @@ from private_rag.exports.schemas import (
     ExportBundleSourceMapping,
     ExportBundleValidationIssue,
     ExportBundleValidationResponse,
+    RecreateBundleOptions,
+    RecreateBundleResponse,
+    RecreateIndexReport,
+    RecreateSourceResult,
 )
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
+from private_rag.ingestion.service import inspect_document, upload_document
 from private_rag.prompt_sandbox.models import (
     SandboxComparison,
     SandboxPromptVersion,
     SandboxRun,
 )
+from private_rag.repositories.models import Repository, RepositorySettingsRow
+from private_rag.repositories.schemas import RepositorySettings
 from private_rag.repositories.service import get_repository_with_settings
 from private_rag.retrieval.models import RetrievalResult, RetrievalRun
+from private_rag.search.service import rebuild_full_text_index
+from private_rag.vector.embeddings import EmbeddingProvider
+from private_rag.vector.service import rebuild_vector_index
+from private_rag.vector.store import VectorStore
 
 MANIFEST_PATH = "manifest.json"
 SETTINGS_PAYLOAD_PATH = "payloads/settings.json"
@@ -234,6 +246,85 @@ def validate_export_bundle_data(
                     "Export bundle is not a valid ZIP file.",
                 )
             ]
+        )
+
+
+def recreate_export_bundle_data(
+    session: Session,
+    data: bytes,
+    store: VectorStore,
+    embedder: EmbeddingProvider,
+    options: RecreateBundleOptions | None = None,
+    settings: Settings | None = None,
+) -> RecreateBundleResponse:
+    recreate_options = options or RecreateBundleOptions()
+    validation = validate_export_bundle_data(
+        data=data,
+        available_models=recreate_options.available_models,
+        source_mappings=recreate_options.source_mappings,
+    )
+    if not validation.can_recreate or validation.manifest is None:
+        return RecreateBundleResponse(status="failed", validation=validation)
+
+    manifest = validation.manifest
+    app_settings = settings or get_settings()
+    with ZipFile(BytesIO(data)) as archive:
+        payloads = _read_bundle_payloads_unchecked(archive, manifest)
+        repository = _prepare_recreate_repository(
+            session=session,
+            manifest=manifest,
+            options=recreate_options,
+            settings=app_settings,
+        )
+        repository_settings = RepositorySettings.model_validate(manifest.settings)
+        _save_repository_settings(session, repository, repository_settings)
+
+        source_results, id_maps = _restore_sources(
+            session=session,
+            archive=archive,
+            manifest=manifest,
+            source_mappings=recreate_options.source_mappings,
+            target_repository_id=repository.id,
+            settings=app_settings,
+            payloads=payloads,
+        )
+        _restore_retrieval_history(session, repository.id, payloads, id_maps)
+        _restore_chat_history(session, repository.id, payloads, id_maps)
+        session.commit()
+
+        full_text = rebuild_full_text_index(session, repository.id)
+        vector = rebuild_vector_index(session, repository.id, store, embedder)
+        indexes = RecreateIndexReport(
+            full_text_indexed_chunks=full_text.indexed_chunks if full_text is not None else 0,
+            vector_indexed_chunks=vector.indexed_chunks if vector is not None else 0,
+            vector_collection_name=vector.collection_name if vector is not None else None,
+            vector_distance=vector.distance if vector is not None else None,
+            vector_size=vector.vector_size if vector is not None else None,
+            vector_model=vector.model if vector is not None else None,
+        )
+        warnings = [
+            *validation.warnings,
+            *_chunk_difference_warnings(source_results),
+            *_index_difference_warnings(source_results, indexes),
+        ]
+        return RecreateBundleResponse(
+            status="completed",
+            repository_id=repository.id,
+            repository_name=repository.name,
+            validation=validation,
+            restored_counts={
+                "sources": len(source_results),
+                "documents": len(id_maps["documents"]),
+                "document_versions": len(id_maps["document_versions"]),
+                "chunks": len(id_maps["chunks"]),
+                "retrieval_runs": len(id_maps["retrieval_runs"]),
+                "retrieval_results": id_maps["retrieval_results_count"],
+                "chat_sessions": len(id_maps["chat_sessions"]),
+                "chat_messages": id_maps["chat_messages_count"],
+            },
+            sources=source_results,
+            indexes=indexes,
+            warnings=warnings,
         )
 
 
@@ -583,6 +674,348 @@ def _safe_filename(filename: str) -> str:
 def _bundle_filename(repository_name: str) -> str:
     safe_name = _safe_filename(repository_name).removesuffix(".zip")
     return f"{safe_name or 'repository'}-export.zip"
+
+
+def _read_bundle_payloads_unchecked(
+    archive: ZipFile,
+    manifest: ExportBundleManifest,
+) -> dict[str, Any]:
+    return {name: json.loads(archive.read(path)) for name, path in manifest.payloads.items()}
+
+
+def _prepare_recreate_repository(
+    session: Session,
+    manifest: ExportBundleManifest,
+    options: RecreateBundleOptions,
+    settings: Settings,
+) -> Repository:
+    if options.target_repository_id is not None:
+        repository = session.get(Repository, options.target_repository_id)
+        if repository is None:
+            raise RuntimeError("Target repository was not found.")
+        if not _repository_is_empty(session, repository.id):
+            raise RuntimeError("Target repository must be empty before recreate.")
+        return repository
+
+    original_name = str(manifest.repository.get("name") or "Recreated Repository")
+    repository = Repository(
+        name=_unique_repository_name(
+            session, options.repository_name or f"{original_name} Recreated"
+        ),
+        root_path=str(settings.data_dir),
+    )
+    session.add(repository)
+    session.flush()
+    return repository
+
+
+def _repository_is_empty(session: Session, repository_id: str) -> bool:
+    checks = [
+        select(func.count()).select_from(Document).where(Document.repository_id == repository_id),
+        select(func.count())
+        .select_from(ChatSession)
+        .where(ChatSession.repository_id == repository_id),
+        select(func.count())
+        .select_from(RetrievalRun)
+        .where(RetrievalRun.repository_id == repository_id),
+    ]
+    return all(session.scalar(statement) == 0 for statement in checks)
+
+
+def _unique_repository_name(session: Session, requested_name: str) -> str:
+    base = requested_name.strip() or "Recreated Repository"
+    candidate = base
+    suffix = 2
+    while session.scalar(select(Repository).where(Repository.name == candidate)) is not None:
+        candidate = f"{base} {suffix}"
+        suffix += 1
+    return candidate
+
+
+def _save_repository_settings(
+    session: Session,
+    repository: Repository,
+    settings: RepositorySettings,
+) -> None:
+    if repository.settings is None:
+        repository.settings = RepositorySettingsRow(settings=settings.model_dump(mode="json"))
+    else:
+        repository.settings.settings = settings.model_dump(mode="json")
+    session.add(repository)
+    session.flush()
+
+
+def _restore_sources(
+    session: Session,
+    archive: ZipFile,
+    manifest: ExportBundleManifest,
+    source_mappings: Sequence[ExportBundleSourceMapping],
+    target_repository_id: str,
+    settings: Settings,
+    payloads: Mapping[str, Any],
+) -> tuple[list[RecreateSourceResult], dict[str, Any]]:
+    id_maps: dict[str, Any] = {
+        "documents": {},
+        "document_versions": {},
+        "chunks": {},
+        "retrieval_runs": {},
+        "chat_sessions": {},
+        "retrieval_results_count": 0,
+        "chat_messages_count": 0,
+    }
+    mapping_by_version = {
+        mapping.document_version_id: mapping
+        for mapping in source_mappings
+        if mapping.document_version_id is not None
+    }
+    mapping_by_hash = {mapping.sha256: mapping for mapping in source_mappings}
+    expected_chunks = _expected_chunks_by_version(payloads)
+    results: list[RecreateSourceResult] = []
+
+    for source in manifest.sources:
+        data, source_path = _source_bytes_for_recreate(
+            archive=archive,
+            source=source,
+            mapping=mapping_by_version.get(source.document_version_id)
+            or mapping_by_hash.get(source.sha256),
+        )
+        uploaded = upload_document(
+            session=session,
+            repository_id=target_repository_id,
+            filename=source.original_filename,
+            content_type=source.content_type,
+            data=data,
+            settings=settings,
+        )
+        if uploaded is None:
+            raise RuntimeError("Target repository disappeared during recreate.")
+        inspection = inspect_document(session, target_repository_id, uploaded.document.id)
+        if inspection is None:
+            raise RuntimeError("Recreated document could not be inspected.")
+
+        id_maps["documents"][source.document_id] = uploaded.document.id
+        id_maps["document_versions"][source.document_version_id] = uploaded.version.id
+        for old_chunk in expected_chunks.get(source.document_version_id, []):
+            new_chunk = next(
+                (
+                    chunk
+                    for chunk in inspection.chunks
+                    if chunk.chunk_index == old_chunk.get("chunk_index")
+                ),
+                None,
+            )
+            if new_chunk is not None:
+                id_maps["chunks"][old_chunk["id"]] = new_chunk.id
+
+        results.append(
+            RecreateSourceResult(
+                original_document_id=source.document_id,
+                original_document_version_id=source.document_version_id,
+                recreated_document_id=uploaded.document.id,
+                recreated_document_version_id=uploaded.version.id,
+                original_filename=source.original_filename,
+                source_sha256=source.sha256,
+                source_path=str(source_path),
+                expected_chunk_count=len(expected_chunks.get(source.document_version_id, [])),
+                actual_chunk_count=uploaded.version.chunk_count,
+                status=uploaded.version.status,
+            )
+        )
+
+    return results, id_maps
+
+
+def _source_bytes_for_recreate(
+    archive: ZipFile,
+    source: ExportBundleSource,
+    mapping: ExportBundleSourceMapping | None,
+) -> tuple[bytes, Path]:
+    if source.included and source.bundle_path is not None:
+        return archive.read(source.bundle_path), Path(source.bundle_path)
+    if mapping is None:
+        raise RuntimeError(f"Missing external source mapping for {source.original_filename}.")
+    mapped_path = Path(mapping.path).expanduser()
+    return mapped_path.read_bytes(), mapped_path
+
+
+def _expected_chunks_by_version(payloads: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    expected: dict[str, list[dict[str, Any]]] = {}
+    for chunk in _payload_list(payloads, "chunks", "chunks"):
+        if isinstance(chunk, dict):
+            expected.setdefault(str(chunk["document_version_id"]), []).append(chunk)
+    for chunks in expected.values():
+        chunks.sort(key=lambda item: int(item.get("chunk_index") or 0))
+    return expected
+
+
+def _restore_retrieval_history(
+    session: Session,
+    repository_id: str,
+    payloads: Mapping[str, Any],
+    id_maps: dict[str, Any],
+) -> None:
+    for run_payload in _payload_list(payloads, "retrieval", "runs"):
+        if not isinstance(run_payload, dict):
+            continue
+        run = RetrievalRun(
+            repository_id=repository_id,
+            mode=str(run_payload["mode"]),
+            query=str(run_payload["query"]),
+            filters=dict(run_payload.get("filters") or {}),
+            top_k=int(run_payload["top_k"]),
+            candidate_pool_size=int(run_payload["candidate_pool_size"]),
+            rrf_constant=int(run_payload["rrf_constant"]),
+            embedding_model=run_payload.get("embedding_model"),
+            embedding_run_id=run_payload.get("embedding_run_id"),
+            vector_collection_name=run_payload.get("vector_collection_name"),
+            reranker_strategy=str(run_payload["reranker_strategy"]),
+            reranker_model=run_payload.get("reranker_model"),
+            metadata_boosts=dict(run_payload.get("metadata_boosts") or {}),
+            settings_snapshot=dict(run_payload.get("settings_snapshot") or {}),
+        )
+        session.add(run)
+        session.flush()
+        id_maps["retrieval_runs"][run_payload["id"]] = run.id
+
+    for result_payload in _payload_list(payloads, "retrieval", "results"):
+        if not isinstance(result_payload, dict):
+            continue
+        chunk_id = id_maps["chunks"].get(result_payload.get("chunk_id"))
+        document_id = id_maps["documents"].get(result_payload.get("document_id"))
+        version_id = id_maps["document_versions"].get(result_payload.get("document_version_id"))
+        run_id = id_maps["retrieval_runs"].get(result_payload.get("run_id"))
+        if None in {chunk_id, document_id, version_id, run_id}:
+            continue
+        session.add(
+            RetrievalResult(
+                run_id=str(run_id),
+                repository_id=repository_id,
+                document_id=str(document_id),
+                document_version_id=str(version_id),
+                chunk_id=str(chunk_id),
+                chunk_index=int(result_payload["chunk_index"]),
+                rank=int(result_payload["rank"]),
+                final_score=float(result_payload["final_score"]),
+                score_breakdown=dict(result_payload.get("score_breakdown") or {}),
+                source_ranks=dict(result_payload.get("source_ranks") or {}),
+                matched_fields=list(result_payload.get("matched_fields") or []),
+                result_metadata=dict(result_payload.get("metadata") or {}),
+            )
+        )
+        id_maps["retrieval_results_count"] += 1
+    session.flush()
+
+
+def _restore_chat_history(
+    session: Session,
+    repository_id: str,
+    payloads: Mapping[str, Any],
+    id_maps: dict[str, Any],
+) -> None:
+    for session_payload in _payload_list(payloads, "chat", "sessions"):
+        if not isinstance(session_payload, dict):
+            continue
+        chat_session = ChatSession(
+            repository_id=repository_id,
+            title=str(session_payload["title"]),
+            model=str(session_payload["model"]),
+            retrieval_settings=dict(session_payload.get("retrieval_settings") or {}),
+            prompt_id=str(session_payload["prompt_id"]),
+        )
+        session.add(chat_session)
+        session.flush()
+        id_maps["chat_sessions"][session_payload["id"]] = chat_session.id
+
+    for message_payload in _payload_list(payloads, "chat", "messages"):
+        if not isinstance(message_payload, dict):
+            continue
+        chat_session_id = id_maps["chat_sessions"].get(message_payload.get("session_id"))
+        if chat_session_id is None:
+            continue
+        session.add(
+            ChatMessageRow(
+                session_id=str(chat_session_id),
+                repository_id=repository_id,
+                sequence=int(message_payload["sequence"]),
+                role=str(message_payload["role"]),
+                content=str(message_payload["content"]),
+                retrieval_run_id=id_maps["retrieval_runs"].get(
+                    message_payload.get("retrieval_run_id")
+                ),
+                citations=_remap_citations(list(message_payload.get("citations") or []), id_maps),
+                extra_metadata=dict(message_payload.get("metadata") or {}),
+            )
+        )
+        id_maps["chat_messages_count"] += 1
+    session.flush()
+
+
+def _remap_citations(citations: list[Any], id_maps: Mapping[str, Any]) -> list[dict[str, Any]]:
+    remapped: list[dict[str, Any]] = []
+    for citation in citations:
+        if not isinstance(citation, dict):
+            continue
+        item = dict(citation)
+        if item.get("document_id") in id_maps["documents"]:
+            item["document_id"] = id_maps["documents"][item["document_id"]]
+        if item.get("document_version_id") in id_maps["document_versions"]:
+            item["document_version_id"] = id_maps["document_versions"][item["document_version_id"]]
+        if item.get("chunk_id") in id_maps["chunks"]:
+            item["chunk_id"] = id_maps["chunks"][item["chunk_id"]]
+        remapped.append(item)
+    return remapped
+
+
+def _chunk_difference_warnings(
+    sources: Sequence[RecreateSourceResult],
+) -> list[ExportBundleValidationIssue]:
+    warnings: list[ExportBundleValidationIssue] = []
+    for source in sources:
+        if source.expected_chunk_count != source.actual_chunk_count:
+            warnings.append(
+                _issue(
+                    "warning",
+                    "chunk_count_difference",
+                    (
+                        f"Chunk count changed for {source.original_filename}: "
+                        f"expected {source.expected_chunk_count}, got {source.actual_chunk_count}."
+                    ),
+                    source_sha256=source.source_sha256,
+                    document_version_id=source.original_document_version_id,
+                )
+            )
+    return warnings
+
+
+def _index_difference_warnings(
+    sources: Sequence[RecreateSourceResult],
+    indexes: RecreateIndexReport,
+) -> list[ExportBundleValidationIssue]:
+    actual_chunks = sum(source.actual_chunk_count for source in sources)
+    warnings: list[ExportBundleValidationIssue] = []
+    if indexes.full_text_indexed_chunks != actual_chunks:
+        warnings.append(
+            _issue(
+                "warning",
+                "full_text_index_difference",
+                (
+                    "Full-text index chunk count differs from recreated chunks: "
+                    f"{indexes.full_text_indexed_chunks} != {actual_chunks}."
+                ),
+            )
+        )
+    if indexes.vector_indexed_chunks != actual_chunks:
+        warnings.append(
+            _issue(
+                "warning",
+                "vector_index_difference",
+                (
+                    "Vector index chunk count differs from recreated chunks: "
+                    f"{indexes.vector_indexed_chunks} != {actual_chunks}."
+                ),
+            )
+        )
+    return warnings
 
 
 def _read_payloads(

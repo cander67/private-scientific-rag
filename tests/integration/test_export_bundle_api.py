@@ -8,23 +8,28 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from private_rag.api.app import create_app
 from private_rag.api.routes.repositories import get_db_session
+from private_rag.api.routes.vector import get_embedding_provider, get_vector_store
 from private_rag.chat.models import ChatMessageRow, ChatSession
 from private_rag.core.settings import Settings
 from private_rag.db.base import Base
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
 from private_rag.prompt_sandbox.models import SandboxComparison, SandboxPromptVersion, SandboxRun
 from private_rag.repositories import models as repository_models  # noqa: F401
+from private_rag.repositories.models import Repository, RepositorySettingsRow
 from private_rag.repositories.service import ensure_default_repository
 from private_rag.retrieval.models import RetrievalResult, RetrievalRun
+from private_rag.vector.embeddings import DeterministicEmbeddingProvider
+from private_rag.vector.models import EmbeddingRun
+from private_rag.vector.store import InMemoryVectorStore
 
 
-def _client_with_database() -> tuple[TestClient, sessionmaker[Session], Path]:
+def _client_with_database() -> tuple[TestClient, sessionmaker[Session], InMemoryVectorStore]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -39,7 +44,12 @@ def _client_with_database() -> tuple[TestClient, sessionmaker[Session], Path]:
 
     app = create_app()
     app.dependency_overrides[get_db_session] = override_session
-    return TestClient(app), session_factory, Path("unused")
+    store = InMemoryVectorStore()
+    app.dependency_overrides[get_vector_store] = lambda: store
+    app.dependency_overrides[get_embedding_provider] = lambda: DeterministicEmbeddingProvider(
+        vector_size=8
+    )
+    return TestClient(app), session_factory, store
 
 
 def test_export_bundle_zip_contains_default_payloads_and_sources(tmp_path: Path) -> None:
@@ -246,6 +256,143 @@ def test_validate_bundle_endpoint_reports_external_source_failures(
     }
 
 
+def test_recreate_bundle_endpoint_creates_repository_restores_history_and_rebuilds_indexes(
+    tmp_path: Path,
+) -> None:
+    client, session_factory, store = _client_with_database()
+    repository_id, _ = _seed_repository(session_factory, tmp_path)
+    bundle = client.post(f"/repositories/{repository_id}/exports/bundle").content
+
+    response = client.post(
+        "/repositories/recreate/bundle",
+        files={"file": ("export.zip", bundle, "application/zip")},
+        data={
+            "repository_name": "Recreated Research",
+            "available_models_json": json.dumps([]),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    recreated_id = payload["repository_id"]
+    assert payload["status"] == "completed"
+    assert payload["repository_name"] == "Recreated Research"
+    assert payload["restored_counts"]["documents"] == 1
+    assert payload["restored_counts"]["chunks"] == 1
+    assert payload["restored_counts"]["retrieval_runs"] == 1
+    assert payload["restored_counts"]["chat_messages"] == 2
+    assert payload["indexes"]["full_text_indexed_chunks"] == 1
+    assert payload["indexes"]["vector_indexed_chunks"] == 1
+    assert payload["indexes"]["vector_collection_name"] in store.collections
+
+    with session_factory() as session:
+        recreated_documents = session.scalars(
+            select(Document).where(Document.repository_id == recreated_id)
+        ).all()
+        recreated_chunks = session.scalars(
+            select(DocumentChunk).where(DocumentChunk.repository_id == recreated_id)
+        ).all()
+        recreated_chat_messages = session.scalars(
+            select(ChatMessageRow).where(ChatMessageRow.repository_id == recreated_id)
+        ).all()
+        recreated_results = session.scalars(
+            select(RetrievalResult).where(RetrievalResult.repository_id == recreated_id)
+        ).all()
+        embedding_run = session.scalar(
+            select(EmbeddingRun).where(EmbeddingRun.repository_id == recreated_id)
+        )
+
+        assert len(recreated_documents) == 1
+        assert len(recreated_chunks) == 1
+        assert recreated_results[0].chunk_id == recreated_chunks[0].id
+        assert recreated_chat_messages[1].citations[0]["chunk_id"] == recreated_chunks[0].id
+        assert embedding_run is not None
+        assert embedding_run.chunk_count == 1
+
+
+def test_recreate_bundle_endpoint_restores_into_existing_empty_repository(
+    tmp_path: Path,
+) -> None:
+    client, session_factory, _ = _client_with_database()
+    repository_id, _ = _seed_repository(session_factory, tmp_path)
+    bundle = client.post(f"/repositories/{repository_id}/exports/bundle").content
+
+    with session_factory() as session:
+        target = Repository(name="Empty Restore Target", root_path=str(tmp_path))
+        session.add(target)
+        session.flush()
+        session.add(
+            RepositorySettingsRow(
+                repository_id=target.id,
+                settings=ensure_default_repository(
+                    session,
+                    Settings(data_dir=tmp_path, database_url="sqlite://"),
+                ).settings.model_dump(mode="json"),
+            )
+        )
+        target_id = target.id
+        session.commit()
+
+    response = client.post(
+        "/repositories/recreate/bundle",
+        files={"file": ("export.zip", bundle, "application/zip")},
+        data={"target_repository_id": target_id, "available_models_json": json.dumps([])},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["repository_id"] == target_id
+
+
+def test_recreate_bundle_endpoint_uses_external_source_mapping(
+    tmp_path: Path,
+) -> None:
+    client, session_factory, _ = _client_with_database()
+    repository_id, source_digest = _seed_repository(session_factory, tmp_path)
+    bundle = client.post(
+        f"/repositories/{repository_id}/exports/bundle",
+        params={"include_sources": "false"},
+    ).content
+    mapped_source = tmp_path / "moved-paper.txt"
+    mapped_source.write_bytes(b"alpha beta gamma")
+
+    response = client.post(
+        "/repositories/recreate/bundle",
+        files={"file": ("export.zip", bundle, "application/zip")},
+        data={
+            "repository_name": "Mapped Recreate",
+            "available_models_json": json.dumps([]),
+            "source_mappings_json": json.dumps(
+                [{"sha256": source_digest, "path": str(mapped_source)}]
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["sources"][0]["actual_chunk_count"] == 1
+    assert "external_source_renamed" in {issue["code"] for issue in payload["warnings"]}
+
+
+def test_recreate_bundle_endpoint_rejects_non_empty_target_repository(
+    tmp_path: Path,
+) -> None:
+    client, session_factory, _ = _client_with_database()
+    repository_id, _ = _seed_repository(session_factory, tmp_path)
+    bundle = client.post(f"/repositories/{repository_id}/exports/bundle").content
+
+    response = client.post(
+        "/repositories/recreate/bundle",
+        files={"file": ("export.zip", bundle, "application/zip")},
+        data={"target_repository_id": repository_id},
+    )
+
+    assert response.status_code == 409
+    assert "empty" in response.json()["detail"]
+
+
 def _seed_repository(
     session_factory: sessionmaker[Session],
     tmp_path: Path,
@@ -260,6 +407,12 @@ def _seed_repository(
             Settings(data_dir=tmp_path, database_url="sqlite://"),
         )
         repository_id = repository_with_settings.repository.id
+        repository = session.get(Repository, repository_id)
+        assert repository is not None and repository.settings is not None
+        settings_payload = repository_with_settings.settings.model_dump(mode="json")
+        settings_payload["vector"]["vector_size"] = 8
+        repository.settings.settings = settings_payload
+        repository_with_settings.settings.vector.vector_size = 8
 
         document = Document(repository_id=repository_id, display_name="paper.txt")
         session.add(document)
