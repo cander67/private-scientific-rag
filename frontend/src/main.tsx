@@ -11,7 +11,7 @@ type RepositoryResponse = {
   };
 };
 
-type View = "documents" | "source" | "search" | "chat";
+type View = "documents" | "source" | "search" | "sandbox" | "chat";
 
 type DocumentVersion = {
   id: string;
@@ -313,6 +313,60 @@ type ChatReadiness = {
   ready_for_chat: boolean;
 };
 
+type SandboxPromptVersion = {
+  id: string;
+  repository_id: string;
+  name: string;
+  body: string;
+  notes: string | null;
+  source_chat_prompt_id: string | null;
+  used_by_run: boolean;
+  created_at: string;
+};
+
+type SandboxRun = {
+  id: string;
+  repository_id: string;
+  prompt_version_id: string | null;
+  comparison_id: string | null;
+  comparison_index: number | null;
+  label: string | null;
+  query: string;
+  model: string;
+  retrieval_settings: ChatRetrievalSettings;
+  prompt_snapshot: Record<string, unknown>;
+  context_entries: RetrievalSearchResult[];
+  retrieval_run_id: string | null;
+  answer: string;
+  citations: ChatCitation[];
+  metrics: Record<string, unknown>;
+  latency_ms: number;
+  status: string;
+  created_at: string;
+};
+
+type SandboxComparison = {
+  id: string;
+  repository_id: string;
+  query: string;
+  status: string;
+  expected_run_count: number;
+  runs: SandboxRun[];
+  created_at: string;
+};
+
+type SandboxComparisonRunConfig = ReturnType<typeof sandboxComparisonRunConfigs>[number];
+
+type SandboxProgressRun = {
+  id: string;
+  label: string;
+  model: string;
+  retrieval_settings: ChatRetrievalSettings;
+  status: "pending" | "running" | "completed" | "failed";
+  run: SandboxRun | null;
+  error: string | null;
+};
+
 function App() {
   const [repository, setRepository] = useState<RepositoryResponse["repository"] | null>(null);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
@@ -359,6 +413,19 @@ function App() {
   const [chatReadinessBusy, setChatReadinessBusy] = useState(false);
   const [chatReadinessCheckedAt, setChatReadinessCheckedAt] = useState<string | null>(null);
   const [chatRebuildBusy, setChatRebuildBusy] = useState<"full-text" | "vector" | null>(null);
+  const [sandboxPrompts, setSandboxPrompts] = useState<SandboxPromptVersion[]>([]);
+  const [sandboxPromptName, setSandboxPromptName] = useState("Scientific grounded prompt");
+  const [sandboxPromptBody, setSandboxPromptBody] = useState(
+    "Answer only from retrieved repository context. Cite every factual claim with inline citation tokens such as [1]. If the retrieved context is insufficient, say so.",
+  );
+  const [selectedSandboxPromptId, setSelectedSandboxPromptId] = useState<string | null>(null);
+  const [sandboxQuery, setSandboxQuery] = useState("LiFePO4 cathodes retain capacity cycling");
+  const [sandboxModel, setSandboxModel] = useState("gemma3:4b");
+  const [sandboxTopK, setSandboxTopK] = useState(3);
+  const [sandboxComparison, setSandboxComparison] = useState<SandboxComparison | null>(null);
+  const [sandboxProgressRuns, setSandboxProgressRuns] = useState<SandboxProgressRun[]>([]);
+  const [sandboxBusy, setSandboxBusy] = useState(false);
+  const [sandboxMessage, setSandboxMessage] = useState("Save a prompt, then run a comparison.");
   const [pendingSourceTarget, setPendingSourceTarget] = useState<{
     documentId: string;
     chunkId: string;
@@ -383,6 +450,7 @@ function App() {
       void loadDocuments(repository.id);
       void loadChatSessions(repository.id);
       void loadChatReadiness(repository.id);
+      void loadSandboxPrompts(repository.id);
     }
   }, [repository]);
 
@@ -536,6 +604,224 @@ function App() {
       if (announce) {
         setChatReadinessBusy(false);
       }
+    }
+  }
+
+  async function loadSandboxPrompts(repositoryId: string) {
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repositoryId}/prompt-sandbox/prompts`);
+      if (!response.ok) {
+        throw new Error("sandbox prompts unavailable");
+      }
+      const payload = (await response.json()) as SandboxPromptVersion[];
+      setSandboxPrompts(payload);
+      if (!selectedSandboxPromptId && payload.length > 0) {
+        const latest = payload[payload.length - 1];
+        setSelectedSandboxPromptId(latest.id);
+        setSandboxPromptName(latest.name);
+        setSandboxPromptBody(latest.body);
+      }
+    } catch {
+      setSandboxMessage("Could not load sandbox prompts");
+    }
+  }
+
+  async function saveSandboxPrompt(manageBusy = true) {
+    if (!repository || !sandboxPromptName.trim() || !sandboxPromptBody.trim()) {
+      return null;
+    }
+    if (manageBusy) {
+      setSandboxBusy(true);
+    }
+    setSandboxMessage("Saving prompt version");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/prompt-sandbox/prompts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: sandboxPromptName.trim(),
+          body: sandboxPromptBody.trim(),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("save sandbox prompt failed");
+      }
+      const prompt = (await response.json()) as SandboxPromptVersion;
+      setSandboxPrompts((current) => [...current, prompt]);
+      setSelectedSandboxPromptId(prompt.id);
+      setSandboxMessage("Prompt version saved");
+      return prompt;
+    } catch {
+      setSandboxMessage("Could not save prompt version");
+      return null;
+    } finally {
+      if (manageBusy) {
+        setSandboxBusy(false);
+      }
+    }
+  }
+
+  async function deleteSandboxPrompt() {
+    if (!repository || !selectedSandboxPromptId) {
+      return;
+    }
+    setSandboxBusy(true);
+    setSandboxMessage("Deleting prompt version");
+    try {
+      const deletedPromptId = selectedSandboxPromptId;
+      const response = await fetch(
+        `${API_BASE}/repositories/${repository.id}/prompt-sandbox/prompts/${deletedPromptId}`,
+        {
+          method: "DELETE",
+        },
+      );
+      if (!response.ok) {
+        throw new Error("delete sandbox prompt failed");
+      }
+      setSandboxPrompts((current) => {
+        const remaining = current.filter((prompt) => prompt.id !== deletedPromptId);
+        const nextPrompt = remaining[remaining.length - 1] ?? null;
+        setSelectedSandboxPromptId(nextPrompt?.id ?? null);
+        if (nextPrompt) {
+          setSandboxPromptName(nextPrompt.name);
+          setSandboxPromptBody(nextPrompt.body);
+        }
+        return remaining;
+      });
+      setSandboxMessage("Prompt version deleted");
+    } catch {
+      setSandboxMessage("Could not delete prompt version");
+    } finally {
+      setSandboxBusy(false);
+    }
+  }
+
+  async function runSandboxComparison() {
+    if (!repository || !sandboxQuery.trim()) {
+      return;
+    }
+    setSandboxBusy(true);
+    setSandboxMessage("Running comparison");
+    try {
+      const selectedPrompt =
+        sandboxPrompts.find((prompt) => prompt.id === selectedSandboxPromptId) ??
+        (await saveSandboxPrompt(false));
+      if (!selectedPrompt) {
+        throw new Error("missing sandbox prompt");
+      }
+      const runConfigs = sandboxComparisonRunConfigs(selectedPrompt.id, sandboxModel, sandboxTopK);
+      setSandboxProgressRuns(progressRunsFromConfigs(runConfigs, "pending"));
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/prompt-sandbox/comparisons`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          query: sandboxQuery.trim(),
+          runs: runConfigs,
+          execute_immediately: false,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("sandbox comparison failed");
+      }
+      const comparison = (await response.json()) as SandboxComparison;
+      setSandboxComparison(comparison);
+      setSandboxMessage(`Running comparison · 0/${runConfigs.length} complete`);
+      const completedRuns = await Promise.all(
+        runConfigs.map((runConfig, index) =>
+          runSandboxComparisonRun(repository.id, comparison.id, runConfig, index),
+        ),
+      );
+      const successfulRuns = completedRuns.filter((run): run is SandboxRun => run !== null);
+      const failedCount = completedRuns.length - successfulRuns.length;
+      const reloadResponse = await fetch(
+        `${API_BASE}/repositories/${repository.id}/prompt-sandbox/comparisons/${comparison.id}`,
+      );
+      if (reloadResponse.ok) {
+        setSandboxComparison((await reloadResponse.json()) as SandboxComparison);
+      } else {
+        setSandboxComparison({
+          ...comparison,
+          status: failedCount > 0 ? "failed" : "completed",
+          runs: successfulRuns,
+        });
+      }
+      setSandboxMessage(
+        failedCount > 0
+          ? `Comparison finished with ${failedCount} failed run${failedCount === 1 ? "" : "s"}`
+          : `Comparison complete · ${successfulRuns.length} runs`,
+      );
+    } catch {
+      setSandboxProgressRuns((current) =>
+        current.map((run) =>
+          run.status === "completed"
+            ? run
+            : {
+                ...run,
+                status: "failed",
+                error: "Could not run this retrieval mode.",
+              },
+        ),
+      );
+      setSandboxMessage("Could not run comparison");
+    } finally {
+      setSandboxBusy(false);
+    }
+  }
+
+  async function runSandboxComparisonRun(
+    repositoryId: string,
+    comparisonId: string,
+    runConfig: SandboxComparisonRunConfig,
+    index: number,
+  ) {
+    setSandboxProgressRuns((current) =>
+      current.map((run) => (run.id === runConfig.label ? { ...run, status: "running" } : run)),
+    );
+    try {
+      const response = await fetch(
+        `${API_BASE}/repositories/${repositoryId}/prompt-sandbox/comparisons/${comparisonId}/runs`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...runConfig,
+            comparison_index: index,
+          }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error("sandbox comparison run failed");
+      }
+      const run = (await response.json()) as SandboxRun;
+      setSandboxProgressRuns((current) => {
+        const next = current.map((progressRun) =>
+          progressRun.id === runConfig.label
+            ? {
+                ...progressRun,
+                status: "completed" as const,
+                run,
+                error: null,
+              }
+            : progressRun,
+        );
+        const completeCount = next.filter((progressRun) => progressRun.status === "completed").length;
+        setSandboxMessage(`Running comparison · ${completeCount}/${next.length} complete`);
+        return next;
+      });
+      return run;
+    } catch {
+      setSandboxProgressRuns((current) =>
+        current.map((progressRun) =>
+          progressRun.id === runConfig.label
+            ? {
+                ...progressRun,
+                status: "failed",
+                error: "Could not complete this retrieval mode.",
+              }
+            : progressRun,
+        ),
+      );
+      return null;
     }
   }
 
@@ -908,7 +1194,9 @@ function App() {
           ? "source-viewer"
           : view === "chat"
             ? "chat-workspace"
-            : "search-lab";
+            : view === "sandbox"
+              ? "prompt-sandbox"
+              : "search-lab";
     setActiveView(view);
     setNavOpen(false);
   }
@@ -926,6 +1214,12 @@ function App() {
     navigateTo("source");
   }
 
+  function openSandboxContext(result: RetrievalSearchResult) {
+    setSelectedDocumentId(result.document_id);
+    setSelectedChunkId(result.chunk_id);
+    navigateTo("source");
+  }
+
   const title =
     activeView === "search"
       ? "Search Lab"
@@ -933,10 +1227,14 @@ function App() {
         ? "Source Viewer"
         : activeView === "chat"
           ? "Chat Workspace"
+          : activeView === "sandbox"
+            ? "Prompt Sandbox"
           : "Document Manager";
   const subtitle =
     activeView === "search"
       ? "Inspect full-text retrieval with BM25 scores and citation provenance"
+      : activeView === "sandbox"
+        ? `${repository?.name ?? "Default Repository"} · ${sandboxMessage}`
       : activeView === "chat"
         ? `${repository?.name ?? "Default Repository"} · ${activeChatSession?.model ?? "local model"} · ${chatMessage}`
       : `${repository?.name ?? "Default Repository"} · ${message}`;
@@ -980,7 +1278,13 @@ function App() {
             >
               Search Lab
             </a>
-            <a>Prompt Sandbox</a>
+            <a
+              className={activeView === "sandbox" ? "active" : ""}
+              href="#prompt-sandbox"
+              onClick={() => navigateTo("sandbox")}
+            >
+              Prompt Sandbox
+            </a>
             <a
               className={activeView === "chat" ? "active" : ""}
               href="#chat-workspace"
@@ -1119,6 +1423,37 @@ function App() {
                 onCitationClick={setActiveCitation}
                 onCloseCitation={() => setActiveCitation(null)}
                 onOpenCitation={openChatCitation}
+              />
+            ) : activeView === "sandbox" ? (
+              <PromptSandbox
+                prompts={sandboxPrompts}
+                selectedPromptId={selectedSandboxPromptId}
+                promptName={sandboxPromptName}
+                promptBody={sandboxPromptBody}
+                query={sandboxQuery}
+                model={sandboxModel}
+                topK={sandboxTopK}
+                comparison={sandboxComparison}
+                progressRuns={sandboxProgressRuns}
+                busy={sandboxBusy}
+                message={sandboxMessage}
+                onSelectPrompt={(promptId) => {
+                  setSelectedSandboxPromptId(promptId);
+                  const prompt = sandboxPrompts.find((item) => item.id === promptId);
+                  if (prompt) {
+                    setSandboxPromptName(prompt.name);
+                    setSandboxPromptBody(prompt.body);
+                  }
+                }}
+                onPromptNameChange={setSandboxPromptName}
+                onPromptBodyChange={setSandboxPromptBody}
+                onQueryChange={setSandboxQuery}
+                onModelChange={setSandboxModel}
+                onTopKChange={setSandboxTopK}
+                onSavePrompt={() => void saveSandboxPrompt()}
+                onDeletePrompt={() => void deleteSandboxPrompt()}
+                onRunComparison={() => void runSandboxComparison()}
+                onOpenContext={openSandboxContext}
               />
             ) : (
               <>
@@ -1442,6 +1777,298 @@ function App() {
         </main>
       </div>
     </>
+  );
+}
+
+function PromptSandbox({
+  prompts,
+  selectedPromptId,
+  promptName,
+  promptBody,
+  query,
+  model,
+  topK,
+  comparison,
+  progressRuns,
+  busy,
+  message,
+  onSelectPrompt,
+  onPromptNameChange,
+  onPromptBodyChange,
+  onQueryChange,
+  onModelChange,
+  onTopKChange,
+  onSavePrompt,
+  onDeletePrompt,
+  onRunComparison,
+  onOpenContext,
+}: {
+  prompts: SandboxPromptVersion[];
+  selectedPromptId: string | null;
+  promptName: string;
+  promptBody: string;
+  query: string;
+  model: string;
+  topK: number;
+  comparison: SandboxComparison | null;
+  progressRuns: SandboxProgressRun[];
+  busy: boolean;
+  message: string;
+  onSelectPrompt: (value: string) => void;
+  onPromptNameChange: (value: string) => void;
+  onPromptBodyChange: (value: string) => void;
+  onQueryChange: (value: string) => void;
+  onModelChange: (value: string) => void;
+  onTopKChange: (value: number) => void;
+  onSavePrompt: () => void;
+  onDeletePrompt: () => void;
+  onRunComparison: () => void;
+  onOpenContext: (result: RetrievalSearchResult) => void;
+}) {
+  const visibleProgressRuns =
+    progressRuns.length > 0
+      ? progressRuns
+      : comparison
+        ? progressRunsFromCompletedRuns(comparison.runs)
+        : [];
+
+  return (
+    <div className="sandbox-layout">
+      <section className="sandbox-controls">
+        <div className="card">
+          <div className="row row-between">
+            <div>
+              <div className="eyebrow">Prompt version</div>
+              <h2>Sandbox prompt</h2>
+            </div>
+            <div className="row sandbox-prompt-actions">
+              <button className="btn btn-sm" type="button" onClick={onSavePrompt} disabled={busy}>
+                Save version
+              </button>
+              <button
+                className="btn btn-sm btn-ghost"
+                type="button"
+                onClick={onDeletePrompt}
+                disabled={busy || !selectedPromptId}
+              >
+                Delete version
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-2 sandbox-form">
+            <div>
+              <label className="field" htmlFor="sandbox-prompt-select">
+                Saved versions
+              </label>
+              <select
+                id="sandbox-prompt-select"
+                value={selectedPromptId ?? ""}
+                onChange={(event) => onSelectPrompt(event.target.value)}
+              >
+                <option value="">Unsaved draft</option>
+                {prompts.map((prompt) => (
+                  <option value={prompt.id} key={prompt.id}>
+                    {prompt.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="field" htmlFor="sandbox-prompt-name">
+                Version name
+              </label>
+              <input
+                id="sandbox-prompt-name"
+                value={promptName}
+                onChange={(event) => onPromptNameChange(event.target.value)}
+              />
+            </div>
+          </div>
+          <label className="field" htmlFor="sandbox-prompt-body">
+            System prompt
+          </label>
+          <textarea
+            id="sandbox-prompt-body"
+            rows={6}
+            value={promptBody}
+            onChange={(event) => onPromptBodyChange(event.target.value)}
+          />
+          <p className="hint">
+            Sandbox prompt versions are isolated from Chat Workspace defaults. Saving, deleting, or
+            running sandbox prompts will not change normal chat behavior.
+          </p>
+        </div>
+
+        <div className="card">
+          <div className="row row-between">
+            <div>
+              <div className="eyebrow">Comparison setup</div>
+              <h2>Four retrieval modes</h2>
+            </div>
+            <button
+              className={`btn btn-primary ${busy ? "btn-running" : ""}`}
+              type="button"
+              onClick={onRunComparison}
+              disabled={busy}
+              aria-busy={busy}
+            >
+              {busy ? "Running comparison..." : "Run comparison"}
+            </button>
+          </div>
+          <div className="grid grid-3 sandbox-form">
+            <div>
+              <label className="field" htmlFor="sandbox-query">
+                Query
+              </label>
+              <input
+                id="sandbox-query"
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+              />
+            </div>
+            <div>
+              <label className="field" htmlFor="sandbox-model">
+                Local model
+              </label>
+              <input
+                id="sandbox-model"
+                value={model}
+                onChange={(event) => onModelChange(event.target.value)}
+              />
+            </div>
+            <div>
+              <label className="field" htmlFor="sandbox-top-k">
+                Top-k
+              </label>
+              <select
+                id="sandbox-top-k"
+                value={topK}
+                onChange={(event) => onTopKChange(Number(event.target.value))}
+              >
+                {[3, 5, 6, 10].map((value) => (
+                  <option value={value} key={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="sandbox-presets">
+            {sandboxComparisonRunConfigs("preview", model, topK).map((run) => (
+              <span className="badge" key={run.label}>
+                <span className="dot" />
+                {run.label}
+              </span>
+            ))}
+          </div>
+          <p className="hint">{message}</p>
+        </div>
+      </section>
+
+      {visibleProgressRuns.length > 0 ? (
+        <section className="sandbox-results">
+          <div className="row row-between">
+            <div>
+              <div className="eyebrow">Comparison results</div>
+              <h2>{comparison?.query ?? query}</h2>
+            </div>
+            <span className="badge badge-ok">
+              <span className="dot" />
+              {comparison?.status ?? "running"}
+            </span>
+          </div>
+          <div className="sandbox-run-grid">
+            {visibleProgressRuns.map((progressRun) => (
+              <SandboxRunCard
+                progressRun={progressRun}
+                key={progressRun.id}
+                onOpenContext={onOpenContext}
+              />
+            ))}
+          </div>
+        </section>
+      ) : (
+        <div className="empty">
+          <h3>No comparison yet</h3>
+          <p>Run the four-mode comparison to see answers, settings, latency, and retrieved context side by side.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SandboxRunCard({
+  progressRun,
+  onOpenContext,
+}: {
+  progressRun: SandboxProgressRun;
+  onOpenContext: (result: RetrievalSearchResult) => void;
+}) {
+  const run = progressRun.run;
+  const firstContext = run?.context_entries[0] ?? null;
+  return (
+    <article className={`sandbox-run-card sandbox-run-card-${progressRun.status}`}>
+      <div className="row row-between">
+        <div>
+          <div className="eyebrow">{progressRun.label}</div>
+          <h3>{sandboxModeLabel(progressRun.retrieval_settings)}</h3>
+        </div>
+        <span className={`badge badge-${progressRun.status}`}>
+          <span className="dot" />
+          {run ? formatLatencySeconds(run.latency_ms) : progressRun.status}
+        </span>
+      </div>
+      <p className="sandbox-answer">
+        {run?.answer ??
+          (progressRun.status === "failed"
+            ? (progressRun.error ?? "This retrieval mode failed.")
+            : progressRun.status === "running"
+              ? "Running this retrieval mode..."
+              : "Waiting to start...")}
+      </p>
+      <dl className="kv sandbox-kv">
+        <dt>model</dt>
+        <dd>{run?.model ?? progressRun.model}</dd>
+        <dt>prompt</dt>
+        <dd>{run ? sandboxPromptSnapshotName(run.prompt_snapshot) : "pending"}</dd>
+        <dt>top-k</dt>
+        <dd>{progressRun.retrieval_settings.top_k}</dd>
+        <dt>context</dt>
+        <dd>{run?.context_entries.length ?? "—"}</dd>
+        <dt>citations</dt>
+        <dd>{run?.citations.length ?? "—"}</dd>
+        <dt>run</dt>
+        <dd>{run ? (run.retrieval_run_id?.slice(0, 8) ?? run.id.slice(0, 8)) : progressRun.status}</dd>
+      </dl>
+      <div className="stack sandbox-context">
+        {(run?.context_entries ?? []).slice(0, 2).map((entry) => (
+          <div className="source-card" key={`${progressRun.id}-${entry.chunk_id}`}>
+            <div className="meta">
+              #{entry.rank} · {entry.document_title} · {searchProvenanceLabel(entry)} · final{" "}
+              {entry.final_score.toFixed(4)}
+            </div>
+            <p>{entry.text_preview || entry.snippet || "No preview available."}</p>
+            <div className="row row-between">
+              <span className="hint">
+                BM25 {formatScore(entry.score_breakdown.bm25)} · Dense{" "}
+                {formatScore(entry.score_breakdown.dense)} · Rerank{" "}
+                {formatScore(entry.score_breakdown.rerank)}
+              </span>
+              <button className="btn btn-sm btn-ghost" type="button" onClick={() => onOpenContext(entry)}>
+                View source
+              </button>
+            </div>
+          </div>
+        ))}
+        {!firstContext && (
+          <p className="muted">
+            {progressRun.status === "completed"
+              ? "No retrieved context was stored for this run."
+              : "Context will appear here when this retrieval mode finishes."}
+          </p>
+        )}
+      </div>
+    </article>
   );
 }
 
@@ -2541,9 +3168,113 @@ function normalizeChatRetrievalSettings(settings: Partial<ChatRetrievalSettings>
   };
 }
 
+function sandboxComparisonRunConfigs(
+  promptVersionId: string,
+  model: string,
+  topK: number,
+): Array<{
+  label: string;
+  prompt_version_id: string;
+  model: string;
+  retrieval_settings: ChatRetrievalSettings;
+}> {
+  return [
+    {
+      label: "Full-text",
+      prompt_version_id: promptVersionId,
+      model,
+      retrieval_settings: {
+        mode: "full_text",
+        top_k: topK,
+        reranker_strategy: "none",
+      },
+    },
+    {
+      label: "Vector",
+      prompt_version_id: promptVersionId,
+      model,
+      retrieval_settings: {
+        mode: "vector",
+        top_k: topK,
+        reranker_strategy: "none",
+      },
+    },
+    {
+      label: "Hybrid",
+      prompt_version_id: promptVersionId,
+      model,
+      retrieval_settings: {
+        mode: "hybrid",
+        top_k: topK,
+        reranker_strategy: "none",
+      },
+    },
+    {
+      label: "Reranked hybrid",
+      prompt_version_id: promptVersionId,
+      model,
+      retrieval_settings: {
+        mode: "hybrid",
+        top_k: topK,
+        reranker_strategy: "cross_encoder",
+      },
+    },
+  ];
+}
+
+function progressRunsFromConfigs(
+  runConfigs: SandboxComparisonRunConfig[],
+  status: SandboxProgressRun["status"],
+): SandboxProgressRun[] {
+  return runConfigs.map((runConfig) => ({
+    id: runConfig.label,
+    label: runConfig.label,
+    model: runConfig.model,
+    retrieval_settings: runConfig.retrieval_settings,
+    status,
+    run: null,
+    error: null,
+  }));
+}
+
+function progressRunsFromCompletedRuns(runs: SandboxRun[]): SandboxProgressRun[] {
+  return runs.map((run) => ({
+    id: run.id,
+    label: run.label ?? `Run ${(run.comparison_index ?? 0) + 1}`,
+    model: run.model,
+    retrieval_settings: run.retrieval_settings,
+    status: run.status === "completed" ? "completed" : "failed",
+    run,
+    error: run.status === "completed" ? null : "This retrieval mode failed.",
+  }));
+}
+
+function sandboxModeLabel(settings: ChatRetrievalSettings) {
+  const mode = settings.mode === "full_text" ? "Full-text" : settings.mode === "vector" ? "Vector" : "Hybrid";
+  if (settings.reranker_strategy === "none") {
+    return mode;
+  }
+  return `${mode} · ${settings.reranker_strategy.replace(/_/g, " ")}`;
+}
+
+function formatScore(value: number | null | undefined) {
+  return value == null ? "—" : value.toFixed(4);
+}
+
+function formatLatencySeconds(latencyMs: number) {
+  return `${(latencyMs / 1000).toFixed(1)} s`;
+}
+
+function sandboxPromptSnapshotName(snapshot: Record<string, unknown>) {
+  return typeof snapshot.name === "string" && snapshot.name.trim() ? snapshot.name : "Snapshot";
+}
+
 function viewFromHash(hash: string): View {
   if (hash === "#chat-workspace") {
     return "chat";
+  }
+  if (hash === "#prompt-sandbox") {
+    return "sandbox";
   }
   if (hash === "#search-lab") {
     return "search";
