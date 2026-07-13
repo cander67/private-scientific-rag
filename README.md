@@ -24,7 +24,7 @@ The current scaffold provides:
 - Prompt Sandbox API for repository-scoped sandbox prompt versions, copy-to/from chat prompt library, prompt deletion, persisted sandbox runs, progressive side-by-side retrieval comparisons, context snapshots, citations, latency, and status.
 - Portable repository ZIP export/recreate bundle API with validation, a versioned manifest, settings, prompt library, document/chunk metadata, chat and retrieval history, citations, selected source files, external source mapping, rebuilt full-text/vector indexes, and opt-in sandbox data.
 - Deterministic comparison evaluation for full-text, vector, hybrid, and reranked hybrid retrieval, plus opt-in live Qdrant and cross-encoder checks.
-- React/Vite frontend document manager, source inspector, Search Lab, Chat Workspace, and Prompt Sandbox for full-text, vector, hybrid, reranked retrieval inspection, local cited chat, and prompt/retrieval/model comparison, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
+- React/Vite frontend document manager, source inspector, Search Lab, Chat Workspace, Prompt Sandbox, and Export Center for full-text, vector, hybrid, reranked retrieval inspection, local cited chat, prompt/retrieval/model comparison, and portable ZIP export, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
 - SQLAlchemy/Alembic migration wiring for repository settings, document ingestion, vector embedding runs, and retrieval history/results.
 - Qdrant Docker Compose service.
 - Pytest, Ruff, Mypy, and CI configuration.

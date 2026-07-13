@@ -11,7 +11,75 @@ type RepositoryResponse = {
   };
 };
 
-type View = "documents" | "source" | "search" | "sandbox" | "chat";
+type RepositorySettings = {
+  chunking: {
+    chunk_size: number;
+    chunk_overlap: number;
+    mode: string;
+  };
+  parser: {
+    structured_parser: string;
+    fallback_parser: string;
+  };
+  full_text: {
+    tokenizer: string;
+    prefix_index: boolean;
+    porter_stemming: boolean;
+  };
+  vector: {
+    collection_name: string;
+    vector_size: number;
+    distance: string;
+  };
+  embedding: {
+    provider: string;
+    model: string;
+  };
+  reranking: {
+    strategy: string;
+    model: string | null;
+  };
+  model: {
+    ollama_chat_model: string;
+  };
+  prompt: {
+    version: string;
+    active_chat_prompt_id: string;
+    library: Array<{
+      id: string;
+      name: string;
+      text: string;
+    }>;
+  };
+  export: {
+    include_sources: boolean;
+    include_indexes: boolean;
+    format: string;
+  };
+};
+
+type RepositorySettingsResponse = RepositoryResponse & {
+  settings: RepositorySettings;
+};
+
+type ExportManifestSummary = {
+  generated_at: string;
+  repository: {
+    id: string;
+    name: string;
+  };
+  export_options: {
+    include_sources: boolean;
+    include_sandbox: boolean;
+    format: string;
+  };
+  counts: Record<string, number>;
+  required_models: string[];
+  settings_summary: string[];
+  warnings: string[];
+};
+
+type View = "documents" | "source" | "search" | "sandbox" | "chat" | "export";
 
 type DocumentVersion = {
   id: string;
@@ -426,6 +494,14 @@ function App() {
   const [sandboxProgressRuns, setSandboxProgressRuns] = useState<SandboxProgressRun[]>([]);
   const [sandboxBusy, setSandboxBusy] = useState(false);
   const [sandboxMessage, setSandboxMessage] = useState("Save a prompt, then run a comparison.");
+  const [repositorySettings, setRepositorySettings] = useState<RepositorySettings | null>(null);
+  const [exportIncludeSources, setExportIncludeSources] = useState(true);
+  const [exportIncludeSandbox, setExportIncludeSandbox] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [exportMessage, setExportMessage] = useState("Ready to export");
+  const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(null);
+  const [exportFilename, setExportFilename] = useState<string | null>(null);
+  const [exportSummary, setExportSummary] = useState<ExportManifestSummary | null>(null);
   const [pendingSourceTarget, setPendingSourceTarget] = useState<{
     documentId: string;
     chunkId: string;
@@ -448,11 +524,20 @@ function App() {
   useEffect(() => {
     if (repository) {
       void loadDocuments(repository.id);
+      void loadRepositorySettings(repository.id);
       void loadChatSessions(repository.id);
       void loadChatReadiness(repository.id);
       void loadSandboxPrompts(repository.id);
     }
   }, [repository]);
+
+  useEffect(() => {
+    return () => {
+      if (exportDownloadUrl) {
+        URL.revokeObjectURL(exportDownloadUrl);
+      }
+    };
+  }, [exportDownloadUrl]);
 
   useEffect(() => {
     if (repository && selectedDocumentId) {
@@ -552,6 +637,21 @@ function App() {
       }
     } catch {
       setMessage("Could not load documents");
+    }
+  }
+
+  async function loadRepositorySettings(repositoryId: string) {
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repositoryId}/settings`);
+      if (!response.ok) {
+        throw new Error("settings unavailable");
+      }
+      const payload = (await response.json()) as RepositorySettingsResponse;
+      setRepositorySettings(payload.settings);
+      setExportIncludeSources(payload.settings.export.include_sources);
+    } catch {
+      setRepositorySettings(null);
+      setExportMessage("Could not load export defaults");
     }
   }
 
@@ -1186,6 +1286,58 @@ function App() {
     }
   }
 
+  async function exportRepositoryBundle() {
+    if (!repository) {
+      return;
+    }
+    setExportBusy(true);
+    setExportMessage("Preparing export bundle");
+    setExportSummary(null);
+    try {
+      const params = new URLSearchParams({
+        include_sources: String(exportIncludeSources),
+        include_sandbox: String(exportIncludeSandbox),
+      });
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/exports/bundle?${params}`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        throw new Error("export failed");
+      }
+      const blob = await response.blob();
+      if (exportDownloadUrl) {
+        URL.revokeObjectURL(exportDownloadUrl);
+      }
+      const downloadUrl = URL.createObjectURL(blob);
+      const filename =
+        filenameFromContentDisposition(response.headers.get("Content-Disposition")) ??
+        `${repository.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "repository"}-export.zip`;
+
+      setExportDownloadUrl(downloadUrl);
+      setExportFilename(filename);
+      setExportSummary(
+        buildExportManifestSummary({
+          repository,
+          documents,
+          totalChunks,
+          chatSessions,
+          sandboxPrompts,
+          settings: repositorySettings,
+          includeSources: exportIncludeSources,
+          includeSandbox: exportIncludeSandbox,
+        }),
+      );
+      setExportMessage(`Export ready · ${formatBytes(blob.size)}`);
+    } catch {
+      setExportDownloadUrl(null);
+      setExportFilename(null);
+      setExportSummary(null);
+      setExportMessage("Export failed");
+    } finally {
+      setExportBusy(false);
+    }
+  }
+
   function navigateTo(view: View) {
     window.location.hash =
       view === "documents"
@@ -1196,7 +1348,9 @@ function App() {
             ? "chat-workspace"
             : view === "sandbox"
               ? "prompt-sandbox"
-              : "search-lab";
+              : view === "export"
+                ? "export-center"
+                : "search-lab";
     setActiveView(view);
     setNavOpen(false);
   }
@@ -1229,12 +1383,16 @@ function App() {
           ? "Chat Workspace"
           : activeView === "sandbox"
             ? "Prompt Sandbox"
+            : activeView === "export"
+              ? "Export Center"
           : "Document Manager";
   const subtitle =
     activeView === "search"
       ? "Inspect full-text retrieval with BM25 scores and citation provenance"
       : activeView === "sandbox"
         ? `${repository?.name ?? "Default Repository"} · ${sandboxMessage}`
+      : activeView === "export"
+        ? `${repository?.name ?? "Default Repository"} · ${exportMessage}`
       : activeView === "chat"
         ? `${repository?.name ?? "Default Repository"} · ${activeChatSession?.model ?? "local model"} · ${chatMessage}`
       : `${repository?.name ?? "Default Repository"} · ${message}`;
@@ -1295,7 +1453,13 @@ function App() {
             <span className="nav-label">Manage</span>
             <a>Settings / Models</a>
             <a>Recreate Repository</a>
-            <a>Export Center</a>
+            <a
+              className={activeView === "export" ? "active" : ""}
+              href="#export-center"
+              onClick={() => navigateTo("export")}
+            >
+              Export Center
+            </a>
           </nav>
           <div className="sidebar-foot">
             <span className="status ok">Local-only mode</span>
@@ -1454,6 +1618,25 @@ function App() {
                 onDeletePrompt={() => void deleteSandboxPrompt()}
                 onRunComparison={() => void runSandboxComparison()}
                 onOpenContext={openSandboxContext}
+              />
+            ) : activeView === "export" ? (
+              <ExportCenter
+                repository={repository}
+                documents={documents}
+                totalChunks={totalChunks}
+                chatSessions={chatSessions}
+                sandboxPrompts={sandboxPrompts}
+                settings={repositorySettings}
+                includeSources={exportIncludeSources}
+                includeSandbox={exportIncludeSandbox}
+                busy={exportBusy}
+                message={exportMessage}
+                downloadUrl={exportDownloadUrl}
+                filename={exportFilename}
+                summary={exportSummary}
+                onIncludeSourcesChange={setExportIncludeSources}
+                onIncludeSandboxChange={setExportIncludeSandbox}
+                onExport={() => void exportRepositoryBundle()}
               />
             ) : (
               <>
@@ -1993,6 +2176,195 @@ function PromptSandbox({
           <p>Run the four-mode comparison to see answers, settings, latency, and retrieved context side by side.</p>
         </div>
       )}
+    </div>
+  );
+}
+
+function ExportCenter({
+  repository,
+  documents,
+  totalChunks,
+  chatSessions,
+  sandboxPrompts,
+  settings,
+  includeSources,
+  includeSandbox,
+  busy,
+  message,
+  downloadUrl,
+  filename,
+  summary,
+  onIncludeSourcesChange,
+  onIncludeSandboxChange,
+  onExport,
+}: {
+  repository: RepositoryResponse["repository"] | null;
+  documents: DocumentSummary[];
+  totalChunks: number;
+  chatSessions: ChatSession[];
+  sandboxPrompts: SandboxPromptVersion[];
+  settings: RepositorySettings | null;
+  includeSources: boolean;
+  includeSandbox: boolean;
+  busy: boolean;
+  message: string;
+  downloadUrl: string | null;
+  filename: string | null;
+  summary: ExportManifestSummary | null;
+  onIncludeSourcesChange: (value: boolean) => void;
+  onIncludeSandboxChange: (value: boolean) => void;
+  onExport: () => void;
+}) {
+  const chatMessageCount = chatSessions.reduce((sum, session) => sum + session.messages.length, 0);
+  const chatCitationCount = chatSessions.reduce(
+    (sum, session) =>
+      sum + session.messages.reduce((messageSum, chatMessage) => messageSum + chatMessage.citations.length, 0),
+    0,
+  );
+  const promptCount = settings?.prompt.library.length ?? 0;
+  const requiredModels = requiredModelsForSettings(settings);
+  const settingsRows = settingsSummaryRows(settings);
+
+  return (
+    <div className="export-layout">
+      <section className="card export-overview">
+        <div className="row row-between">
+          <div>
+            <div className="eyebrow">Repository export</div>
+            <h2>{repository?.name ?? "Default Repository"}</h2>
+          </div>
+          <span className={`badge ${downloadUrl ? "badge-ok" : busy ? "badge-running" : ""}`}>
+            <span className="dot" />
+            {message}
+          </span>
+        </div>
+        <div className="export-metrics">
+          <ExportMetric label="Sources" value={documents.length} />
+          <ExportMetric label="Chunks" value={totalChunks} />
+          <ExportMetric label="Chat sessions" value={chatSessions.length} />
+          <ExportMetric label="Chat messages" value={chatMessageCount} />
+          <ExportMetric label="Citations" value={chatCitationCount} />
+          <ExportMetric label="Prompt data" value={promptCount + sandboxPrompts.length} />
+          <ExportMetric label="Retrieval runs" value={summary?.counts.retrieval_runs ?? "after export"} />
+          <ExportMetric label="Sandbox runs" value={summary?.counts.sandbox_runs ?? (includeSandbox ? "included" : "excluded")} />
+        </div>
+      </section>
+
+      <div className="export-grid">
+        <section className="card">
+          <div className="row row-between">
+            <div>
+              <div className="eyebrow">Bundle options</div>
+              <h2>ZIP contents</h2>
+            </div>
+            <button
+              className={`btn btn-primary ${busy ? "btn-running" : ""}`}
+              type="button"
+              onClick={onExport}
+              disabled={busy || !repository}
+              aria-busy={busy}
+            >
+              {busy ? "Exporting..." : "Export ZIP"}
+            </button>
+          </div>
+          <div className="export-option-list">
+            <label className="export-toggle" htmlFor="export-include-sources">
+              <input
+                id="export-include-sources"
+                type="checkbox"
+                checked={includeSources}
+                onChange={(event) => onIncludeSourcesChange(event.target.checked)}
+              />
+              <span>
+                <strong>Include source files</strong>
+                <small>{includeSources ? `${documents.length} files will be packaged` : "Hashes and paths only"}</small>
+              </span>
+            </label>
+            <label className="export-toggle" htmlFor="export-include-sandbox">
+              <input
+                id="export-include-sandbox"
+                type="checkbox"
+                checked={includeSandbox}
+                onChange={(event) => onIncludeSandboxChange(event.target.checked)}
+              />
+              <span>
+                <strong>Include PRD8 sandbox runs/comparisons</strong>
+                <small>{includeSandbox ? "Sandbox history will be packaged" : "Default export excludes sandbox runs"}</small>
+              </span>
+            </label>
+          </div>
+          {downloadUrl && (
+            <div className="export-download">
+              <a className="btn" href={downloadUrl} download={filename ?? "repository-export.zip"}>
+                Download ZIP
+              </a>
+              <span className="muted">{filename ?? "repository-export.zip"}</span>
+            </div>
+          )}
+        </section>
+
+        <section className="card">
+          <div className="eyebrow">Models and settings</div>
+          <h2>Required setup</h2>
+          <dl className="kv export-kv">
+            {settingsRows.map((row) => (
+              <React.Fragment key={row.label}>
+                <dt>{row.label}</dt>
+                <dd>{row.value}</dd>
+              </React.Fragment>
+            ))}
+          </dl>
+          <div className="export-chip-list">
+            {requiredModels.length > 0 ? (
+              requiredModels.map((model) => (
+                <span className="badge" key={model}>
+                  <span className="dot" />
+                  {model}
+                </span>
+              ))
+            ) : (
+              <span className="muted">Settings unavailable</span>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {summary && (
+        <section className="card export-summary">
+          <div className="row row-between">
+            <div>
+              <div className="eyebrow">Manifest summary</div>
+              <h2>{summary.repository.name}</h2>
+            </div>
+            <span className="badge badge-ok">
+              <span className="dot" />
+              {new Date(summary.generated_at).toLocaleString()}
+            </span>
+          </div>
+          <div className="export-metrics">
+            {Object.entries(summary.counts).map(([label, value]) => (
+              <ExportMetric label={label.replace(/_/g, " ")} value={value} key={label} />
+            ))}
+          </div>
+          <dl className="kv export-kv">
+            <dt>sources</dt>
+            <dd>{summary.export_options.include_sources ? "included" : "excluded"}</dd>
+            <dt>sandbox</dt>
+            <dd>{summary.export_options.include_sandbox ? "included" : "excluded"}</dd>
+            <dt>format</dt>
+            <dd>{summary.export_options.format}</dd>
+          </dl>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function ExportMetric({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="export-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
@@ -3269,7 +3641,104 @@ function sandboxPromptSnapshotName(snapshot: Record<string, unknown>) {
   return typeof snapshot.name === "string" && snapshot.name.trim() ? snapshot.name : "Snapshot";
 }
 
+function filenameFromContentDisposition(header: string | null) {
+  if (!header) {
+    return null;
+  }
+  const match = header.match(/filename="?([^";]+)"?/i);
+  return match?.[1] ?? null;
+}
+
+function requiredModelsForSettings(settings: RepositorySettings | null) {
+  if (!settings) {
+    return [];
+  }
+  return Array.from(
+    new Set(
+      [
+        settings.model.ollama_chat_model,
+        settings.embedding.model,
+        settings.reranking.model,
+      ].filter((model): model is string => Boolean(model)),
+    ),
+  );
+}
+
+function settingsSummaryRows(settings: RepositorySettings | null) {
+  if (!settings) {
+    return [{ label: "settings", value: "unavailable" }];
+  }
+  return [
+    { label: "chat model", value: settings.model.ollama_chat_model },
+    { label: "embedding", value: `${settings.embedding.provider} / ${settings.embedding.model}` },
+    {
+      label: "reranking",
+      value: settings.reranking.model
+        ? `${settings.reranking.strategy} / ${settings.reranking.model}`
+        : settings.reranking.strategy,
+    },
+    { label: "chunking", value: `${settings.chunking.mode} ${settings.chunking.chunk_size}/${settings.chunking.chunk_overlap}` },
+    { label: "full-text", value: settings.full_text.tokenizer },
+    { label: "parser", value: settings.parser.structured_parser },
+  ];
+}
+
+function buildExportManifestSummary({
+  repository,
+  documents,
+  totalChunks,
+  chatSessions,
+  sandboxPrompts,
+  settings,
+  includeSources,
+  includeSandbox,
+}: {
+  repository: RepositoryResponse["repository"];
+  documents: DocumentSummary[];
+  totalChunks: number;
+  chatSessions: ChatSession[];
+  sandboxPrompts: SandboxPromptVersion[];
+  settings: RepositorySettings | null;
+  includeSources: boolean;
+  includeSandbox: boolean;
+}): ExportManifestSummary {
+  const chatMessages = chatSessions.reduce((sum, session) => sum + session.messages.length, 0);
+  const chatCitations = chatSessions.reduce(
+    (sum, session) =>
+      sum + session.messages.reduce((messageSum, chatMessage) => messageSum + chatMessage.citations.length, 0),
+    0,
+  );
+  const promptCount = settings?.prompt.library.length ?? 0;
+  return {
+    generated_at: new Date().toISOString(),
+    repository,
+    export_options: {
+      include_sources: includeSources,
+      include_sandbox: includeSandbox,
+      format: settings?.export.format ?? "json",
+    },
+    counts: {
+      sources: documents.length,
+      included_sources: includeSources ? documents.length : 0,
+      chunks: totalChunks,
+      chat_sessions: chatSessions.length,
+      chat_messages: chatMessages,
+      chat_citations: chatCitations,
+      prompt_library_entries: promptCount,
+      sandbox_prompt_versions: sandboxPrompts.length,
+      sandbox_runs: includeSandbox ? sandboxPrompts.filter((prompt) => prompt.used_by_run).length : 0,
+      retrieval_runs: chatCitations,
+    },
+    required_models: requiredModelsForSettings(settings),
+    settings_summary: settingsSummaryRows(settings).map((row) => `${row.label}: ${row.value}`),
+    warnings: [],
+  };
+}
+
 function viewFromHash(hash: string): View {
+  if (hash === "#export-center") {
+    return "export";
+  }
   if (hash === "#chat-workspace") {
     return "chat";
   }

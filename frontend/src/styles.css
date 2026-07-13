@@ -684,6 +684,108 @@ textarea {
   color: var(--danger);
 }
 
+.export-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.export-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.7fr);
+  gap: var(--s4);
+  align-items: start;
+}
+
+.export-overview,
+.export-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.export-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: var(--s3);
+}
+
+.export-metric {
+  min-height: 74px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--s3);
+}
+
+.export-metric span {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.export-metric strong {
+  font-family: var(--mono);
+  font-size: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+.export-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  margin-top: var(--s4);
+}
+
+.export-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s3);
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: pointer;
+  padding: var(--s3);
+}
+
+.export-toggle input {
+  margin-top: 4px;
+}
+
+.export-toggle span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.export-toggle small {
+  color: var(--text-faint);
+}
+
+.export-download {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  margin-top: var(--s4);
+}
+
+.export-kv {
+  margin: var(--s4) 0;
+}
+
+.export-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
 @keyframes sandbox-spin {
   to {
     transform: rotate(360deg);
@@ -1384,6 +1486,10 @@ textarea {
     grid-template-columns: repeat(2, minmax(240px, 1fr));
   }
 
+  .export-metrics {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+
   .sandbox-controls {
     grid-template-columns: 1fr;
   }
@@ -1439,7 +1545,12 @@ textarea {
   .grid-side,
   .viewer,
   .chat-layout,
-  .sandbox-run-grid {
+  .sandbox-run-grid,
+  .export-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .export-metrics {
     grid-template-columns: 1fr;
   }
 
