@@ -79,7 +79,94 @@ type ExportManifestSummary = {
   warnings: string[];
 };
 
-type View = "documents" | "source" | "search" | "sandbox" | "chat" | "export";
+type ExportBundleSource = {
+  document_id: string;
+  document_version_id: string;
+  original_filename: string;
+  content_type: string | null;
+  source_type: string;
+  sha256: string;
+  byte_size: number;
+  original_storage_path: string;
+  bundle_path: string | null;
+  included: boolean;
+  missing: boolean;
+};
+
+type ExportBundleManifest = {
+  bundle_schema_version: 1;
+  bundle_format: string;
+  generated_at: string;
+  repository: Record<string, unknown>;
+  export_options: Record<string, unknown>;
+  settings: Record<string, unknown>;
+  required_models: string[];
+  payloads: Record<string, string>;
+  sources: ExportBundleSource[];
+  counts: Record<string, number>;
+  warnings: string[];
+};
+
+type ExportBundleValidationIssue = {
+  severity: "error" | "warning" | "info";
+  code: string;
+  message: string;
+  path: string | null;
+  setting: string | null;
+  source_sha256: string | null;
+  document_version_id: string | null;
+};
+
+type ExportBundleValidationResponse = {
+  can_recreate: boolean;
+  manifest: ExportBundleManifest | null;
+  counts: Record<string, number>;
+  required_models: string[];
+  blocking_errors: ExportBundleValidationIssue[];
+  warnings: ExportBundleValidationIssue[];
+  informational: ExportBundleValidationIssue[];
+};
+
+type RecreateSourceMapping = {
+  sha256: string;
+  path: string;
+  document_version_id?: string;
+};
+
+type RecreateSourceResult = {
+  original_document_id: string;
+  original_document_version_id: string;
+  recreated_document_id: string | null;
+  recreated_document_version_id: string | null;
+  original_filename: string;
+  source_sha256: string;
+  source_path: string | null;
+  expected_chunk_count: number;
+  actual_chunk_count: number;
+  status: string;
+};
+
+type RecreateIndexReport = {
+  full_text_indexed_chunks: number;
+  vector_indexed_chunks: number;
+  vector_collection_name: string | null;
+  vector_distance: string | null;
+  vector_size: number | null;
+  vector_model: string | null;
+};
+
+type RecreateBundleResponse = {
+  status: "completed" | "failed";
+  repository_id: string | null;
+  repository_name: string | null;
+  validation: ExportBundleValidationResponse;
+  restored_counts: Record<string, number>;
+  sources: RecreateSourceResult[];
+  indexes: RecreateIndexReport;
+  warnings: ExportBundleValidationIssue[];
+};
+
+type View = "documents" | "source" | "search" | "sandbox" | "chat" | "export" | "recreate";
 
 type DocumentVersion = {
   id: string;
@@ -502,6 +589,15 @@ function App() {
   const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(null);
   const [exportFilename, setExportFilename] = useState<string | null>(null);
   const [exportSummary, setExportSummary] = useState<ExportManifestSummary | null>(null);
+  const [recreateFile, setRecreateFile] = useState<File | null>(null);
+  const [recreateRepositoryName, setRecreateRepositoryName] = useState("");
+  const [recreateTargetRepositoryId, setRecreateTargetRepositoryId] = useState("");
+  const [recreateAvailableModels, setRecreateAvailableModels] = useState("");
+  const [recreateSourceMappings, setRecreateSourceMappings] = useState<RecreateSourceMapping[]>([]);
+  const [recreateValidation, setRecreateValidation] = useState<ExportBundleValidationResponse | null>(null);
+  const [recreateResult, setRecreateResult] = useState<RecreateBundleResponse | null>(null);
+  const [recreateBusy, setRecreateBusy] = useState<"validating" | "recreating" | null>(null);
+  const [recreateMessage, setRecreateMessage] = useState("Select an export ZIP bundle");
   const [pendingSourceTarget, setPendingSourceTarget] = useState<{
     documentId: string;
     chunkId: string;
@@ -1338,6 +1434,68 @@ function App() {
     }
   }
 
+  async function validateRecreateBundle() {
+    if (!recreateFile) {
+      return;
+    }
+    setRecreateBusy("validating");
+    setRecreateResult(null);
+    setRecreateMessage("Validating bundle");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/recreate/bundle/validate`, {
+        method: "POST",
+        body: recreateFormData(recreateFile, {
+          availableModelsText: recreateAvailableModels,
+          sourceMappings: recreateSourceMappings,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("bundle validation failed");
+      }
+      const payload = (await response.json()) as ExportBundleValidationResponse;
+      setRecreateValidation(payload);
+      setRecreateSourceMappings((current) => mergeSourceMappings(current, payload));
+      setRecreateMessage(payload.can_recreate ? "Bundle can be recreated" : "Bundle has blocking issues");
+    } catch {
+      setRecreateValidation(null);
+      setRecreateMessage("Validation failed");
+    } finally {
+      setRecreateBusy(null);
+    }
+  }
+
+  async function runRecreateBundle() {
+    if (!recreateFile || !recreateValidation?.can_recreate) {
+      return;
+    }
+    setRecreateBusy("recreating");
+    setRecreateResult(null);
+    setRecreateMessage("Recreating repository");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/recreate/bundle`, {
+        method: "POST",
+        body: recreateFormData(recreateFile, {
+          repositoryName: recreateRepositoryName,
+          targetRepositoryId: recreateTargetRepositoryId,
+          availableModelsText: recreateAvailableModels,
+          sourceMappings: recreateSourceMappings,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("recreate failed");
+      }
+      const payload = (await response.json()) as RecreateBundleResponse;
+      setRecreateResult(payload);
+      setRecreateValidation(payload.validation);
+      setRecreateMessage(payload.status === "completed" ? "Recreate complete" : "Recreate failed");
+    } catch {
+      setRecreateResult(null);
+      setRecreateMessage("Recreate failed");
+    } finally {
+      setRecreateBusy(null);
+    }
+  }
+
   function navigateTo(view: View) {
     window.location.hash =
       view === "documents"
@@ -1350,7 +1508,9 @@ function App() {
               ? "prompt-sandbox"
               : view === "export"
                 ? "export-center"
-                : "search-lab";
+                : view === "recreate"
+                  ? "recreate-repository"
+                  : "search-lab";
     setActiveView(view);
     setNavOpen(false);
   }
@@ -1385,6 +1545,8 @@ function App() {
             ? "Prompt Sandbox"
             : activeView === "export"
               ? "Export Center"
+              : activeView === "recreate"
+                ? "Recreate Repository"
           : "Document Manager";
   const subtitle =
     activeView === "search"
@@ -1393,6 +1555,8 @@ function App() {
         ? `${repository?.name ?? "Default Repository"} · ${sandboxMessage}`
       : activeView === "export"
         ? `${repository?.name ?? "Default Repository"} · ${exportMessage}`
+      : activeView === "recreate"
+        ? `${repository?.name ?? "Default Repository"} · ${recreateMessage}`
       : activeView === "chat"
         ? `${repository?.name ?? "Default Repository"} · ${activeChatSession?.model ?? "local model"} · ${chatMessage}`
       : `${repository?.name ?? "Default Repository"} · ${message}`;
@@ -1452,7 +1616,13 @@ function App() {
             </a>
             <span className="nav-label">Manage</span>
             <a>Settings / Models</a>
-            <a>Recreate Repository</a>
+            <a
+              className={activeView === "recreate" ? "active" : ""}
+              href="#recreate-repository"
+              onClick={() => navigateTo("recreate")}
+            >
+              Recreate Repository
+            </a>
             <a
               className={activeView === "export" ? "active" : ""}
               href="#export-center"
@@ -1637,6 +1807,30 @@ function App() {
                 onIncludeSourcesChange={setExportIncludeSources}
                 onIncludeSandboxChange={setExportIncludeSandbox}
                 onExport={() => void exportRepositoryBundle()}
+              />
+            ) : activeView === "recreate" ? (
+              <RecreateRepository
+                file={recreateFile}
+                repositoryName={recreateRepositoryName}
+                targetRepositoryId={recreateTargetRepositoryId}
+                availableModels={recreateAvailableModels}
+                sourceMappings={recreateSourceMappings}
+                validation={recreateValidation}
+                result={recreateResult}
+                busy={recreateBusy}
+                message={recreateMessage}
+                onFileChange={(file) => {
+                  setRecreateFile(file);
+                  setRecreateValidation(null);
+                  setRecreateResult(null);
+                  setRecreateMessage(file ? "Ready to validate bundle" : "Select an export ZIP bundle");
+                }}
+                onRepositoryNameChange={setRecreateRepositoryName}
+                onTargetRepositoryIdChange={setRecreateTargetRepositoryId}
+                onAvailableModelsChange={setRecreateAvailableModels}
+                onSourceMappingsChange={setRecreateSourceMappings}
+                onValidate={() => void validateRecreateBundle()}
+                onRecreate={() => void runRecreateBundle()}
               />
             ) : (
               <>
@@ -2365,6 +2559,314 @@ function ExportMetric({ label, value }: { label: string; value: number | string 
     <div className="export-metric">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function RecreateRepository({
+  file,
+  repositoryName,
+  targetRepositoryId,
+  availableModels,
+  sourceMappings,
+  validation,
+  result,
+  busy,
+  message,
+  onFileChange,
+  onRepositoryNameChange,
+  onTargetRepositoryIdChange,
+  onAvailableModelsChange,
+  onSourceMappingsChange,
+  onValidate,
+  onRecreate,
+}: {
+  file: File | null;
+  repositoryName: string;
+  targetRepositoryId: string;
+  availableModels: string;
+  sourceMappings: RecreateSourceMapping[];
+  validation: ExportBundleValidationResponse | null;
+  result: RecreateBundleResponse | null;
+  busy: "validating" | "recreating" | null;
+  message: string;
+  onFileChange: (file: File | null) => void;
+  onRepositoryNameChange: (value: string) => void;
+  onTargetRepositoryIdChange: (value: string) => void;
+  onAvailableModelsChange: (value: string) => void;
+  onSourceMappingsChange: (value: RecreateSourceMapping[]) => void;
+  onValidate: () => void;
+  onRecreate: () => void;
+}) {
+  const canRecreate = Boolean(file && validation?.can_recreate && !busy);
+  const statusClass = result?.status === "completed" ? "badge-ok" : validation?.can_recreate ? "badge-ok" : validation ? "badge-danger" : "";
+  const steps = recreateProgressSteps(validation, result, busy);
+
+  return (
+    <div className="recreate-layout">
+      <section className="card recreate-overview">
+        <div className="row row-between">
+          <div>
+            <div className="eyebrow">Bundle recreate</div>
+            <h2>{file?.name ?? "No bundle selected"}</h2>
+          </div>
+          <span className={`badge ${busy ? "badge-running" : statusClass}`}>
+            <span className="dot" />
+            {message}
+          </span>
+        </div>
+        <div className="recreate-steps">
+          {steps.map((step) => (
+            <div className={`recreate-step recreate-step-${step.status}`} key={step.label}>
+              <span>{step.label}</span>
+              <strong>{step.status}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <div className="recreate-grid">
+        <section className="card">
+          <div className="row row-between">
+            <div>
+              <div className="eyebrow">Validation</div>
+              <h2>Bundle and target</h2>
+            </div>
+            <button
+              className={`btn ${busy === "validating" ? "btn-running" : ""}`}
+              type="button"
+              onClick={onValidate}
+              disabled={!file || Boolean(busy)}
+              aria-busy={busy === "validating"}
+            >
+              {busy === "validating" ? "Validating..." : "Validate bundle"}
+            </button>
+          </div>
+          <div className="grid grid-2 recreate-form">
+            <label className="field" htmlFor="recreate-bundle-file">
+              Bundle ZIP
+              <input
+                id="recreate-bundle-file"
+                type="file"
+                accept=".zip,application/zip"
+                onChange={(event) => onFileChange(event.target.files?.[0] ?? null)}
+              />
+            </label>
+            <label className="field" htmlFor="recreate-repository-name">
+              New repository name
+              <input
+                id="recreate-repository-name"
+                value={repositoryName}
+                onChange={(event) => onRepositoryNameChange(event.target.value)}
+              />
+            </label>
+            <label className="field" htmlFor="recreate-target-repository-id">
+              Existing empty repository ID
+              <input
+                id="recreate-target-repository-id"
+                value={targetRepositoryId}
+                onChange={(event) => onTargetRepositoryIdChange(event.target.value)}
+              />
+            </label>
+            <label className="field" htmlFor="recreate-available-models">
+              Available models
+              <input
+                id="recreate-available-models"
+                value={availableModels}
+                onChange={(event) => onAvailableModelsChange(event.target.value)}
+              />
+            </label>
+          </div>
+          <div className="row recreate-actions">
+            <button
+              className={`btn btn-primary ${busy === "recreating" ? "btn-running" : ""}`}
+              type="button"
+              onClick={onRecreate}
+              disabled={!canRecreate}
+              aria-busy={busy === "recreating"}
+            >
+              {busy === "recreating" ? "Recreating..." : "Recreate repository"}
+            </button>
+            {validation && (
+              <span className={validation.can_recreate ? "badge badge-ok" : "badge badge-danger"}>
+                <span className="dot" />
+                {validation.can_recreate ? "ready" : "blocked"}
+              </span>
+            )}
+          </div>
+        </section>
+
+        <section className="card">
+          <div className="eyebrow">Source mappings</div>
+          <h2>External files</h2>
+          <div className="recreate-mapping-list">
+            {sourceMappings.length === 0 ? (
+              <p className="muted">No external source mappings requested.</p>
+            ) : (
+              sourceMappings.map((mapping, index) => (
+                <div className="recreate-mapping-row" key={`${mapping.sha256}-${mapping.document_version_id ?? index}`}>
+                  <label className="field" htmlFor={`recreate-mapping-sha-${index}`}>
+                    Source hash
+                    <input
+                      id={`recreate-mapping-sha-${index}`}
+                      value={mapping.sha256}
+                      onChange={(event) =>
+                        onSourceMappingsChange(
+                          sourceMappings.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, sha256: event.target.value } : item,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="field" htmlFor={`recreate-mapping-path-${index}`}>
+                    Local path
+                    <input
+                      id={`recreate-mapping-path-${index}`}
+                      value={mapping.path}
+                      onChange={(event) =>
+                        onSourceMappingsChange(
+                          sourceMappings.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, path: event.target.value } : item,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+                  <button
+                    className="btn btn-sm btn-ghost"
+                    type="button"
+                    onClick={() => onSourceMappingsChange(sourceMappings.filter((_, itemIndex) => itemIndex !== index))}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+          <button
+            className="btn btn-sm"
+            type="button"
+            onClick={() => onSourceMappingsChange([...sourceMappings, { sha256: "", path: "" }])}
+          >
+            Add mapping
+          </button>
+        </section>
+      </div>
+
+      {validation && (
+        <section className="card recreate-report">
+          <div className="row row-between">
+            <div>
+              <div className="eyebrow">Validation report</div>
+              <h2>{validation.manifest ? manifestRepositoryName(validation.manifest) : "Bundle report"}</h2>
+            </div>
+            <div className="export-chip-list">
+              {validation.required_models.map((model) => (
+                <span className="badge" key={model}>
+                  <span className="dot" />
+                  {model}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="export-metrics">
+            {Object.entries(validation.counts).map(([label, value]) => (
+              <ExportMetric label={label.replace(/_/g, " ")} value={value} key={label} />
+            ))}
+          </div>
+          <div className="recreate-issue-grid">
+            <IssueGroup title="Blocking errors" issues={validation.blocking_errors} emptyLabel="No blocking errors" />
+            <IssueGroup title="Warnings" issues={validation.warnings} emptyLabel="No warnings" />
+            <IssueGroup title="Information" issues={validation.informational} emptyLabel="No informational checks" />
+          </div>
+        </section>
+      )}
+
+      {result && (
+        <section className="card recreate-report">
+          <div className="row row-between">
+            <div>
+              <div className="eyebrow">Final report</div>
+              <h2>{result.repository_name ?? "Recreated repository"}</h2>
+            </div>
+            <span className={result.status === "completed" ? "badge badge-ok" : "badge badge-danger"}>
+              <span className="dot" />
+              {result.status}
+            </span>
+          </div>
+          <div className="export-metrics">
+            {Object.entries(result.restored_counts).map(([label, value]) => (
+              <ExportMetric label={label.replace(/_/g, " ")} value={value} key={label} />
+            ))}
+            <ExportMetric label="full-text index" value={result.indexes.full_text_indexed_chunks} />
+            <ExportMetric label="vector index" value={result.indexes.vector_indexed_chunks} />
+          </div>
+          <dl className="kv export-kv">
+            <dt>repository</dt>
+            <dd>{result.repository_id ?? "not created"}</dd>
+            <dt>vector collection</dt>
+            <dd>{result.indexes.vector_collection_name ?? "not rebuilt"}</dd>
+            <dt>vector model</dt>
+            <dd>{result.indexes.vector_model ?? "not reported"}</dd>
+          </dl>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Expected chunks</th>
+                  <th>Actual chunks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.sources.map((source) => (
+                  <tr key={source.original_document_version_id}>
+                    <td>{source.original_filename}</td>
+                    <td>{source.status}</td>
+                    <td className="num">{source.expected_chunk_count}</td>
+                    <td className="num">{source.actual_chunk_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function IssueGroup({
+  title,
+  issues,
+  emptyLabel,
+}: {
+  title: string;
+  issues: ExportBundleValidationIssue[];
+  emptyLabel: string;
+}) {
+  return (
+    <div className="recreate-issue-group">
+      <h3>{title}</h3>
+      {issues.length === 0 ? (
+        <p className="muted">{emptyLabel}</p>
+      ) : (
+        issues.map((issue) => (
+          <article className={`recreate-issue recreate-issue-${issue.severity}`} key={`${issue.code}-${issue.path ?? issue.source_sha256 ?? issue.message}`}>
+            <strong>{issueLabel(issue.code)}</strong>
+            <span>{issue.message}</span>
+            {(issue.path || issue.setting || issue.source_sha256) && (
+              <small>
+                {[issue.path, issue.setting, issue.source_sha256 ? shortHash(issue.source_sha256) : null]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </small>
+            )}
+          </article>
+        ))
+      )}
     </div>
   );
 }
@@ -3735,7 +4237,134 @@ function buildExportManifestSummary({
   };
 }
 
+function recreateFormData(
+  file: File,
+  options: {
+    repositoryName?: string;
+    targetRepositoryId?: string;
+    availableModelsText: string;
+    sourceMappings: RecreateSourceMapping[];
+  },
+) {
+  const formData = new FormData();
+  formData.append("file", file);
+  const repositoryName = options.repositoryName?.trim();
+  const targetRepositoryId = options.targetRepositoryId?.trim();
+  const sourceMappings = normalizeSourceMappings(options.sourceMappings);
+  formData.append("available_models_json", JSON.stringify(parseAvailableModels(options.availableModelsText)));
+  if (repositoryName) {
+    formData.append("repository_name", repositoryName);
+  }
+  if (targetRepositoryId) {
+    formData.append("target_repository_id", targetRepositoryId);
+  }
+  if (sourceMappings.length > 0) {
+    formData.append("source_mappings_json", JSON.stringify(sourceMappings));
+  }
+  return formData;
+}
+
+function parseAvailableModels(value: string) {
+  return value
+    .split(/[\n,]+/)
+    .map((model) => model.trim())
+    .filter(Boolean);
+}
+
+function normalizeSourceMappings(sourceMappings: RecreateSourceMapping[]) {
+  return sourceMappings
+    .map((mapping) => ({
+      sha256: mapping.sha256.trim(),
+      path: mapping.path.trim(),
+      document_version_id: mapping.document_version_id?.trim() || undefined,
+    }))
+    .filter((mapping) => mapping.sha256 && mapping.path);
+}
+
+function mergeSourceMappings(
+  current: RecreateSourceMapping[],
+  validation: ExportBundleValidationResponse,
+) {
+  const existing = new Map(current.map((mapping) => [mapping.sha256, mapping]));
+  for (const source of validation.manifest?.sources ?? []) {
+    if (!source.included && !existing.has(source.sha256)) {
+      existing.set(source.sha256, {
+        sha256: source.sha256,
+        path: "",
+        document_version_id: source.document_version_id,
+      });
+    }
+  }
+  for (const issue of validation.blocking_errors) {
+    if (issue.code === "missing_external_source_mapping" && issue.source_sha256 && !existing.has(issue.source_sha256)) {
+      existing.set(issue.source_sha256, {
+        sha256: issue.source_sha256,
+        path: "",
+        document_version_id: issue.document_version_id ?? undefined,
+      });
+    }
+  }
+  return Array.from(existing.values());
+}
+
+function recreateProgressSteps(
+  validation: ExportBundleValidationResponse | null,
+  result: RecreateBundleResponse | null,
+  busy: "validating" | "recreating" | null,
+) {
+  return [
+    {
+      label: "validation",
+      status: busy === "validating" ? "running" : validation ? (validation.can_recreate ? "complete" : "blocked") : "pending",
+    },
+    {
+      label: "source restore",
+      status: busy === "recreating" ? "running" : result ? (result.status === "completed" ? "complete" : "failed") : "pending",
+    },
+    {
+      label: "parsing",
+      status: busy === "recreating" ? "running" : result?.sources.length ? "complete" : "pending",
+    },
+    {
+      label: "full-text rebuild",
+      status: busy === "recreating" ? "running" : result ? (result.indexes.full_text_indexed_chunks > 0 ? "complete" : "warning") : "pending",
+    },
+    {
+      label: "vector rebuild",
+      status: busy === "recreating" ? "running" : result ? (result.indexes.vector_indexed_chunks > 0 ? "complete" : "warning") : "pending",
+    },
+    {
+      label: "final report",
+      status: busy === "recreating" ? "running" : result ? result.status : "pending",
+    },
+  ];
+}
+
+function manifestRepositoryName(manifest: ExportBundleManifest) {
+  return typeof manifest.repository.name === "string" ? manifest.repository.name : "Exported repository";
+}
+
+function issueLabel(code: string) {
+  const labels: Record<string, string> = {
+    missing_payload: "Missing bundle payload",
+    source_hash_mismatch: "Source hash mismatch",
+    missing_external_source_mapping: "Missing external source mapping",
+    external_source_hash_mismatch: "External source hash mismatch",
+    external_source_renamed: "External source path changed",
+    missing_model: "Missing model",
+    unconfirmed_model: "Model not confirmed",
+    parser_fingerprint: "Parser/settings fingerprint",
+    count_mismatch: "Count mismatch",
+    source_hash_verified: "Source hash verified",
+    external_source_hash_verified: "External source hash verified",
+  };
+  return labels[code] ?? code.replace(/_/g, " ");
+}
+
 function viewFromHash(hash: string): View {
+  if (hash === "#recreate-repository") {
+    return "recreate";
+  }
   if (hash === "#export-center") {
     return "export";
   }

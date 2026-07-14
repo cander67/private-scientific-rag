@@ -6,7 +6,7 @@ const source = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8
 const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
 test("Export Center is a first-class routed view", () => {
-  assert.match(source, /type View = "documents" \| "source" \| "search" \| "sandbox" \| "chat" \| "export"/);
+  assert.match(source, /type View = "documents" \| "source" \| "search" \| "sandbox" \| "chat" \| "export" \| "recreate"/);
   assert.match(source, /#export-center/);
   assert.match(source, /navigateTo\("export"\)/);
   assert.match(source, /activeView === "export"/);
