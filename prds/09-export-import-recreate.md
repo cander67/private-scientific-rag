@@ -1,6 +1,6 @@
 # PRD 9: Export, Import, and Recreate Repository
 
-**Status:** In progress.
+**Status:** Implemented, ready for review.
 
 ## Goal
 
@@ -50,6 +50,7 @@ Export complete research bundles and recreate repositories from settings, manife
 ## Documentation References
 
 - `docs/public_repo_checklist.md` for public-safe exported examples.
+- `docs/export_recreate.md` for bundle contents, recreate workflow, warning meanings, and cross-platform transfer checklist.
 - Python `zipfile` documentation: https://docs.python.org/3/library/zipfile.html
 - Qdrant documentation: https://qdrant.tech/documentation/overview/
 - SQLite FTS5 documentation: https://www.sqlite.org/fts5.html

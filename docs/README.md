@@ -8,6 +8,7 @@ Current documents:
 - `../documents/golden_corpus/golden_corpus_manifest.md`: current chemistry/materials golden corpus recipe and inventory.
 - `../documents/golden_corpus/golden_corpus_manifest_v1.md`: frozen historical copy.
 - `../scripts/prepare_golden_corpus.sh`: tracked helper for recreating the local golden-corpus layout.
+- `export_recreate.md`: PRD9 portable ZIP export/recreate transfer guide and cross-platform checklist.
 - `public_repo_checklist.md`: first commit and public GitHub readiness.
 
 As modules mature, add focused docs close to the code:

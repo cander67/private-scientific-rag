@@ -21,7 +21,17 @@ PRD7 chat coverage keeps CI deterministic by mocking the LLM at the chat boundar
 
 PRD8 Prompt Sandbox coverage keeps CI deterministic by mocking the LLM at the sandbox boundary. Default tests cover sandbox prompt version validation, repository-scoped create/list/read/copy/delete behavior, side-by-side comparison persistence, progressive per-run comparison execution, prompt snapshot preservation, retrieved context snapshots, generated answers, citations, latency, and frontend contract coverage for the Prompt Sandbox view. Golden query datasets, aggregate retrieval metrics, and evidence-backed promotion to chat defaults are deferred to PRD18.
 
-PRD9 export/import/recreate coverage includes the portable bundle contract, bundle validation, and backend recreate execution. Default tests cover deterministic source bundle paths and SHA-256 hashing, manifest schema validation, ZIP structure, default source inclusion, chat/retrieval/chunk/citation payload export, opt-in sandbox payload export, malformed/unsupported bundle rejection, missing payload detection, source hash mismatches, external source mapping failures, renamed-file warnings, missing model reports, parser fingerprints, exported count summaries, recreate into a new repository, recreate into an explicit empty repository, source-excluded recreate through external mappings, active chat/retrieval history remapping, and deterministic full-text/vector rebuild reporting.
+PRD9 export/import/recreate coverage includes the portable bundle contract, bundle validation, backend recreate execution, Export Center, and Recreate Repository UI contracts. Default tests cover deterministic source bundle paths and SHA-256 hashing, manifest schema validation, ZIP structure, default source inclusion, chat/retrieval/chunk/citation payload export, opt-in sandbox payload export, malformed/unsupported bundle rejection, missing payload detection, source hash mismatches, external source mapping failures, renamed-file warnings, missing model reports, parser fingerprints, exported count summaries, recreate into a new repository, recreate into an explicit empty repository, source-excluded recreate through external mappings, active chat/retrieval history remapping, deterministic full-text/vector rebuild reporting, validation display, blocked recreate, successful recreate progress, and final report display.
+
+PRD9-focused deterministic commands:
+
+```bash
+uv run pytest tests/unit/test_export_bundle.py tests/integration/test_export_bundle_api.py
+cd frontend
+npm test
+```
+
+The cross-platform manual transfer checklist and warning glossary live in `docs/export_recreate.md`. Optional live checks for Qdrant, cross-encoder reranking, Ollama, and local RAG chat are listed below.
 
 ## Live tests
 

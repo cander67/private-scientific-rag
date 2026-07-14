@@ -8,7 +8,7 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 through PRD8 are complete and closed. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, local Ollama-backed retrieval-augmented chat with citations, and a Prompt Sandbox for prompt/retrieval/model comparisons. PRD9 export/import/recreate is in progress.
+PRD1 through PRD8 are complete and closed. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, local Ollama-backed retrieval-augmented chat with citations, and a Prompt Sandbox for prompt/retrieval/model comparisons. PRD9 export/import/recreate is implemented and ready for review.
 
 Later PRDs include OCR execution (PRD13), structured table extraction (PRD14), bulk patent downloads/raw patent-data feeds (PRD12), and clearer chunk-level versus document-level search labels (PRD17). Support for additional embedding models and immutable document storage are also planned.
 
@@ -125,6 +125,7 @@ The `example_code/` folder is local inspiration code and should not be committed
 - [Test documentation](tests/README.md)
 - [Backend documentation](src/private_rag/README.md)
 - [Frontend documentation](frontend/README.md)
+- [Export/recreate transfer guide](docs/export_recreate.md)
 - [Public repo checklist](docs/public_repo_checklist.md)
 
 ## License
