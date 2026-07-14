@@ -21,7 +21,7 @@ test("Export Center exposes PRD9 bundle options and defaults", () => {
   assert.match(source, /export-include-sources/);
   assert.match(source, /export-include-sandbox/);
   assert.match(source, /Include source files/);
-  assert.match(source, /Include PRD8 sandbox runs\/comparisons/);
+  assert.match(source, /Include sandbox runs\/comparisons/);
   assert.match(source, /Default export excludes sandbox runs/);
 });
 
