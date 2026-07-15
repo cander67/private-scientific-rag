@@ -13,6 +13,8 @@ from private_rag.repositories.schemas import (
     RepositoryManifest,
     RepositoryRead,
     RepositorySettings,
+    RepositorySettingsImpact,
+    RepositorySettingsImpactResponse,
     RepositoryWithSettings,
     source_file_exists,
 )
@@ -94,6 +96,195 @@ def update_repository_settings(
     return _with_settings(repository)
 
 
+def analyze_repository_settings_impact(
+    session: Session,
+    repository_id: str,
+    draft_settings: RepositorySettings,
+) -> RepositorySettingsImpactResponse | None:
+    repository_settings = get_repository_with_settings(session, repository_id)
+    if repository_settings is None:
+        return None
+    return analyze_settings_impact(repository_settings.settings, draft_settings)
+
+
+def analyze_settings_impact(
+    current_settings: RepositorySettings,
+    draft_settings: RepositorySettings,
+) -> RepositorySettingsImpactResponse:
+    current = current_settings.model_dump(mode="json")
+    draft = draft_settings.model_dump(mode="json")
+    impacts: list[RepositorySettingsImpact] = []
+
+    def changed(*fields: str) -> list[str]:
+        return [
+            field for field in fields if _field_value(current, field) != _field_value(draft, field)
+        ]
+
+    parsing_fields = changed(
+        "chunking.mode",
+        "chunking.chunk_size",
+        "chunking.chunk_overlap",
+        "parser.structured_parser",
+        "parser.fallback_parser",
+    )
+    if parsing_fields:
+        impacts.append(
+            RepositorySettingsImpact(
+                category="document_reprocessing",
+                title="Document reprocessing required",
+                message=(
+                    "Chunking or parser defaults changed. Existing parsed documents and chunks "
+                    "will not match these defaults until documents are reprocessed."
+                ),
+                fields=parsing_fields,
+                actions=["Reprocess affected documents in Document Manager."],
+            )
+        )
+
+    full_text_fields = changed(
+        "full_text.tokenizer",
+        "full_text.prefix_index",
+        "full_text.porter_stemming",
+    )
+    if full_text_fields or parsing_fields:
+        impacts.append(
+            RepositorySettingsImpact(
+                category="full_text_rebuild",
+                title="Full-text index rebuild required",
+                message=(
+                    "Full-text search readiness is stale until the sparse index is rebuilt "
+                    "with the saved defaults."
+                ),
+                fields=[*parsing_fields, *full_text_fields],
+                actions=["Rebuild full-text search from Search Lab or Chat Workspace."],
+            )
+        )
+
+    vector_fields = changed(
+        "embedding.provider",
+        "embedding.model",
+        "vector.collection_name",
+        "vector.vector_size",
+        "vector.distance",
+    )
+    if vector_fields or parsing_fields:
+        impacts.append(
+            RepositorySettingsImpact(
+                category="vector_rebuild",
+                title="Vector index rebuild required",
+                message=(
+                    "Semantic and hybrid retrieval readiness is stale until embeddings and "
+                    "the vector collection are rebuilt with the saved defaults."
+                ),
+                fields=[*parsing_fields, *vector_fields],
+                actions=[
+                    "Rebuild the vector index before relying on semantic or hybrid retrieval."
+                ],
+            )
+        )
+
+    retrieval_fields = changed("reranking.strategy", "reranking.model")
+    if retrieval_fields:
+        impacts.append(
+            RepositorySettingsImpact(
+                category="retrieval_defaults",
+                title="Retrieval defaults changed",
+                message=(
+                    "Reranking defaults changed. New Search Lab, Chat Workspace, and Prompt "
+                    "Sandbox runs should be reviewed against the new retrieval behavior."
+                ),
+                fields=retrieval_fields,
+                actions=["Revisit retrieval defaults in Search Lab and rerun important checks."],
+            )
+        )
+
+    chat_fields = changed("model.ollama_chat_model")
+    if chat_fields or retrieval_fields:
+        impacts.append(
+            RepositorySettingsImpact(
+                category="chat_defaults",
+                title="Chat defaults changed",
+                message=(
+                    "New Chat Workspace sessions will use different model or retrieval defaults. "
+                    "Existing sessions keep their persisted run settings."
+                ),
+                fields=[*chat_fields, *retrieval_fields],
+                actions=["Start a new chat session to verify the saved defaults."],
+            )
+        )
+
+    prompt_fields = changed("prompt.version", "prompt.active_chat_prompt_id", "prompt.library")
+    if prompt_fields:
+        impacts.append(
+            RepositorySettingsImpact(
+                category="prompt_defaults",
+                title="Prompt defaults changed",
+                message=(
+                    "Normal chat prompt defaults changed. Prompt Sandbox versions remain isolated "
+                    "from these chat defaults."
+                ),
+                fields=prompt_fields,
+                actions=["Verify the active prompt before starting new chat sessions."],
+            )
+        )
+
+    export_fields = changed("export.include_sources", "export.include_indexes", "export.format")
+    compatibility_fields = [
+        *parsing_fields,
+        *full_text_fields,
+        *vector_fields,
+        *retrieval_fields,
+        *chat_fields,
+        *prompt_fields,
+        *export_fields,
+    ]
+    if compatibility_fields:
+        impacts.append(
+            RepositorySettingsImpact(
+                category="export_recreate",
+                severity="info",
+                title="Export and recreate metadata will change",
+                message=(
+                    "Future portable bundles and recreate validation will include these saved "
+                    "defaults. Older exports keep the settings captured when they were created."
+                ),
+                fields=compatibility_fields,
+                actions=["Create a fresh export after saving if this configuration should travel."],
+            )
+        )
+
+    if [
+        *parsing_fields,
+        *full_text_fields,
+        *vector_fields,
+        *retrieval_fields,
+        *chat_fields,
+        *prompt_fields,
+    ]:
+        impacts.append(
+            RepositorySettingsImpact(
+                category="evaluation_freshness",
+                severity="info",
+                title="Evaluation evidence may be stale",
+                message=(
+                    "Retrieval or generation defaults changed. Any prior manual checks or golden "
+                    "evaluation notes should be rerun before promoting these defaults."
+                ),
+                fields=[
+                    *parsing_fields,
+                    *full_text_fields,
+                    *vector_fields,
+                    *retrieval_fields,
+                    *chat_fields,
+                    *prompt_fields,
+                ],
+                actions=["Rerun relevant searches, chats, or sandbox comparisons."],
+            )
+        )
+
+    return RepositorySettingsImpactResponse(has_changes=current != draft, impacts=impacts)
+
+
 def export_manifest(session: Session, repository_id: str) -> RepositoryManifest | None:
     repository_settings = get_repository_with_settings(session, repository_id)
     if repository_settings is None:
@@ -110,6 +301,15 @@ def export_manifest(session: Session, repository_id: str) -> RepositoryManifest 
     session.add(snapshot)
     session.commit()
     return manifest
+
+
+def _field_value(payload: dict[str, object], dotted_path: str) -> object:
+    value: object = payload
+    for part in dotted_path.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
+    return value
 
 
 def _manifest_for_repository(

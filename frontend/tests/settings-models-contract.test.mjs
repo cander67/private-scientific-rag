@@ -51,6 +51,22 @@ test("Settings / Models supports edit, save, cancel, and field validation", () =
   assert.match(styles, /\.settings-field-error/);
 });
 
+test("Settings / Models previews and preserves settings impact", () => {
+  assert.match(source, /function previewRepositorySettingsImpact/);
+  assert.match(source, /settings\/impact/);
+  assert.match(source, /SettingsImpactResponse/);
+  assert.match(source, /pendingImpact/);
+  assert.match(source, /lastSavedImpact/);
+  assert.match(source, /SettingsImpactPanel/);
+  assert.match(source, /Pending impact/);
+  assert.match(source, /Saved impact/);
+  assert.match(source, /document_reprocessing/);
+  assert.match(source, /full_text_rebuild/);
+  assert.match(source, /vector_rebuild/);
+  assert.match(styles, /\.settings-impact/);
+  assert.match(styles, /\.settings-impact-list/);
+});
+
 test("Settings / Models manages normal chat prompt library entries", () => {
   assert.match(source, /Chat prompt library/);
   assert.match(source, /Add prompt/);

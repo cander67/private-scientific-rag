@@ -67,6 +67,28 @@ type RepositorySettingsResponse = RepositoryResponse & {
   settings: RepositorySettings;
 };
 
+type SettingsImpact = {
+  category:
+    | "document_reprocessing"
+    | "full_text_rebuild"
+    | "vector_rebuild"
+    | "retrieval_defaults"
+    | "chat_defaults"
+    | "prompt_defaults"
+    | "export_recreate"
+    | "evaluation_freshness";
+  severity: "info" | "warning";
+  title: string;
+  message: string;
+  fields: string[];
+  actions: string[];
+};
+
+type SettingsImpactResponse = {
+  has_changes: boolean;
+  impacts: SettingsImpact[];
+};
+
 type ExportManifestSummary = {
   generated_at: string;
   repository: {
@@ -824,6 +846,21 @@ function App() {
     setRepositorySettings(payload.settings);
     setExportIncludeSources(payload.settings.export.include_sources);
     return payload.settings;
+  }
+
+  async function previewRepositorySettingsImpact(nextSettings: RepositorySettings) {
+    if (!repository) {
+      throw new Error("No active repository");
+    }
+    const response = await fetch(`${API_BASE}/repositories/${repository.id}/settings/impact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: nextSettings }),
+    });
+    if (!response.ok) {
+      throw new Error("Settings impact unavailable");
+    }
+    return (await response.json()) as SettingsImpactResponse;
   }
 
   async function inspectDocument(repositoryId: string, documentId: string) {
@@ -1937,6 +1974,7 @@ function App() {
                 settings={repositorySettings}
                 onNavigate={navigateTo}
                 onSave={saveRepositorySettings}
+                onAnalyzeImpact={previewRepositorySettingsImpact}
               />
             ) : activeView === "recreate" ? (
               <RecreateRepository
@@ -2292,19 +2330,31 @@ function SettingsModels({
   settings,
   onNavigate,
   onSave,
+  onAnalyzeImpact,
 }: {
   repository: RepositoryResponse["repository"] | null;
   settings: RepositorySettings | null;
   onNavigate: (view: View) => void;
   onSave: (settings: RepositorySettings) => Promise<RepositorySettings>;
+  onAnalyzeImpact: (settings: RepositorySettings) => Promise<SettingsImpactResponse>;
 }) {
   const [draft, setDraft] = useState<RepositorySettings | null>(() => cloneSettings(settings));
   const [saveMessage, setSaveMessage] = useState("Loaded repository defaults");
   const [saveBusy, setSaveBusy] = useState(false);
+  const [pendingImpact, setPendingImpact] = useState<SettingsImpactResponse | null>(null);
+  const [lastSavedImpact, setLastSavedImpact] = useState<SettingsImpactResponse | null>(null);
+  const [impactMessage, setImpactMessage] = useState("No pending settings impact.");
+  const lastRepositoryId = useRef(repository?.id ?? null);
 
   useEffect(() => {
+    if (lastRepositoryId.current !== repository?.id) {
+      lastRepositoryId.current = repository?.id ?? null;
+      setLastSavedImpact(null);
+      setImpactMessage("No pending settings impact.");
+    }
     setDraft(cloneSettings(settings));
     setSaveMessage("Loaded repository defaults");
+    setPendingImpact(null);
   }, [settings, repository?.id]);
 
   const validationIssues = useMemo(() => validateSettingsDraft(draft), [draft]);
@@ -2314,6 +2364,45 @@ function SettingsModels({
   );
   const requiredModels = requiredModelsForSettings(draft);
   const dirty = Boolean(settings && draft && JSON.stringify(settings) !== JSON.stringify(draft));
+  const visibleImpact = dirty ? pendingImpact : lastSavedImpact;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!draft || !dirty || validationIssues.length > 0) {
+      setPendingImpact(null);
+      if (validationIssues.length > 0) {
+        setImpactMessage("Fix validation errors to preview impact.");
+      } else if (!lastSavedImpact) {
+        setImpactMessage("No pending settings impact.");
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setImpactMessage("Checking settings impact...");
+    onAnalyzeImpact(draft)
+      .then((impact) => {
+        if (!cancelled) {
+          setPendingImpact(impact);
+          setImpactMessage(
+            impact.impacts.length > 0
+              ? "Review impact before saving."
+              : "No rebuild or workflow impact detected.",
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPendingImpact(null);
+          setImpactMessage("Settings impact unavailable.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [draft, dirty, repository?.id, validationIssues, lastSavedImpact]);
 
   function updateDraft(updater: (next: RepositorySettings) => void) {
     setDraft((current) => {
@@ -2340,9 +2429,17 @@ function SettingsModels({
     }
     setSaveBusy(true);
     setSaveMessage("Saving settings...");
+    const impactBeforeSave = pendingImpact;
     try {
       const saved = await onSave(draft);
       setDraft(cloneSettings(saved));
+      setLastSavedImpact(impactBeforeSave);
+      setPendingImpact(null);
+      setImpactMessage(
+        impactBeforeSave?.impacts.length
+          ? "Saved settings changed repository readiness. Review the follow-up actions."
+          : "Settings saved with no rebuild or workflow impact.",
+      );
       setSaveMessage("Settings saved");
     } catch (error) {
       setSaveMessage(error instanceof Error ? error.message : "Settings save failed");
@@ -2353,6 +2450,7 @@ function SettingsModels({
 
   function cancelEdits() {
     setDraft(cloneSettings(settings));
+    setPendingImpact(null);
     setSaveMessage("Edits discarded");
   }
 
@@ -2441,6 +2539,11 @@ function SettingsModels({
             </div>
           </div>
         )}
+        <SettingsImpactPanel
+          impact={visibleImpact}
+          message={impactMessage}
+          mode={dirty ? "pending" : "saved"}
+        />
         <div className="settings-actions">
           <button className="btn btn-sm" type="button" onClick={() => onNavigate("documents")}>
             Document Manager
@@ -2736,6 +2839,57 @@ function SettingText({
       <input id={id} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
       {error && <small className="settings-field-error">{error}</small>}
     </label>
+  );
+}
+
+function SettingsImpactPanel({
+  impact,
+  message,
+  mode,
+}: {
+  impact: SettingsImpactResponse | null;
+  message: string;
+  mode: "pending" | "saved";
+}) {
+  const impacts = impact?.impacts ?? [];
+  return (
+    <section className="settings-impact" aria-label="Settings impact">
+      <div className="row row-between">
+        <div>
+          <div className="eyebrow">{mode === "pending" ? "Pending impact" : "Saved impact"}</div>
+          <h2>Rebuild and workflow effects</h2>
+        </div>
+        <span className={`badge ${impacts.length > 0 ? "badge-warn" : "badge-ok"}`}>
+          <span className="dot" />
+          {impacts.length > 0 ? `${impacts.length} changes` : "No impact"}
+        </span>
+      </div>
+      <p className="muted">{message}</p>
+      {impacts.length > 0 && (
+        <div className="settings-impact-list">
+          {impacts.map((item) => (
+            <article className={`settings-impact-item settings-impact-${item.severity}`} key={item.category}>
+              <div className="row row-between">
+                <strong>{item.title}</strong>
+                <span className="badge">
+                  <span className="dot" />
+                  {item.category.replace(/_/g, " ")}
+                </span>
+              </div>
+              <p>{item.message}</p>
+              {item.actions.length > 0 && <small>{item.actions.join(" ")}</small>}
+              {item.fields.length > 0 && (
+                <div className="settings-impact-fields">
+                  {item.fields.map((field) => (
+                    <code key={field}>{field}</code>
+                  ))}
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -147,6 +147,31 @@ def test_repository_settings_endpoint_rejects_invalid_settings() -> None:
     assert "chunk_overlap must be smaller" in response.text
 
 
+def test_repository_settings_impact_endpoint_reports_categories() -> None:
+    client = _client_with_database()
+    created = client.get("/repositories/default").json()
+    repository_id = created["repository"]["id"]
+    settings = created["settings"]
+    settings["chunking"]["mode"] = "fixed"
+    settings["embedding"]["model"] = "sentence-transformers/other"
+    settings["reranking"]["model"] = "cross-encoder/other"
+    settings["export"]["include_sources"] = False
+
+    response = client.post(
+        f"/repositories/{repository_id}/settings/impact",
+        json={"settings": settings},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    categories = {impact["category"] for impact in payload["impacts"]}
+    assert payload["has_changes"] is True
+    assert "document_reprocessing" in categories
+    assert "vector_rebuild" in categories
+    assert "retrieval_defaults" in categories
+    assert "export_recreate" in categories
+
+
 def test_recreate_validation_endpoint_reports_clear_issues(tmp_path: Path) -> None:
     client = _client_with_database()
     created = client.get("/repositories/default").json()

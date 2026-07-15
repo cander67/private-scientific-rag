@@ -12,10 +12,13 @@ from private_rag.repositories.schemas import (
     RecreateValidationResponse,
     RepositoryManifest,
     RepositoryRead,
+    RepositorySettingsImpactRequest,
+    RepositorySettingsImpactResponse,
     RepositorySettingsUpdate,
     RepositoryWithSettings,
 )
 from private_rag.repositories.service import (
+    analyze_repository_settings_impact,
     ensure_default_repository,
     export_manifest,
     get_repository_with_settings,
@@ -55,6 +58,18 @@ def read_repository_settings(
     if repository is None:
         raise HTTPException(status_code=404, detail="Repository not found")
     return repository
+
+
+@router.post("/{repository_id}/settings/impact", response_model=RepositorySettingsImpactResponse)
+def preview_repository_settings_impact(
+    repository_id: str,
+    request: RepositorySettingsImpactRequest,
+    session: DbSession,
+) -> RepositorySettingsImpactResponse:
+    impact = analyze_repository_settings_impact(session, repository_id, request.settings)
+    if impact is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return impact
 
 
 @router.put("/{repository_id}/settings", response_model=RepositoryWithSettings)

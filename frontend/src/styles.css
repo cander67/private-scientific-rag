@@ -835,6 +835,69 @@ textarea {
   margin-top: 2px;
 }
 
+.settings-impact {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--s4);
+}
+
+.settings-impact h2 {
+  font-size: 0.95rem;
+}
+
+.settings-impact-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+
+.settings-impact-item {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: var(--s3);
+}
+
+.settings-impact-item p {
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  margin-top: var(--s2);
+}
+
+.settings-impact-item small {
+  display: block;
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  margin-top: var(--s2);
+}
+
+.settings-impact-warning {
+  border-color: var(--warn);
+}
+
+.settings-impact-info {
+  border-color: var(--border-strong);
+}
+
+.settings-impact-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s3);
+}
+
+.settings-impact-fields code {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  padding: 2px 6px;
+}
+
 .settings-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(240px, 1fr));
@@ -1800,7 +1863,8 @@ textarea {
 
   .settings-grid,
   .settings-readiness-grid,
-  .settings-prompt-list {
+  .settings-prompt-list,
+  .settings-impact-list {
     grid-template-columns: repeat(2, minmax(200px, 1fr));
   }
 
@@ -1874,6 +1938,7 @@ textarea {
   .settings-grid,
   .settings-readiness-grid,
   .settings-prompt-list,
+  .settings-impact-list,
   .recreate-grid,
   .recreate-mapping-row {
     grid-template-columns: 1fr;

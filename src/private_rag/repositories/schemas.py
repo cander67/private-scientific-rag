@@ -141,6 +141,33 @@ class RepositorySettingsUpdate(BaseModel):
     settings: RepositorySettings
 
 
+class RepositorySettingsImpactRequest(BaseModel):
+    settings: RepositorySettings
+
+
+class RepositorySettingsImpact(BaseModel):
+    category: Literal[
+        "document_reprocessing",
+        "full_text_rebuild",
+        "vector_rebuild",
+        "retrieval_defaults",
+        "chat_defaults",
+        "prompt_defaults",
+        "export_recreate",
+        "evaluation_freshness",
+    ]
+    severity: Literal["info", "warning"] = "warning"
+    title: str
+    message: str
+    fields: list[str] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
+
+
+class RepositorySettingsImpactResponse(BaseModel):
+    has_changes: bool
+    impacts: list[RepositorySettingsImpact] = Field(default_factory=list)
+
+
 class RepositoryManifest(BaseModel):
     schema_version: int = 1
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
