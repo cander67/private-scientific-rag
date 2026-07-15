@@ -183,6 +183,48 @@ type RepositoryAdminStorageHint = {
   detail: string;
 };
 
+type RepositoryCleanupAction = "remove" | "preserve" | "skip" | "retry_required";
+
+type RepositoryDeletePreview = {
+  repository: RepositoryRead;
+  generated_at: string;
+  database_counts: {
+    repositories: number;
+    settings: number;
+    documents: number;
+    document_versions: number;
+    chunks: number;
+    chat_sessions: number;
+    chat_messages: number;
+    retrieval_runs: number;
+    retrieval_results: number;
+    sandbox_prompts: number;
+    sandbox_runs: number;
+    sandbox_comparisons: number;
+    embedding_runs: number;
+    snapshots: number;
+  };
+  plan: RepositoryCleanupPlanItem[];
+  warnings: RepositoryCleanupWarning[];
+  destructive: boolean;
+};
+
+type RepositoryCleanupPlanItem = {
+  category: RepositoryAdminStorageHint["category"];
+  label: string;
+  action: RepositoryCleanupAction;
+  count: number;
+  paths: string[];
+  detail: string;
+};
+
+type RepositoryCleanupWarning = {
+  code: string;
+  category: RepositoryAdminStorageHint["category"];
+  message: string;
+  retryable: boolean;
+};
+
 type DashboardActivityItem = {
   kind: "document" | "retrieval" | "chat" | "sandbox" | "export" | "recreate";
   label: string;
@@ -733,6 +775,8 @@ function App() {
   const [dashboardMessage, setDashboardMessage] = useState("Loading repository summary");
   const [adminInventory, setAdminInventory] = useState<RepositoryAdminInventory | null>(null);
   const [adminMessage, setAdminMessage] = useState("Loading local repository inventory");
+  const [deletePreview, setDeletePreview] = useState<RepositoryDeletePreview | null>(null);
+  const [deletePreviewBusy, setDeletePreviewBusy] = useState(false);
   const [recreateFile, setRecreateFile] = useState<File | null>(null);
   const [recreateRepositoryName, setRecreateRepositoryName] = useState("");
   const [recreateTargetRepositoryId, setRecreateTargetRepositoryId] = useState("");
@@ -930,6 +974,7 @@ function App() {
     setLastRebuild(null);
     setDashboardSummary(null);
     setDashboardMessage("Loading repository summary");
+    setDeletePreview(null);
     setChatSessions([]);
     setActiveChatSessionId(null);
     setActiveCitation(null);
@@ -1006,6 +1051,25 @@ function App() {
     } catch {
       setAdminInventory(null);
       setAdminMessage("Could not load repository administration inventory");
+    }
+  }
+
+  async function previewRepositoryCleanup(repositoryId: string) {
+    setDeletePreviewBusy(true);
+    setAdminMessage("Loading repository cleanup preview");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repositoryId}/admin/delete-preview`);
+      if (!response.ok) {
+        throw new Error("cleanup preview unavailable");
+      }
+      const payload = (await response.json()) as RepositoryDeletePreview;
+      setDeletePreview(payload);
+      setAdminMessage(`Cleanup preview loaded for ${payload.repository.name}`);
+    } catch {
+      setDeletePreview(null);
+      setAdminMessage("Could not load repository cleanup preview");
+    } finally {
+      setDeletePreviewBusy(false);
     }
   }
 
@@ -2099,8 +2163,11 @@ function App() {
               <RepositoryAdministration
                 inventory={adminInventory}
                 activeRepositoryId={repository?.id ?? null}
+                preview={deletePreview}
+                previewBusy={deletePreviewBusy}
                 message={adminMessage}
                 onRefresh={() => void loadAdminInventory()}
+                onPreviewCleanup={(repositoryId) => void previewRepositoryCleanup(repositoryId)}
                 onSelectRepository={activateRepository}
                 onNavigate={navigateTo}
               />
@@ -2831,15 +2898,21 @@ function RepositoryDashboard({
 function RepositoryAdministration({
   inventory,
   activeRepositoryId,
+  preview,
+  previewBusy,
   message,
   onRefresh,
+  onPreviewCleanup,
   onSelectRepository,
   onNavigate,
 }: {
   inventory: RepositoryAdminInventory | null;
   activeRepositoryId: string | null;
+  preview: RepositoryDeletePreview | null;
+  previewBusy: boolean;
   message: string;
   onRefresh: () => void;
+  onPreviewCleanup: (repositoryId: string) => void;
   onSelectRepository: (repository: RepositoryRead) => void;
   onNavigate: (view: View) => void;
 }) {
@@ -2955,6 +3028,14 @@ function RepositoryAdministration({
                       <button
                         className="btn btn-sm"
                         type="button"
+                        onClick={() => onPreviewCleanup(item.repository.id)}
+                        disabled={previewBusy}
+                      >
+                        Preview cleanup
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        type="button"
                         onClick={() => {
                           onSelectRepository(item.repository);
                           onNavigate("dashboard");
@@ -2970,7 +3051,75 @@ function RepositoryAdministration({
           </div>
         </section>
       )}
+
+      {preview && <RepositoryCleanupPreviewPanel preview={preview} />}
     </div>
+  );
+}
+
+function RepositoryCleanupPreviewPanel({ preview }: { preview: RepositoryDeletePreview }) {
+  const databaseRows = Object.entries(preview.database_counts).filter(([, value]) => value > 0);
+  return (
+    <section className="card admin-preview-panel" aria-label="Repository cleanup preview">
+      <div>
+        <div className="eyebrow">Cleanup preview</div>
+        <h2>{preview.repository.name}</h2>
+      </div>
+      <p className="hint">
+        Preview generated {formatDate(preview.generated_at)}. No records, files, indexes, or model
+        caches are changed by this preview.
+      </p>
+      <div className="admin-preview-grid">
+        <section>
+          <h3>Database records</h3>
+          <dl className="kv dashboard-kv">
+            {databaseRows.map(([label, value]) => (
+              <React.Fragment key={label}>
+                <dt>{label.replace(/_/g, " ")}</dt>
+                <dd>{value}</dd>
+              </React.Fragment>
+            ))}
+          </dl>
+        </section>
+        <section>
+          <h3>Warnings</h3>
+          {preview.warnings.length > 0 ? (
+            <div className="admin-warning-list">
+              {preview.warnings.map((warning) => (
+                <article className="dashboard-warning" key={warning.code}>
+                  <strong>{adminCleanupCategoryLabel(warning.category)}</strong>
+                  <p>{warning.message}</p>
+                  {warning.retryable && <small>Retry available after the local service is reachable.</small>}
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="hint">No cleanup warnings were reported.</p>
+          )}
+        </section>
+      </div>
+      <div className="admin-plan-list">
+        {preview.plan.map((item) => (
+          <article className={`admin-plan-item admin-plan-${item.action}`} key={item.category}>
+            <div className="row row-between">
+              <div>
+                <span>{adminCleanupActionLabel(item.action)}</span>
+                <strong>{item.label}</strong>
+              </div>
+              <b>{item.count}</b>
+            </div>
+            <p>{item.detail}</p>
+            {item.paths.length > 0 && (
+              <ul>
+                {item.paths.slice(0, 4).map((path) => (
+                  <li key={path}>{path}</li>
+                ))}
+              </ul>
+            )}
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -6027,6 +6176,20 @@ function adminStorageStatusLabel(status: RepositoryAdminStorageHint["status"]) {
     out_of_scope: "out of scope",
   };
   return labels[status];
+}
+
+function adminCleanupActionLabel(action: RepositoryCleanupAction) {
+  const labels: Record<RepositoryCleanupAction, string> = {
+    remove: "Would remove",
+    preserve: "Preserved",
+    skip: "Skipped",
+    retry_required: "Retry needed",
+  };
+  return labels[action];
+}
+
+function adminCleanupCategoryLabel(category: RepositoryAdminStorageHint["category"]) {
+  return category.replace(/_/g, " ");
 }
 
 function dashboardQuickActions() {

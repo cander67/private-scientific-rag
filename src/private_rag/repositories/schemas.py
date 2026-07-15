@@ -279,6 +279,61 @@ class RepositoryAdminInventory(BaseModel):
     repositories: list[RepositoryAdminSummary] = Field(default_factory=list)
 
 
+CleanupCategory = Literal[
+    "database_records",
+    "app_managed_sources",
+    "external_sources",
+    "full_text_index",
+    "vector_index",
+    "exports",
+    "prompt_sandbox_history",
+    "chat_retrieval_history",
+    "model_caches",
+]
+
+
+class RepositoryCleanupDatabaseCounts(BaseModel):
+    repositories: int = 1
+    settings: int = 0
+    documents: int = 0
+    document_versions: int = 0
+    chunks: int = 0
+    chat_sessions: int = 0
+    chat_messages: int = 0
+    retrieval_runs: int = 0
+    retrieval_results: int = 0
+    sandbox_prompts: int = 0
+    sandbox_runs: int = 0
+    sandbox_comparisons: int = 0
+    embedding_runs: int = 0
+    snapshots: int = 0
+
+
+class RepositoryCleanupPlanItem(BaseModel):
+    category: CleanupCategory
+    label: str
+    action: Literal["remove", "preserve", "skip", "retry_required"]
+    count: int = 0
+    paths: list[str] = Field(default_factory=list)
+    detail: str
+
+
+class RepositoryCleanupWarning(BaseModel):
+    code: str
+    category: CleanupCategory
+    message: str
+    retryable: bool = False
+
+
+class RepositoryDeletePreview(BaseModel):
+    repository: RepositoryRead
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    database_counts: RepositoryCleanupDatabaseCounts
+    plan: list[RepositoryCleanupPlanItem] = Field(default_factory=list)
+    warnings: list[RepositoryCleanupWarning] = Field(default_factory=list)
+    destructive: bool = False
+
+
 class RepositoryManifest(BaseModel):
     schema_version: int = 1
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

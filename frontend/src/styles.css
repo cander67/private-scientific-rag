@@ -1047,6 +1047,76 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.admin-preview-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.admin-preview-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+  gap: var(--s4);
+}
+
+.admin-preview-grid h3 {
+  font-size: 0.85rem;
+  margin-bottom: var(--s3);
+}
+
+.admin-warning-list,
+.admin-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.admin-plan-item {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: var(--s3);
+}
+
+.admin-plan-item span {
+  color: var(--text-faint);
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-plan-item strong,
+.admin-plan-item b {
+  overflow-wrap: anywhere;
+}
+
+.admin-plan-item p {
+  color: var(--text-faint);
+  font-size: 0.82rem;
+  margin: var(--s2) 0 0;
+}
+
+.admin-plan-item ul {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  margin: var(--s2) 0 0;
+  padding-left: var(--s4);
+}
+
+.admin-plan-remove {
+  border-left-color: var(--danger);
+}
+
+.admin-plan-preserve {
+  border-left-color: var(--ok);
+}
+
+.admin-plan-retry_required {
+  border-left-color: var(--warn);
+}
+
 .settings-layout {
   display: flex;
   flex-direction: column;
@@ -2165,6 +2235,7 @@ textarea {
   .export-metrics,
   .dashboard-grid,
   .admin-totals,
+  .admin-preview-grid,
   .dashboard-status-grid,
   .dashboard-quick-actions,
   .dashboard-activity-list {
@@ -2251,6 +2322,7 @@ textarea {
   .export-grid,
   .dashboard-grid,
   .admin-totals,
+  .admin-preview-grid,
   .dashboard-status-grid,
   .dashboard-quick-actions,
   .dashboard-activity-list,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal, Protocol
 
 import httpx
@@ -11,7 +12,7 @@ from private_rag.chat.llm import ChatLLM
 from private_rag.chat.models import ChatMessageRow, ChatSession
 from private_rag.core.settings import Settings, get_settings
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
-from private_rag.prompt_sandbox.models import SandboxComparison, SandboxRun
+from private_rag.prompt_sandbox.models import SandboxComparison, SandboxPromptVersion, SandboxRun
 from private_rag.repositories.models import Repository, RepositorySettingsRow, RepositorySnapshot
 from private_rag.repositories.schemas import (
     RecreateValidationIssue,
@@ -20,11 +21,15 @@ from private_rag.repositories.schemas import (
     RepositoryAdminInventory,
     RepositoryAdminStorageHint,
     RepositoryAdminSummary,
+    RepositoryCleanupDatabaseCounts,
+    RepositoryCleanupPlanItem,
+    RepositoryCleanupWarning,
     RepositoryDashboardActiveConfig,
     RepositoryDashboardActivityItem,
     RepositoryDashboardCounts,
     RepositoryDashboardIndexStatus,
     RepositoryDashboardSummary,
+    RepositoryDeletePreview,
     RepositoryManifest,
     RepositoryRead,
     RepositorySettings,
@@ -35,7 +40,7 @@ from private_rag.repositories.schemas import (
     RepositoryWithSettings,
     source_file_exists,
 )
-from private_rag.retrieval.models import RetrievalRun
+from private_rag.retrieval.models import RetrievalResult, RetrievalRun
 from private_rag.search.service import FTS_TABLE
 from private_rag.vector.embeddings import SentenceTransformersEmbeddingProvider
 from private_rag.vector.models import EmbeddingRun
@@ -296,6 +301,170 @@ def repository_admin_inventory(session: Session) -> RepositoryAdminInventory:
         repositories=[
             _repository_admin_summary(session, repository=repository) for repository in repositories
         ]
+    )
+
+
+def preview_repository_deletion(
+    session: Session,
+    *,
+    repository_id: str,
+    app_settings: Settings,
+    checker: SettingsReadinessChecker,
+) -> RepositoryDeletePreview | None:
+    repository = session.get(Repository, repository_id)
+    if repository is None:
+        return None
+    counts = _repository_cleanup_database_counts(session, repository_id)
+    app_managed_paths, external_paths = _classify_repository_source_paths(
+        session,
+        repository_id=repository_id,
+        app_settings=app_settings,
+    )
+    derived_paths = _repository_derived_artifact_paths(session, repository_id=repository_id)
+    full_text_count = _full_text_count(session, repository_id)
+    embedding_run = session.scalar(
+        select(EmbeddingRun).where(EmbeddingRun.repository_id == repository_id)
+    )
+    vector_count = embedding_run.chunk_count if embedding_run is not None else 0
+    warnings: list[RepositoryCleanupWarning] = []
+    vector_action: Literal["remove", "skip", "retry_required"] = "skip"
+    vector_detail = "No vector index run is recorded for this repository."
+    if embedding_run is not None:
+        qdrant_readiness = checker.check_qdrant(
+            qdrant_url=app_settings.qdrant_url,
+            collection_name=embedding_run.collection_name,
+        )
+        if qdrant_readiness.ready:
+            vector_action = "remove"
+            vector_detail = (
+                f"Vector collection '{embedding_run.collection_name}' would be removed "
+                f"for {vector_count} indexed chunks."
+            )
+        else:
+            vector_action = "retry_required"
+            vector_detail = (
+                f"Vector collection '{embedding_run.collection_name}' needs cleanup, but "
+                "Qdrant is not reachable from this runtime."
+            )
+            warnings.append(
+                RepositoryCleanupWarning(
+                    code="qdrant_unavailable",
+                    category="vector_index",
+                    message=qdrant_readiness.message,
+                    retryable=True,
+                )
+            )
+
+    repository_read = RepositoryRead(
+        id=repository.id,
+        name=repository.name,
+        root_path=repository.root_path,
+        created_at=repository.created_at,
+        updated_at=repository.updated_at,
+    )
+    return RepositoryDeletePreview(
+        repository=repository_read,
+        database_counts=counts,
+        plan=[
+            RepositoryCleanupPlanItem(
+                category="database_records",
+                label="Repository database records",
+                action="remove",
+                count=sum(counts.model_dump().values()),
+                detail=(
+                    "Repository-scoped records would be removed from the local database, "
+                    "including settings, documents, history, snapshots, and index metadata."
+                ),
+            ),
+            RepositoryCleanupPlanItem(
+                category="app_managed_sources",
+                label="App-managed source copies and generated artifacts",
+                action="remove" if app_managed_paths or derived_paths else "skip",
+                count=len(app_managed_paths) + len(derived_paths),
+                paths=[*app_managed_paths, *derived_paths],
+                detail=(
+                    "Files under the app-managed repository data directory would be removed."
+                    if app_managed_paths or derived_paths
+                    else "No app-managed source copies or generated artifacts were found."
+                ),
+            ),
+            RepositoryCleanupPlanItem(
+                category="external_sources",
+                label="External source references",
+                action="preserve",
+                count=len(external_paths),
+                paths=external_paths,
+                detail="Referenced source files outside app-managed storage are preserved.",
+            ),
+            RepositoryCleanupPlanItem(
+                category="full_text_index",
+                label="SQLite full-text index",
+                action="remove" if full_text_count else "skip",
+                count=full_text_count,
+                detail=f"{full_text_count} full-text indexed chunks would be removed.",
+            ),
+            RepositoryCleanupPlanItem(
+                category="vector_index",
+                label="Qdrant vector collection",
+                action=vector_action,
+                count=vector_count,
+                paths=[embedding_run.collection_name] if embedding_run is not None else [],
+                detail=vector_detail,
+            ),
+            RepositoryCleanupPlanItem(
+                category="exports",
+                label="Repository snapshots and export metadata",
+                action="remove" if counts.snapshots else "skip",
+                count=counts.snapshots,
+                detail=f"{counts.snapshots} local repository snapshots would be removed.",
+            ),
+            RepositoryCleanupPlanItem(
+                category="prompt_sandbox_history",
+                label="Prompt sandbox history",
+                action=(
+                    "remove"
+                    if counts.sandbox_prompts or counts.sandbox_runs or counts.sandbox_comparisons
+                    else "skip"
+                ),
+                count=counts.sandbox_prompts + counts.sandbox_runs + counts.sandbox_comparisons,
+                detail=(
+                    f"{counts.sandbox_prompts} prompts, {counts.sandbox_runs} runs, and "
+                    f"{counts.sandbox_comparisons} comparisons would be removed."
+                ),
+            ),
+            RepositoryCleanupPlanItem(
+                category="chat_retrieval_history",
+                label="Chat and retrieval history",
+                action=(
+                    "remove"
+                    if counts.chat_sessions
+                    or counts.chat_messages
+                    or counts.retrieval_runs
+                    or counts.retrieval_results
+                    else "skip"
+                ),
+                count=(
+                    counts.chat_sessions
+                    + counts.chat_messages
+                    + counts.retrieval_runs
+                    + counts.retrieval_results
+                ),
+                detail=(
+                    f"{counts.chat_sessions} chat sessions, {counts.chat_messages} messages, "
+                    f"{counts.retrieval_runs} retrieval runs, and {counts.retrieval_results} "
+                    "retrieval results would be removed."
+                ),
+            ),
+            RepositoryCleanupPlanItem(
+                category="model_caches",
+                label="Local model caches",
+                action="preserve",
+                count=0,
+                detail="Ollama and embedding/reranker model caches are out of scope and preserved.",
+            ),
+        ],
+        warnings=warnings,
+        destructive=False,
     )
 
 
@@ -739,6 +908,99 @@ def _repository_counts(
             else 0
         ),
     )
+
+
+def _repository_cleanup_database_counts(
+    session: Session,
+    repository_id: str,
+) -> RepositoryCleanupDatabaseCounts:
+    return RepositoryCleanupDatabaseCounts(
+        settings=_count(
+            session,
+            RepositorySettingsRow,
+            RepositorySettingsRow.repository_id == repository_id,
+        ),
+        documents=_count(session, Document, Document.repository_id == repository_id),
+        document_versions=_count(
+            session,
+            DocumentVersion,
+            DocumentVersion.repository_id == repository_id,
+        ),
+        chunks=_count(session, DocumentChunk, DocumentChunk.repository_id == repository_id),
+        chat_sessions=_count(session, ChatSession, ChatSession.repository_id == repository_id),
+        chat_messages=_count(
+            session, ChatMessageRow, ChatMessageRow.repository_id == repository_id
+        ),
+        retrieval_runs=_count(session, RetrievalRun, RetrievalRun.repository_id == repository_id),
+        retrieval_results=_count(
+            session,
+            RetrievalResult,
+            RetrievalResult.repository_id == repository_id,
+        ),
+        sandbox_prompts=_count(
+            session,
+            SandboxPromptVersion,
+            SandboxPromptVersion.repository_id == repository_id,
+        ),
+        sandbox_runs=_count(session, SandboxRun, SandboxRun.repository_id == repository_id),
+        sandbox_comparisons=_count(
+            session,
+            SandboxComparison,
+            SandboxComparison.repository_id == repository_id,
+        ),
+        embedding_runs=_count(session, EmbeddingRun, EmbeddingRun.repository_id == repository_id),
+        snapshots=_count(
+            session, RepositorySnapshot, RepositorySnapshot.repository_id == repository_id
+        ),
+    )
+
+
+def _classify_repository_source_paths(
+    session: Session,
+    *,
+    repository_id: str,
+    app_settings: Settings,
+) -> tuple[list[str], list[str]]:
+    managed_root = app_settings.data_dir / "repositories" / repository_id
+    app_managed: set[str] = set()
+    external: set[str] = set()
+    paths = session.scalars(
+        select(DocumentVersion.storage_path).where(DocumentVersion.repository_id == repository_id)
+    ).all()
+    for path_text in paths:
+        path = Path(path_text).expanduser()
+        if _is_relative_to_path(path, managed_root):
+            app_managed.add(path_text)
+        else:
+            external.add(path_text)
+    return sorted(app_managed), sorted(external)
+
+
+def _repository_derived_artifact_paths(
+    session: Session,
+    *,
+    repository_id: str,
+) -> list[str]:
+    paths = session.scalars(
+        select(DocumentVersion.storage_path).where(DocumentVersion.repository_id == repository_id)
+    ).all()
+    derived_paths: set[str] = set()
+    for path_text in paths:
+        path = Path(path_text).expanduser()
+        try:
+            derived_dir = path.parents[1] / "derived"
+        except IndexError:
+            continue
+        derived_paths.add(str(derived_dir))
+    return sorted(derived_paths)
+
+
+def _is_relative_to_path(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(parent.expanduser().resolve(strict=False))
+    except ValueError:
+        return False
+    return True
 
 
 def _repository_storage_hints(

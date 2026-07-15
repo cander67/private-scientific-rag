@@ -14,6 +14,7 @@ from private_rag.repositories.schemas import (
     RecreateValidationResponse,
     RepositoryAdminInventory,
     RepositoryDashboardSummary,
+    RepositoryDeletePreview,
     RepositoryManifest,
     RepositoryRead,
     RepositorySettingsImpactRequest,
@@ -31,6 +32,7 @@ from private_rag.repositories.service import (
     export_manifest,
     get_repository_with_settings,
     list_repositories,
+    preview_repository_deletion,
     repository_admin_inventory,
     repository_dashboard_summary,
     update_repository_settings,
@@ -80,6 +82,23 @@ def read_repositories(session: DbSession) -> list[RepositoryRead]:
 def read_repository_admin_inventory(session: DbSession) -> RepositoryAdminInventory:
     ensure_default_repository(session)
     return repository_admin_inventory(session)
+
+
+@router.get("/{repository_id}/admin/delete-preview", response_model=RepositoryDeletePreview)
+def preview_repository_admin_deletion(
+    repository_id: str,
+    session: DbSession,
+    checker: SettingsReadinessCheckerDependency,
+) -> RepositoryDeletePreview:
+    preview = preview_repository_deletion(
+        session,
+        repository_id=repository_id,
+        app_settings=get_settings(),
+        checker=checker,
+    )
+    if preview is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return preview
 
 
 @router.get("/{repository_id}/settings", response_model=RepositoryWithSettings)

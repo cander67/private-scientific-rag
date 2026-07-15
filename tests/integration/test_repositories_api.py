@@ -601,6 +601,67 @@ def test_repository_admin_inventory_lists_scoped_counts_and_index_status() -> No
     )
 
 
+def test_repository_delete_preview_reports_cleanup_plan_without_mutating() -> None:
+    client = _client_with_database()
+    _install_readiness_fakes(client)
+    created = client.get("/repositories/default").json()
+    repository_id = created["repository"]["id"]
+    test_app = cast(Any, client.app)
+    with test_app.state.test_session_factory() as session:
+        _add_document_with_chunks(session, repository_id, "preview.txt", 2)
+        session.commit()
+        rebuild_full_text_index(session, repository_id)
+        session.add(
+            EmbeddingRun(
+                repository_id=repository_id,
+                provider="sentence_transformers",
+                model="test-deterministic",
+                vector_size=8,
+                distance="cosine",
+                collection_name="default_repository",
+                status="indexed",
+                chunk_count=2,
+                settings_snapshot={},
+            )
+        )
+        session.add(
+            RepositorySnapshot(
+                repository_id=repository_id,
+                manifest={"repository": {"id": repository_id}, "kind": "export"},
+            )
+        )
+        session.commit()
+        before_documents = session.query(Document).filter_by(repository_id=repository_id).count()
+        before_chunks = session.query(DocumentChunk).filter_by(repository_id=repository_id).count()
+
+    response = client.get(f"/repositories/{repository_id}/admin/delete-preview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["destructive"] is False
+    assert payload["repository"]["id"] == repository_id
+    assert payload["database_counts"]["documents"] == 1
+    assert payload["database_counts"]["document_versions"] == 1
+    assert payload["database_counts"]["chunks"] == 2
+    assert payload["database_counts"]["settings"] == 1
+    assert payload["database_counts"]["embedding_runs"] == 1
+    assert payload["database_counts"]["snapshots"] == 1
+    plan = {item["category"]: item for item in payload["plan"]}
+    assert plan["database_records"]["action"] == "remove"
+    assert plan["full_text_index"]["count"] == 2
+    assert plan["vector_index"]["action"] == "retry_required"
+    assert plan["external_sources"]["action"] == "preserve"
+    assert plan["model_caches"]["action"] == "preserve"
+    assert payload["warnings"][0]["code"] == "qdrant_unavailable"
+    assert payload["warnings"][0]["retryable"] is True
+
+    with test_app.state.test_session_factory() as session:
+        after_documents = session.query(Document).filter_by(repository_id=repository_id).count()
+        after_chunks = session.query(DocumentChunk).filter_by(repository_id=repository_id).count()
+    assert after_documents == before_documents
+    assert after_chunks == before_chunks
+
+
 def test_repository_summary_reports_partial_and_stale_indexes() -> None:
     client = _client_with_database()
     _install_readiness_fakes(client)
