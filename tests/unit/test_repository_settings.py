@@ -10,7 +10,11 @@ from private_rag.repositories.schemas import (
     RecreateValidationRequest,
     RepositorySettings,
 )
-from private_rag.repositories.service import validate_recreate_request
+from private_rag.repositories.service import (
+    LocalSettingsReadinessChecker,
+    analyze_settings_impact,
+    validate_recreate_request,
+)
 
 
 def test_default_repository_settings_use_app_model_defaults() -> None:
@@ -34,6 +38,90 @@ def test_repository_settings_reject_chunk_overlap_larger_than_chunk_size() -> No
 
     with pytest.raises(ValidationError, match="chunk_overlap must be smaller"):
         RepositorySettings.model_validate(payload)
+
+
+def test_repository_settings_reject_cross_encoder_without_model() -> None:
+    app_settings = Settings()
+    payload = RepositorySettings.from_app_settings(app_settings).model_dump(mode="json")
+    payload["reranking"] = {"strategy": "cross_encoder", "model": None}
+
+    with pytest.raises(ValidationError, match="reranking.model is required"):
+        RepositorySettings.model_validate(payload)
+
+
+def test_repository_settings_reject_ollama_dot_distance() -> None:
+    app_settings = Settings()
+    payload = RepositorySettings.from_app_settings(app_settings).model_dump(mode="json")
+    payload["embedding"]["provider"] = "ollama"
+    payload["vector"]["distance"] = "dot"
+
+    with pytest.raises(ValidationError, match="Ollama embeddings currently require cosine"):
+        RepositorySettings.model_validate(payload)
+
+
+def test_repository_settings_reject_invalid_active_prompt() -> None:
+    app_settings = Settings()
+    payload = RepositorySettings.from_app_settings(app_settings).model_dump(mode="json")
+    payload["prompt"]["active_chat_prompt_id"] = "missing-prompt"
+
+    with pytest.raises(ValidationError, match="active_chat_prompt_id"):
+        RepositorySettings.model_validate(payload)
+
+
+def test_settings_impact_reports_reprocessing_and_index_rebuilds() -> None:
+    current = RepositorySettings.from_app_settings(Settings())
+    draft_payload = current.model_dump(mode="json")
+    draft_payload["chunking"]["chunk_size"] = 1200
+    draft_payload["full_text"]["tokenizer"] = "porter"
+    draft_payload["embedding"]["model"] = "sentence-transformers/other"
+    draft = RepositorySettings.model_validate(draft_payload)
+
+    result = analyze_settings_impact(current, draft)
+
+    categories = {impact.category for impact in result.impacts}
+    assert result.has_changes is True
+    assert "document_reprocessing" in categories
+    assert "full_text_rebuild" in categories
+    assert "vector_rebuild" in categories
+    assert "export_recreate" in categories
+    assert "evaluation_freshness" in categories
+
+
+def test_settings_impact_reports_retrieval_chat_and_prompt_defaults() -> None:
+    current = RepositorySettings.from_app_settings(Settings())
+    draft_payload = current.model_dump(mode="json")
+    draft_payload["reranking"]["model"] = "cross-encoder/new"
+    draft_payload["model"]["ollama_chat_model"] = "llama3.2:latest"
+    draft_payload["prompt"]["library"][0]["text"] = "Answer carefully from context."
+    draft = RepositorySettings.model_validate(draft_payload)
+
+    result = analyze_settings_impact(current, draft)
+
+    categories = {impact.category for impact in result.impacts}
+    assert "retrieval_defaults" in categories
+    assert "chat_defaults" in categories
+    assert "prompt_defaults" in categories
+    assert "evaluation_freshness" in categories
+
+
+def test_settings_impact_reports_no_changes_for_same_settings() -> None:
+    current = RepositorySettings.from_app_settings(Settings())
+
+    result = analyze_settings_impact(current, current)
+
+    assert result.has_changes is False
+    assert result.impacts == []
+
+
+def test_readiness_checker_skips_disabled_reranker() -> None:
+    checker = LocalSettingsReadinessChecker()
+
+    result = checker.check_reranker(strategy="none", model=None)
+
+    assert result.target == "reranker"
+    assert result.status == "skipped"
+    assert result.ready is True
+    assert "disabled" in result.message
 
 
 def test_recreate_validation_reports_missing_files_and_models(tmp_path: Path) -> None:

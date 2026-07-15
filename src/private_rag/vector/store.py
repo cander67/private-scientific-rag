@@ -31,6 +31,8 @@ class VectorStore(Protocol):
         self, collection_name: str, vector_size: int, distance: str
     ) -> None: ...
 
+    def delete_collection(self, collection_name: str) -> None: ...
+
     def upsert_points(self, collection_name: str, points: list[VectorPoint]) -> None: ...
 
     def search(
@@ -58,6 +60,9 @@ class QdrantVectorStore:
                 }
             },
         )
+
+    def delete_collection(self, collection_name: str) -> None:
+        self._request("DELETE", f"/collections/{collection_name}", tolerate_not_found=True)
 
     def upsert_points(self, collection_name: str, points: list[VectorPoint]) -> None:
         if not points:
@@ -140,6 +145,9 @@ class InMemoryVectorStore:
 
     def recreate_collection(self, collection_name: str, vector_size: int, distance: str) -> None:
         self.collections[collection_name] = (vector_size, distance, [])
+
+    def delete_collection(self, collection_name: str) -> None:
+        self.collections.pop(collection_name, None)
 
     def upsert_points(self, collection_name: str, points: list[VectorPoint]) -> None:
         vector_size, distance, existing = self.collections[collection_name]

@@ -1,6 +1,6 @@
 # PRD 21: Settings and Model Manager
 
-**Status:** Backlog.
+**Status:** Ready for review.
 
 ## Problem Statement
 

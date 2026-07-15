@@ -16,8 +16,9 @@ class EmbeddingProvider(Protocol):
 
 
 class SentenceTransformersEmbeddingProvider:
-    def __init__(self, model_name: str) -> None:
+    def __init__(self, model_name: str, *, device: str | None = None) -> None:
         self._model_name = model_name
+        self._device = device
         self._model: Any | None = None
         self._vector_size: int | None = None
 
@@ -35,7 +36,12 @@ class SentenceTransformersEmbeddingProvider:
     def embed(self, texts: list[str]) -> list[list[float]]:
         model = self._load_model()
         encoded = model.encode(texts, normalize_embeddings=True)
-        return [list(map(float, vector)) for vector in encoded]
+        vectors = [list(map(float, vector)) for vector in encoded]
+        if any(not math.isfinite(value) for vector in vectors for value in vector):
+            raise RuntimeError(
+                f"Embedding model returned non-finite vector values: {self._model_name}"
+            )
+        return vectors
 
     def _load_model(self) -> Any:
         if self._model is not None:
@@ -48,7 +54,8 @@ class SentenceTransformersEmbeddingProvider:
                 "before rebuilding the vector index."
             ) from exc
 
-        model = SentenceTransformer(self._model_name)
+        model_kwargs = {"device": self._device} if self._device is not None else {}
+        model = SentenceTransformer(self._model_name, **model_kwargs)
         dimension = model.get_sentence_embedding_dimension()
         if dimension is None:
             raise RuntimeError(f"Embedding model has no known vector size: {self._model_name}")

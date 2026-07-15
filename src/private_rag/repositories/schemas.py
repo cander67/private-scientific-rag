@@ -16,8 +16,8 @@ class ChunkingSettings(BaseModel):
 
 
 class ParserSettings(BaseModel):
-    structured_parser: str = "pymupdf"
-    fallback_parser: str = "pypdf"
+    structured_parser: str = Field(default="pymupdf", min_length=1)
+    fallback_parser: str = Field(default="pypdf", min_length=1)
 
 
 class FullTextSettings(BaseModel):
@@ -27,23 +27,23 @@ class FullTextSettings(BaseModel):
 
 
 class VectorSettings(BaseModel):
-    collection_name: str = "default_repository"
+    collection_name: str = Field(default="default_repository", min_length=1)
     vector_size: int = Field(default=384, ge=1)
     distance: Literal["cosine", "dot", "euclid"] = "cosine"
 
 
 class EmbeddingSettings(BaseModel):
     provider: Literal["sentence_transformers", "ollama"] = "sentence_transformers"
-    model: str
+    model: str = Field(min_length=1)
 
 
 class RerankingSettings(BaseModel):
     strategy: Literal["cross_encoder", "none"] = "cross_encoder"
-    model: str | None = None
+    model: str | None = Field(default=None, min_length=1)
 
 
 class ModelSettings(BaseModel):
-    ollama_chat_model: str
+    ollama_chat_model: str = Field(min_length=1)
 
 
 DEFAULT_RAG_CHAT_PROMPT_ID = "rag-chat-default-v1"
@@ -119,6 +119,8 @@ class RepositorySettings(BaseModel):
             raise ValueError("chunk_overlap must be smaller than chunk_size")
         if self.reranking.strategy == "cross_encoder" and not self.reranking.model:
             raise ValueError("reranking.model is required when strategy is cross_encoder")
+        if self.vector.distance == "dot" and self.embedding.provider == "ollama":
+            raise ValueError("Ollama embeddings currently require cosine distance")
         return self
 
 
@@ -137,6 +139,55 @@ class RepositoryWithSettings(BaseModel):
 
 class RepositorySettingsUpdate(BaseModel):
     settings: RepositorySettings
+
+
+class RepositorySettingsImpactRequest(BaseModel):
+    settings: RepositorySettings
+
+
+class RepositorySettingsImpact(BaseModel):
+    category: Literal[
+        "document_reprocessing",
+        "full_text_rebuild",
+        "vector_rebuild",
+        "retrieval_defaults",
+        "chat_defaults",
+        "prompt_defaults",
+        "export_recreate",
+        "evaluation_freshness",
+    ]
+    severity: Literal["info", "warning"] = "warning"
+    title: str
+    message: str
+    fields: list[str] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)
+
+
+class RepositorySettingsImpactResponse(BaseModel):
+    has_changes: bool
+    impacts: list[RepositorySettingsImpact] = Field(default_factory=list)
+
+
+class RepositorySettingsReadinessItem(BaseModel):
+    target: Literal["qdrant", "chat", "embedding", "reranker"]
+    label: str
+    status: Literal[
+        "not_checked",
+        "unavailable_runtime",
+        "not_installed",
+        "ready",
+        "failed",
+        "skipped",
+    ]
+    ready: bool
+    message: str
+    model: str | None = None
+
+
+class RepositorySettingsReadinessResponse(BaseModel):
+    repository_id: str
+    checked: bool
+    items: list[RepositorySettingsReadinessItem]
 
 
 class RepositoryManifest(BaseModel):

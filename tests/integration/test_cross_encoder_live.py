@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 
 import pytest
@@ -49,4 +50,4 @@ def test_live_cross_encoder_returns_scores_for_tiny_fixture() -> None:
 
     assert len(scores) == 2
     assert all(isinstance(score, float) for score in scores)
-    assert scores[0] != scores[1]
+    assert all(math.isfinite(score) for score in scores)

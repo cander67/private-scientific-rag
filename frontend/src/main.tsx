@@ -67,6 +67,51 @@ type RepositorySettingsResponse = RepositoryResponse & {
   settings: RepositorySettings;
 };
 
+type SettingsImpact = {
+  category:
+    | "document_reprocessing"
+    | "full_text_rebuild"
+    | "vector_rebuild"
+    | "retrieval_defaults"
+    | "chat_defaults"
+    | "prompt_defaults"
+    | "export_recreate"
+    | "evaluation_freshness";
+  severity: "info" | "warning";
+  title: string;
+  message: string;
+  fields: string[];
+  actions: string[];
+};
+
+type SettingsImpactResponse = {
+  has_changes: boolean;
+  impacts: SettingsImpact[];
+};
+
+type SettingsReadinessStatus =
+  | "not_checked"
+  | "unavailable_runtime"
+  | "not_installed"
+  | "ready"
+  | "failed"
+  | "skipped";
+
+type SettingsReadinessItem = {
+  target: "qdrant" | "chat" | "embedding" | "reranker";
+  label: string;
+  status: SettingsReadinessStatus;
+  ready: boolean;
+  message: string;
+  model: string | null;
+};
+
+type SettingsReadinessResponse = {
+  repository_id: string;
+  checked: boolean;
+  items: SettingsReadinessItem[];
+};
+
 type ExportManifestSummary = {
   generated_at: string;
   repository: {
@@ -171,7 +216,7 @@ type RecreateBundleResponse = {
   warnings: ExportBundleValidationIssue[];
 };
 
-type View = "documents" | "source" | "search" | "sandbox" | "chat" | "export" | "recreate";
+type View = "documents" | "source" | "search" | "sandbox" | "chat" | "settings" | "export" | "recreate";
 
 type DocumentVersion = {
   id: string;
@@ -806,6 +851,52 @@ function App() {
       setRepositorySettings(null);
       setExportMessage("Could not load export defaults");
     }
+  }
+
+  async function saveRepositorySettings(nextSettings: RepositorySettings) {
+    if (!repository) {
+      throw new Error("No active repository");
+    }
+    const response = await fetch(`${API_BASE}/repositories/${repository.id}/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: nextSettings }),
+    });
+    if (!response.ok) {
+      throw new Error(await settingsSaveErrorMessage(response));
+    }
+    const payload = (await response.json()) as RepositorySettingsResponse;
+    setRepositorySettings(payload.settings);
+    setExportIncludeSources(payload.settings.export.include_sources);
+    return payload.settings;
+  }
+
+  async function previewRepositorySettingsImpact(nextSettings: RepositorySettings) {
+    if (!repository) {
+      throw new Error("No active repository");
+    }
+    const response = await fetch(`${API_BASE}/repositories/${repository.id}/settings/impact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: nextSettings }),
+    });
+    if (!response.ok) {
+      throw new Error("Settings impact unavailable");
+    }
+    return (await response.json()) as SettingsImpactResponse;
+  }
+
+  async function checkRepositorySettingsReadiness() {
+    if (!repository) {
+      throw new Error("No active repository");
+    }
+    const response = await fetch(`${API_BASE}/repositories/${repository.id}/settings/readiness`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error("Settings readiness check failed");
+    }
+    return (await response.json()) as SettingsReadinessResponse;
   }
 
   async function inspectDocument(repositoryId: string, documentId: string) {
@@ -1585,20 +1676,7 @@ function App() {
   }
 
   function navigateTo(view: View) {
-    window.location.hash =
-      view === "documents"
-        ? "documents"
-        : view === "source"
-          ? "source-viewer"
-          : view === "chat"
-            ? "chat-workspace"
-            : view === "sandbox"
-              ? "prompt-sandbox"
-              : view === "export"
-                ? "export-center"
-                : view === "recreate"
-                  ? "recreate-repository"
-                  : "search-lab";
+    window.location.hash = hashForView(view);
     setActiveView(view);
     setNavOpen(false);
   }
@@ -1631,6 +1709,8 @@ function App() {
           ? "Chat Workspace"
           : activeView === "sandbox"
             ? "Prompt Sandbox"
+            : activeView === "settings"
+              ? "Settings / Models"
             : activeView === "export"
               ? "Export Center"
               : activeView === "recreate"
@@ -1643,6 +1723,8 @@ function App() {
         ? `${repository?.name ?? "Default Repository"} · ${sandboxMessage}`
       : activeView === "export"
         ? `${repository?.name ?? "Default Repository"} · ${exportMessage}`
+      : activeView === "settings"
+        ? `${repository?.name ?? "Default Repository"} · repository defaults`
       : activeView === "recreate"
         ? `${repository?.name ?? "Default Repository"} · ${recreateMessage}`
       : activeView === "chat"
@@ -1703,7 +1785,13 @@ function App() {
               Chat Workspace
             </a>
             <span className="nav-label">Manage</span>
-            <a>Settings / Models</a>
+            <a
+              className={activeView === "settings" ? "active" : ""}
+              href="#settings-models"
+              onClick={() => navigateTo("settings")}
+            >
+              Settings / Models
+            </a>
             <a
               className={activeView === "recreate" ? "active" : ""}
               href="#recreate-repository"
@@ -1841,6 +1929,7 @@ function App() {
               />
             ) : activeView === "chat" ? (
               <ChatWorkspace
+                settings={repositorySettings}
                 sessions={chatSessions}
                 activeSession={activeChatSession}
                 input={chatInput}
@@ -1905,6 +1994,8 @@ function App() {
                 chatSessions={chatSessions}
                 sandboxPrompts={sandboxPrompts}
                 settings={repositorySettings}
+                defaultIncludeSources={repositorySettings?.export.include_sources ?? true}
+                defaultIncludeIndexes={repositorySettings?.export.include_indexes ?? false}
                 includeSources={exportIncludeSources}
                 includeSandbox={exportIncludeSandbox}
                 busy={exportBusy}
@@ -1915,6 +2006,15 @@ function App() {
                 onIncludeSourcesChange={setExportIncludeSources}
                 onIncludeSandboxChange={setExportIncludeSandbox}
                 onExport={() => void exportRepositoryBundle()}
+              />
+            ) : activeView === "settings" ? (
+              <SettingsModels
+                repository={repository}
+                settings={repositorySettings}
+                onNavigate={navigateTo}
+                onSave={saveRepositorySettings}
+                onAnalyzeImpact={previewRepositorySettingsImpact}
+                onCheckReadiness={checkRepositorySettingsReadiness}
               />
             ) : activeView === "recreate" ? (
               <RecreateRepository
@@ -2265,6 +2365,746 @@ function App() {
   );
 }
 
+function SettingsModels({
+  repository,
+  settings,
+  onNavigate,
+  onSave,
+  onAnalyzeImpact,
+  onCheckReadiness,
+}: {
+  repository: RepositoryResponse["repository"] | null;
+  settings: RepositorySettings | null;
+  onNavigate: (view: View) => void;
+  onSave: (settings: RepositorySettings) => Promise<RepositorySettings>;
+  onAnalyzeImpact: (settings: RepositorySettings) => Promise<SettingsImpactResponse>;
+  onCheckReadiness: () => Promise<SettingsReadinessResponse>;
+}) {
+  const [draft, setDraft] = useState<RepositorySettings | null>(() => cloneSettings(settings));
+  const [saveMessage, setSaveMessage] = useState("Loaded repository defaults");
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [pendingImpact, setPendingImpact] = useState<SettingsImpactResponse | null>(null);
+  const [lastSavedImpact, setLastSavedImpact] = useState<SettingsImpactResponse | null>(null);
+  const [impactMessage, setImpactMessage] = useState("No pending settings impact.");
+  const [readiness, setReadiness] = useState<SettingsReadinessResponse | null>(null);
+  const [readinessBusy, setReadinessBusy] = useState(false);
+  const [readinessMessage, setReadinessMessage] = useState("Readiness has not been checked.");
+  const lastRepositoryId = useRef(repository?.id ?? null);
+
+  useEffect(() => {
+    if (lastRepositoryId.current !== repository?.id) {
+      lastRepositoryId.current = repository?.id ?? null;
+      setLastSavedImpact(null);
+      setImpactMessage("No pending settings impact.");
+    }
+    setDraft(cloneSettings(settings));
+    setSaveMessage("Loaded repository defaults");
+    setPendingImpact(null);
+    setReadiness(null);
+    setReadinessMessage("Readiness has not been checked.");
+  }, [settings, repository?.id]);
+
+  const validationIssues = useMemo(() => validateSettingsDraft(draft), [draft]);
+  const validationByField = useMemo(
+    () => new Map(validationIssues.map((issue) => [issue.field, issue.message])),
+    [validationIssues],
+  );
+  const requiredModels = requiredModelsForSettings(draft);
+  const dirty = Boolean(settings && draft && JSON.stringify(settings) !== JSON.stringify(draft));
+  const visibleImpact = dirty ? pendingImpact : lastSavedImpact;
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!draft || !dirty || validationIssues.length > 0) {
+      setPendingImpact(null);
+      if (validationIssues.length > 0) {
+        setImpactMessage("Fix validation errors to preview impact.");
+      } else if (!lastSavedImpact) {
+        setImpactMessage("No pending settings impact.");
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setImpactMessage("Checking settings impact...");
+    onAnalyzeImpact(draft)
+      .then((impact) => {
+        if (!cancelled) {
+          setPendingImpact(impact);
+          setImpactMessage(
+            impact.impacts.length > 0
+              ? "Review impact before saving."
+              : "No rebuild or workflow impact detected.",
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPendingImpact(null);
+          setImpactMessage("Settings impact unavailable.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [draft, dirty, repository?.id, validationIssues, lastSavedImpact]);
+
+  function updateDraft(updater: (next: RepositorySettings) => void) {
+    setDraft((current) => {
+      if (!current) {
+        return current;
+      }
+      const next = cloneSettings(current);
+      if (!next) {
+        return current;
+      }
+      updater(next);
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    if (!draft) {
+      setSaveMessage("Settings unavailable");
+      return;
+    }
+    if (validationIssues.length > 0) {
+      setSaveMessage("Fix validation errors before saving");
+      return;
+    }
+    setSaveBusy(true);
+    setSaveMessage("Saving settings...");
+    const impactBeforeSave = pendingImpact;
+    try {
+      const saved = await onSave(draft);
+      setDraft(cloneSettings(saved));
+      setLastSavedImpact(impactBeforeSave);
+      setPendingImpact(null);
+      setImpactMessage(
+        impactBeforeSave?.impacts.length
+          ? "Saved settings changed repository readiness. Review the follow-up actions."
+          : "Settings saved with no rebuild or workflow impact.",
+      );
+      setSaveMessage("Settings saved");
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : "Settings save failed");
+    } finally {
+      setSaveBusy(false);
+    }
+  }
+
+  function cancelEdits() {
+    setDraft(cloneSettings(settings));
+    setPendingImpact(null);
+    setSaveMessage("Edits discarded");
+  }
+
+  async function runReadinessCheck() {
+    setReadinessBusy(true);
+    setReadinessMessage("Checking local readiness...");
+    try {
+      const result = await onCheckReadiness();
+      setReadiness(result);
+      setReadinessMessage("Readiness check complete.");
+    } catch (error) {
+      setReadiness(null);
+      setReadinessMessage(
+        error instanceof Error ? error.message : "Settings readiness check failed",
+      );
+    } finally {
+      setReadinessBusy(false);
+    }
+  }
+
+  function updatePromptEntry(
+    promptId: string,
+    field: "name" | "text",
+    value: string,
+  ) {
+    updateDraft((next) => {
+      next.prompt.library = next.prompt.library.map((prompt) =>
+        prompt.id === promptId ? { ...prompt, [field]: value } : prompt,
+      );
+    });
+  }
+
+  function addPromptEntry() {
+    updateDraft((next) => {
+      const promptId = `chat-prompt-${Date.now()}`;
+      next.prompt.library = [
+        ...next.prompt.library,
+        {
+          id: promptId,
+          name: "New chat prompt",
+          text: "Answer from repository context and cite supporting evidence.",
+        },
+      ];
+      next.prompt.active_chat_prompt_id = promptId;
+    });
+  }
+
+  function removePromptEntry(promptId: string) {
+    updateDraft((next) => {
+      if (next.prompt.library.length <= 1) {
+        return;
+      }
+      next.prompt.library = next.prompt.library.filter((prompt) => prompt.id !== promptId);
+      if (next.prompt.active_chat_prompt_id === promptId) {
+        next.prompt.active_chat_prompt_id = next.prompt.library[0]?.id ?? "";
+      }
+    });
+  }
+
+  if (!draft) {
+    return (
+      <div className="empty">
+        <h3>Settings unavailable</h3>
+        <p>Repository settings will appear here when the backend is available.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="settings-layout">
+      <section className="card settings-overview">
+        <div className="row row-between">
+          <div>
+            <div className="eyebrow">Repository settings</div>
+            <h2>{repository?.name ?? "Default Repository"}</h2>
+          </div>
+          <span className={`badge ${validationIssues.length > 0 ? "badge-danger" : dirty ? "badge-warn" : "badge-ok"}`}>
+            <span className="dot" />
+            {validationIssues.length > 0 ? "Needs fixes" : dirty ? "Unsaved edits" : "Saved"}
+          </span>
+        </div>
+        <div className="row row-between settings-save-row">
+          <span className="muted">{saveMessage}</span>
+          <div className="row">
+            <button className="btn btn-ghost" type="button" onClick={cancelEdits} disabled={!dirty || saveBusy}>
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={!dirty || saveBusy || validationIssues.length > 0}
+            >
+              {saveBusy ? "Saving..." : "Save settings"}
+            </button>
+          </div>
+        </div>
+        {validationIssues.length > 0 && (
+          <div className="banner banner-warn settings-validation">
+            <div>
+              <strong>Validation</strong>
+              <span>{validationIssues.map((issue) => issue.message).join(" ")}</span>
+            </div>
+          </div>
+        )}
+        <SettingsImpactPanel
+          impact={visibleImpact}
+          message={impactMessage}
+          mode={dirty ? "pending" : "saved"}
+          onNavigate={onNavigate}
+        />
+        <div className="settings-actions">
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("documents")}>
+            Document Manager
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("search")}>
+            Search Lab
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("chat")}>
+            Chat Workspace
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("sandbox")}>
+            Prompt Sandbox
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("export")}>
+            Export Center
+          </button>
+        </div>
+      </section>
+
+      <div className="settings-grid">
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Chunking and parser</h2>
+          <SettingSelect
+            id="settings-chunking-mode"
+            label="Chunking mode"
+            value={draft.chunking.mode}
+            options={["recursive", "semantic", "fixed"]}
+            onChange={(value) => updateDraft((next) => { next.chunking.mode = value; })}
+          />
+          <SettingNumber
+            id="settings-chunk-size"
+            label="Chunk size"
+            value={draft.chunking.chunk_size}
+            error={validationByField.get("chunking.chunk_size")}
+            onChange={(value) => updateDraft((next) => { next.chunking.chunk_size = value; })}
+          />
+          <SettingNumber
+            id="settings-chunk-overlap"
+            label="Chunk overlap"
+            value={draft.chunking.chunk_overlap}
+            error={validationByField.get("chunking.chunk_overlap")}
+            onChange={(value) => updateDraft((next) => { next.chunking.chunk_overlap = value; })}
+          />
+          <SettingText
+            id="settings-structured-parser"
+            label="Structured parser"
+            value={draft.parser.structured_parser}
+            error={validationByField.get("parser.structured_parser")}
+            onChange={(value) => updateDraft((next) => { next.parser.structured_parser = value; })}
+          />
+          <SettingText
+            id="settings-fallback-parser"
+            label="Fallback parser"
+            value={draft.parser.fallback_parser}
+            error={validationByField.get("parser.fallback_parser")}
+            onChange={(value) => updateDraft((next) => { next.parser.fallback_parser = value; })}
+          />
+        </section>
+
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Full-text</h2>
+          <SettingSelect
+            id="settings-tokenizer"
+            label="Tokenizer"
+            value={draft.full_text.tokenizer}
+            options={["unicode61", "porter"]}
+            onChange={(value) => updateDraft((next) => { next.full_text.tokenizer = value; })}
+          />
+          <SettingCheckbox
+            id="settings-prefix-index"
+            label="Prefix index"
+            checked={draft.full_text.prefix_index}
+            onChange={(value) => updateDraft((next) => { next.full_text.prefix_index = value; })}
+          />
+          <SettingCheckbox
+            id="settings-porter-stemming"
+            label="Porter stemming"
+            checked={draft.full_text.porter_stemming}
+            onChange={(value) => updateDraft((next) => { next.full_text.porter_stemming = value; })}
+          />
+        </section>
+
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Vector and embedding</h2>
+          <SettingSelect
+            id="settings-embedding-provider"
+            label="Embedding provider"
+            value={draft.embedding.provider}
+            options={["sentence_transformers", "ollama"]}
+            onChange={(value) => updateDraft((next) => { next.embedding.provider = value; })}
+          />
+          <SettingText
+            id="settings-embedding-model"
+            label="Embedding model"
+            value={draft.embedding.model}
+            error={validationByField.get("embedding.model")}
+            onChange={(value) => updateDraft((next) => { next.embedding.model = value; })}
+          />
+          <SettingText
+            id="settings-vector-collection"
+            label="Qdrant collection"
+            value={draft.vector.collection_name}
+            error={validationByField.get("vector.collection_name")}
+            onChange={(value) => updateDraft((next) => { next.vector.collection_name = value; })}
+          />
+          <SettingNumber
+            id="settings-vector-size"
+            label="Vector size"
+            value={draft.vector.vector_size}
+            error={validationByField.get("vector.vector_size")}
+            onChange={(value) => updateDraft((next) => { next.vector.vector_size = value; })}
+          />
+          <SettingSelect
+            id="settings-vector-distance"
+            label="Distance"
+            value={draft.vector.distance}
+            options={["cosine", "dot", "euclid"]}
+            error={validationByField.get("vector.distance")}
+            onChange={(value) => updateDraft((next) => { next.vector.distance = value; })}
+          />
+        </section>
+
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Reranking</h2>
+          <SettingSelect
+            id="settings-reranking-strategy"
+            label="Strategy"
+            value={draft.reranking.strategy}
+            options={["cross_encoder", "none"]}
+            onChange={(value) => updateDraft((next) => {
+              next.reranking.strategy = value;
+              if (value === "none") {
+                next.reranking.model = null;
+              }
+            })}
+          />
+          <SettingText
+            id="settings-reranking-model"
+            label="Reranker model"
+            value={draft.reranking.model ?? ""}
+            error={validationByField.get("reranking.model")}
+            disabled={draft.reranking.strategy === "none"}
+            onChange={(value) => updateDraft((next) => { next.reranking.model = value; })}
+          />
+        </section>
+
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Chat defaults</h2>
+          <SettingText
+            id="settings-chat-model"
+            label="Chat model"
+            value={draft.model.ollama_chat_model}
+            error={validationByField.get("model.ollama_chat_model")}
+            onChange={(value) => updateDraft((next) => { next.model.ollama_chat_model = value; })}
+          />
+          <SettingSelect
+            id="settings-active-prompt"
+            label="Active chat prompt"
+            value={draft.prompt.active_chat_prompt_id}
+            options={draft.prompt.library.map((prompt) => prompt.id)}
+            labels={Object.fromEntries(draft.prompt.library.map((prompt) => [prompt.id, prompt.name]))}
+            error={validationByField.get("prompt.active_chat_prompt_id")}
+            onChange={(value) => updateDraft((next) => { next.prompt.active_chat_prompt_id = value; })}
+          />
+          <span className="muted">{draft.prompt.library.length} prompt library entries</span>
+        </section>
+
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Export defaults</h2>
+          <SettingCheckbox
+            id="settings-export-sources"
+            label="Include sources"
+            checked={draft.export.include_sources}
+            onChange={(value) => updateDraft((next) => { next.export.include_sources = value; })}
+          />
+          <SettingCheckbox
+            id="settings-export-indexes"
+            label="Include indexes"
+            checked={draft.export.include_indexes}
+            onChange={(value) => updateDraft((next) => { next.export.include_indexes = value; })}
+          />
+          <SettingSelect
+            id="settings-export-format"
+            label="Format"
+            value={draft.export.format}
+            options={["json"]}
+            onChange={(value) => updateDraft((next) => { next.export.format = value; })}
+          />
+        </section>
+      </div>
+
+      <section className="card settings-prompts">
+        <div className="row row-between">
+          <div>
+            <div className="eyebrow">Chat prompt library</div>
+            <h2>Normal chat prompts</h2>
+          </div>
+          <button className="btn btn-sm" type="button" onClick={addPromptEntry}>
+            Add prompt
+          </button>
+        </div>
+        <div className="settings-prompt-list">
+          {draft.prompt.library.map((prompt, index) => (
+            <div className="settings-prompt-row" key={prompt.id}>
+              <div className="row row-between">
+                <strong>Prompt {index + 1}</strong>
+                <button
+                  className="btn btn-sm btn-ghost danger-action"
+                  type="button"
+                  onClick={() => removePromptEntry(prompt.id)}
+                  disabled={draft.prompt.library.length <= 1}
+                >
+                  Remove
+                </button>
+              </div>
+              <SettingText
+                id={`settings-prompt-name-${prompt.id}`}
+                label="Name"
+                value={prompt.name}
+                error={validationByField.get(`prompt.library.${prompt.id}.name`)}
+                onChange={(value) => updatePromptEntry(prompt.id, "name", value)}
+              />
+              <SettingTextarea
+                id={`settings-prompt-text-${prompt.id}`}
+                label="Prompt text"
+                value={prompt.text}
+                error={validationByField.get(`prompt.library.${prompt.id}.text`)}
+                onChange={(value) => updatePromptEntry(prompt.id, "text", value)}
+              />
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="card settings-models">
+        <div className="row row-between">
+          <div>
+            <div className="eyebrow">Model readiness</div>
+            <h2>Configured local models</h2>
+          </div>
+          <button
+            className={`btn btn-primary ${readinessBusy ? "btn-running" : ""}`}
+            type="button"
+            onClick={() => void runReadinessCheck()}
+            disabled={readinessBusy || !repository || dirty || validationIssues.length > 0}
+            aria-busy={readinessBusy}
+          >
+            {readinessBusy ? "Checking..." : "Check readiness"}
+          </button>
+        </div>
+        <p className="muted">
+          {dirty
+            ? "Save settings before checking readiness."
+            : validationIssues.length > 0
+              ? "Fix validation errors before checking readiness."
+              : readinessMessage}
+        </p>
+        <div className="settings-readiness-grid">
+          {settingsReadinessItems(readiness, draft).map((item) => (
+            <ReadinessCard item={item} key={item.target} onNavigate={onNavigate} />
+          ))}
+        </div>
+        <div className="export-chip-list settings-chip-list">
+          {requiredModels.length > 0 ? (
+            requiredModels.map((model) => (
+              <span className="badge" key={model}>
+                <span className="dot" />
+                {model}
+              </span>
+            ))
+          ) : (
+            <span className="muted">Settings unavailable</span>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SettingText({
+  id,
+  label,
+  value,
+  error,
+  disabled = false,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  error?: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="settings-field" htmlFor={id}>
+      <span>{label}</span>
+      <input id={id} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+      {error && <small className="settings-field-error">{error}</small>}
+    </label>
+  );
+}
+
+function SettingsImpactPanel({
+  impact,
+  message,
+  mode,
+  onNavigate,
+}: {
+  impact: SettingsImpactResponse | null;
+  message: string;
+  mode: "pending" | "saved";
+  onNavigate: (view: View) => void;
+}) {
+  const impacts = impact?.impacts ?? [];
+  return (
+    <section className="settings-impact" aria-label="Settings impact">
+      <div className="row row-between">
+        <div>
+          <div className="eyebrow">{mode === "pending" ? "Pending impact" : "Saved impact"}</div>
+          <h2>Rebuild and workflow effects</h2>
+        </div>
+        <span className={`badge ${impacts.length > 0 ? "badge-warn" : "badge-ok"}`}>
+          <span className="dot" />
+          {impacts.length > 0 ? `${impacts.length} changes` : "No impact"}
+        </span>
+      </div>
+      <p className="muted">{message}</p>
+      {impacts.length > 0 && (
+        <div className="settings-impact-list">
+          {impacts.map((item) => (
+            <article className={`settings-impact-item settings-impact-${item.severity}`} key={item.category}>
+              <div className="row row-between">
+                <strong>{item.title}</strong>
+                <span className="badge">
+                  <span className="dot" />
+                  {item.category.replace(/_/g, " ")}
+                </span>
+              </div>
+              <p>{item.message}</p>
+              {item.actions.length > 0 && <small>{item.actions.join(" ")}</small>}
+              {item.fields.length > 0 && (
+                <div className="settings-impact-fields">
+                  {item.fields.map((field) => (
+                    <code key={field}>{field}</code>
+                  ))}
+                </div>
+              )}
+              <div className="settings-impact-actions">
+                {workflowLinksForImpact(item).map((link) => (
+                  <button className="btn btn-sm" type="button" onClick={() => onNavigate(link.view)} key={link.view}>
+                    {link.label}
+                  </button>
+                ))}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SettingTextarea({
+  id,
+  label,
+  value,
+  error,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  error?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="settings-field" htmlFor={id}>
+      <span>{label}</span>
+      <textarea id={id} rows={4} value={value} onChange={(event) => onChange(event.target.value)} />
+      {error && <small className="settings-field-error">{error}</small>}
+    </label>
+  );
+}
+
+function SettingNumber({
+  id,
+  label,
+  value,
+  error,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  error?: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="settings-field" htmlFor={id}>
+      <span>{label}</span>
+      <input
+        id={id}
+        type="number"
+        value={Number.isFinite(value) ? value : 0}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+      {error && <small className="settings-field-error">{error}</small>}
+    </label>
+  );
+}
+
+function SettingSelect({
+  id,
+  label,
+  value,
+  options,
+  labels = {},
+  error,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  options: string[];
+  labels?: Record<string, string>;
+  error?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="settings-field" htmlFor={id}>
+      <span>{label}</span>
+      <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map((option) => (
+          <option value={option} key={option}>
+            {labels[option] ?? option}
+          </option>
+        ))}
+      </select>
+      {error && <small className="settings-field-error">{error}</small>}
+    </label>
+  );
+}
+
+function SettingCheckbox({
+  id,
+  label,
+  checked,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="settings-checkbox" htmlFor={id}>
+      <input id={id} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>{label}</span>
+    </label>
+  );
+}
+
+function ReadinessCard({
+  item,
+  onNavigate,
+}: {
+  item: SettingsReadinessItem;
+  onNavigate: (view: View) => void;
+}) {
+  const links = workflowLinksForReadiness(item);
+  return (
+    <div className={`settings-readiness-card settings-readiness-${item.status}`}>
+      <span>{item.label}</span>
+      <strong>{item.model ?? item.target}</strong>
+      <em>{settingsReadinessStatusLabel(item.status)}</em>
+      <small>{item.message}</small>
+      {links.length > 0 && (
+        <div className="settings-readiness-actions">
+          {links.map((link) => (
+            <button className="btn btn-sm" type="button" onClick={() => onNavigate(link.view)} key={link.view}>
+              {link.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PromptSandbox({
   prompts,
   selectedPromptId,
@@ -2489,6 +3329,8 @@ function ExportCenter({
   chatSessions,
   sandboxPrompts,
   settings,
+  defaultIncludeSources,
+  defaultIncludeIndexes,
   includeSources,
   includeSandbox,
   busy,
@@ -2506,6 +3348,8 @@ function ExportCenter({
   chatSessions: ChatSession[];
   sandboxPrompts: SandboxPromptVersion[];
   settings: RepositorySettings | null;
+  defaultIncludeSources: boolean;
+  defaultIncludeIndexes: boolean;
   includeSources: boolean;
   includeSandbox: boolean;
   busy: boolean;
@@ -2570,6 +3414,13 @@ function ExportCenter({
             </button>
           </div>
           <div className="export-option-list">
+            <div className="export-default-note">
+              <strong>Saved export defaults</strong>
+              <small>
+                Sources {defaultIncludeSources ? "included" : "excluded"} · indexes{" "}
+                {defaultIncludeIndexes ? "included" : "excluded"} · sandbox remains per export
+              </small>
+            </div>
             <label className="export-toggle" htmlFor="export-include-sources">
               <input
                 id="export-include-sources"
@@ -3055,6 +3906,7 @@ function SandboxRunCard({
 }
 
 function ChatWorkspace({
+  settings,
   sessions,
   activeSession,
   input,
@@ -3080,6 +3932,7 @@ function ChatWorkspace({
   onCloseCitation,
   onOpenCitation,
 }: {
+  settings: RepositorySettings | null;
   sessions: ChatSession[];
   activeSession: ChatSession | null;
   input: string;
@@ -3107,6 +3960,10 @@ function ChatWorkspace({
 }) {
   const threadRef = useRef<HTMLDivElement | null>(null);
   const readyForSelectedMode = chatReadyForSelectedMode(readiness, retrievalSettings);
+  const activePrompt = settings?.prompt.library.find(
+    (prompt) => prompt.id === settings.prompt.active_chat_prompt_id,
+  );
+  const chatDefaultModel = settings?.model.ollama_chat_model ?? "gemma3:4b";
 
   useEffect(() => {
     const thread = threadRef.current;
@@ -3271,8 +4128,14 @@ function ChatWorkspace({
                 {rebuildBusy === "vector" ? "Rebuilding vector" : "Rebuild vector"}
               </button>
               <span className="muted">
-                {activeSession?.model ?? "gemma3:4b"} · settings are saved on send
+                {activeSession?.model ?? chatDefaultModel} · settings are saved on send
               </span>
+            </div>
+            <div className="chat-defaults-note">
+              <strong>New chat default</strong>
+              <small>
+                {chatDefaultModel} · {activePrompt?.name ?? settings?.prompt.active_chat_prompt_id ?? "active prompt"}
+              </small>
             </div>
           </div>
         </aside>
@@ -4293,6 +5156,193 @@ function settingsSummaryRows(settings: RepositorySettings | null) {
   ];
 }
 
+function cloneSettings(settings: RepositorySettings | null) {
+  return settings ? (JSON.parse(JSON.stringify(settings)) as RepositorySettings) : null;
+}
+
+type SettingsValidationIssue = {
+  field: string;
+  message: string;
+};
+
+function validateSettingsDraft(settings: RepositorySettings | null): SettingsValidationIssue[] {
+  if (!settings) {
+    return [{ field: "settings", message: "Settings are unavailable." }];
+  }
+  const issues: SettingsValidationIssue[] = [];
+  if (settings.chunking.chunk_size < 100 || settings.chunking.chunk_size > 8000) {
+    issues.push({ field: "chunking.chunk_size", message: "Chunk size must be between 100 and 8000." });
+  }
+  if (settings.chunking.chunk_overlap < 0) {
+    issues.push({ field: "chunking.chunk_overlap", message: "Chunk overlap cannot be negative." });
+  }
+  if (settings.chunking.chunk_overlap >= settings.chunking.chunk_size) {
+    issues.push({ field: "chunking.chunk_overlap", message: "Chunk overlap must be smaller than chunk size." });
+  }
+  if (!settings.parser.structured_parser.trim()) {
+    issues.push({ field: "parser.structured_parser", message: "Structured parser is required." });
+  }
+  if (!settings.parser.fallback_parser.trim()) {
+    issues.push({ field: "parser.fallback_parser", message: "Fallback parser is required." });
+  }
+  if (!settings.embedding.model.trim()) {
+    issues.push({ field: "embedding.model", message: "Embedding model is required." });
+  }
+  if (!settings.vector.collection_name.trim()) {
+    issues.push({ field: "vector.collection_name", message: "Qdrant collection is required." });
+  }
+  if (settings.vector.vector_size < 1) {
+    issues.push({ field: "vector.vector_size", message: "Vector size must be at least 1." });
+  }
+  if (settings.embedding.provider === "ollama" && settings.vector.distance === "dot") {
+    issues.push({ field: "vector.distance", message: "Ollama embeddings currently require cosine distance." });
+  }
+  if (settings.reranking.strategy === "cross_encoder" && !settings.reranking.model?.trim()) {
+    issues.push({ field: "reranking.model", message: "Cross-encoder reranking requires a model." });
+  }
+  if (!settings.model.ollama_chat_model.trim()) {
+    issues.push({ field: "model.ollama_chat_model", message: "Chat model is required." });
+  }
+  if (!settings.prompt.library.some((prompt) => prompt.id === settings.prompt.active_chat_prompt_id)) {
+    issues.push({ field: "prompt.active_chat_prompt_id", message: "Active chat prompt must exist in the prompt library." });
+  }
+  for (const prompt of settings.prompt.library) {
+    if (!prompt.name.trim()) {
+      issues.push({ field: `prompt.library.${prompt.id}.name`, message: "Prompt names are required." });
+    }
+    if (!prompt.text.trim()) {
+      issues.push({ field: `prompt.library.${prompt.id}.text`, message: "Prompt text is required." });
+    }
+  }
+  return issues;
+}
+
+function settingsReadinessItems(
+  readiness: SettingsReadinessResponse | null,
+  settings: RepositorySettings,
+): SettingsReadinessItem[] {
+  if (readiness) {
+    return readiness.items;
+  }
+  return [
+    {
+      target: "qdrant",
+      label: "Qdrant",
+      status: "not_checked",
+      ready: false,
+      message: "Run an explicit check before relying on vector rebuild or search.",
+      model: settings.vector.collection_name,
+    },
+    {
+      target: "chat",
+      label: "Chat model",
+      status: "not_checked",
+      ready: false,
+      message: "Run an explicit check before starting model-backed chat.",
+      model: settings.model.ollama_chat_model,
+    },
+    {
+      target: "embedding",
+      label: "Embedding model",
+      status: "not_checked",
+      ready: false,
+      message: "Run an explicit check before rebuilding embeddings.",
+      model: settings.embedding.model,
+    },
+    {
+      target: "reranker",
+      label: "Reranker",
+      status: "not_checked",
+      ready: false,
+      message:
+        settings.reranking.strategy === "none"
+          ? "Reranking is disabled; the explicit check will mark this as skipped."
+          : "Run an explicit check before using cross-encoder reranking.",
+      model: settings.reranking.model ?? settings.reranking.strategy,
+    },
+  ];
+}
+
+function settingsReadinessStatusLabel(status: SettingsReadinessStatus) {
+  const labels: Record<SettingsReadinessStatus, string> = {
+    not_checked: "Not checked",
+    unavailable_runtime: "Runtime unavailable",
+    not_installed: "Not installed",
+    ready: "Ready",
+    failed: "Failed",
+    skipped: "Skipped",
+  };
+  return labels[status];
+}
+
+function workflowLinksForImpact(item: SettingsImpact) {
+  const links: Array<{ view: View; label: string }> = [];
+  const add = (view: View, label: string) => {
+    if (!links.some((link) => link.view === view)) {
+      links.push({ view, label });
+    }
+  };
+
+  switch (item.category) {
+    case "document_reprocessing":
+      add("documents", "Open Document Manager");
+      break;
+    case "full_text_rebuild":
+    case "vector_rebuild":
+    case "retrieval_defaults":
+    case "evaluation_freshness":
+      add("search", "Open Search Lab");
+      break;
+    case "chat_defaults":
+      add("chat", "Open Chat Workspace");
+      break;
+    case "prompt_defaults":
+      add("chat", "Open Chat Workspace");
+      add("sandbox", "Open Prompt Sandbox");
+      break;
+    case "export_recreate":
+      add("export", "Open Export Center");
+      add("recreate", "Open Recreate Repository");
+      break;
+  }
+
+  return links;
+}
+
+function workflowLinksForReadiness(item: SettingsReadinessItem) {
+  if (item.status === "ready" || item.status === "skipped" || item.status === "not_checked") {
+    return [];
+  }
+  if (item.target === "chat") {
+    return [{ view: "chat" as const, label: "Open Chat Workspace" }];
+  }
+  return [{ view: "search" as const, label: "Open Search Lab" }];
+}
+
+function formatBoolean(value: boolean | undefined) {
+  if (value === undefined) {
+    return "unavailable";
+  }
+  return value ? "enabled" : "disabled";
+}
+
+async function settingsSaveErrorMessage(response: Response) {
+  try {
+    const payload = await response.json();
+    if (Array.isArray(payload.detail)) {
+      return payload.detail
+        .map((detail: { msg?: string; loc?: string[] }) => detail.msg ?? detail.loc?.join(".") ?? "Invalid settings")
+        .join(" ");
+    }
+    if (typeof payload.detail === "string") {
+      return payload.detail;
+    }
+  } catch {
+    // Fall through to a generic message when the backend response is not JSON.
+  }
+  return "Settings save failed";
+}
+
 function buildExportManifestSummary({
   repository,
   documents,
@@ -4479,12 +5529,36 @@ function issueLabel(code: string) {
   return labels[code] ?? code.replace(/_/g, " ");
 }
 
+function hashForView(view: View) {
+  switch (view) {
+    case "documents":
+      return "documents";
+    case "source":
+      return "source-viewer";
+    case "chat":
+      return "chat-workspace";
+    case "sandbox":
+      return "prompt-sandbox";
+    case "settings":
+      return "settings-models";
+    case "export":
+      return "export-center";
+    case "recreate":
+      return "recreate-repository";
+    case "search":
+      return "search-lab";
+  }
+}
+
 function viewFromHash(hash: string): View {
   if (hash === "#recreate-repository") {
     return "recreate";
   }
   if (hash === "#export-center") {
     return "export";
+  }
+  if (hash === "#settings-models") {
+    return "settings";
   }
   if (hash === "#chat-workspace") {
     return "chat";
