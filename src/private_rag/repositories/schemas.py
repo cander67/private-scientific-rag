@@ -168,6 +168,28 @@ class RepositorySettingsImpactResponse(BaseModel):
     impacts: list[RepositorySettingsImpact] = Field(default_factory=list)
 
 
+class RepositorySettingsReadinessItem(BaseModel):
+    target: Literal["qdrant", "chat", "embedding", "reranker"]
+    label: str
+    status: Literal[
+        "not_checked",
+        "unavailable_runtime",
+        "not_installed",
+        "ready",
+        "failed",
+        "skipped",
+    ]
+    ready: bool
+    message: str
+    model: str | None = None
+
+
+class RepositorySettingsReadinessResponse(BaseModel):
+    repository_id: str
+    checked: bool
+    items: list[RepositorySettingsReadinessItem]
+
+
 class RepositoryManifest(BaseModel):
     schema_version: int = 1
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

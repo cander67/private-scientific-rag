@@ -89,6 +89,29 @@ type SettingsImpactResponse = {
   impacts: SettingsImpact[];
 };
 
+type SettingsReadinessStatus =
+  | "not_checked"
+  | "unavailable_runtime"
+  | "not_installed"
+  | "ready"
+  | "failed"
+  | "skipped";
+
+type SettingsReadinessItem = {
+  target: "qdrant" | "chat" | "embedding" | "reranker";
+  label: string;
+  status: SettingsReadinessStatus;
+  ready: boolean;
+  message: string;
+  model: string | null;
+};
+
+type SettingsReadinessResponse = {
+  repository_id: string;
+  checked: boolean;
+  items: SettingsReadinessItem[];
+};
+
 type ExportManifestSummary = {
   generated_at: string;
   repository: {
@@ -861,6 +884,19 @@ function App() {
       throw new Error("Settings impact unavailable");
     }
     return (await response.json()) as SettingsImpactResponse;
+  }
+
+  async function checkRepositorySettingsReadiness() {
+    if (!repository) {
+      throw new Error("No active repository");
+    }
+    const response = await fetch(`${API_BASE}/repositories/${repository.id}/settings/readiness`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error("Settings readiness check failed");
+    }
+    return (await response.json()) as SettingsReadinessResponse;
   }
 
   async function inspectDocument(repositoryId: string, documentId: string) {
@@ -1975,6 +2011,7 @@ function App() {
                 onNavigate={navigateTo}
                 onSave={saveRepositorySettings}
                 onAnalyzeImpact={previewRepositorySettingsImpact}
+                onCheckReadiness={checkRepositorySettingsReadiness}
               />
             ) : activeView === "recreate" ? (
               <RecreateRepository
@@ -2331,12 +2368,14 @@ function SettingsModels({
   onNavigate,
   onSave,
   onAnalyzeImpact,
+  onCheckReadiness,
 }: {
   repository: RepositoryResponse["repository"] | null;
   settings: RepositorySettings | null;
   onNavigate: (view: View) => void;
   onSave: (settings: RepositorySettings) => Promise<RepositorySettings>;
   onAnalyzeImpact: (settings: RepositorySettings) => Promise<SettingsImpactResponse>;
+  onCheckReadiness: () => Promise<SettingsReadinessResponse>;
 }) {
   const [draft, setDraft] = useState<RepositorySettings | null>(() => cloneSettings(settings));
   const [saveMessage, setSaveMessage] = useState("Loaded repository defaults");
@@ -2344,6 +2383,9 @@ function SettingsModels({
   const [pendingImpact, setPendingImpact] = useState<SettingsImpactResponse | null>(null);
   const [lastSavedImpact, setLastSavedImpact] = useState<SettingsImpactResponse | null>(null);
   const [impactMessage, setImpactMessage] = useState("No pending settings impact.");
+  const [readiness, setReadiness] = useState<SettingsReadinessResponse | null>(null);
+  const [readinessBusy, setReadinessBusy] = useState(false);
+  const [readinessMessage, setReadinessMessage] = useState("Readiness has not been checked.");
   const lastRepositoryId = useRef(repository?.id ?? null);
 
   useEffect(() => {
@@ -2355,6 +2397,8 @@ function SettingsModels({
     setDraft(cloneSettings(settings));
     setSaveMessage("Loaded repository defaults");
     setPendingImpact(null);
+    setReadiness(null);
+    setReadinessMessage("Readiness has not been checked.");
   }, [settings, repository?.id]);
 
   const validationIssues = useMemo(() => validateSettingsDraft(draft), [draft]);
@@ -2452,6 +2496,23 @@ function SettingsModels({
     setDraft(cloneSettings(settings));
     setPendingImpact(null);
     setSaveMessage("Edits discarded");
+  }
+
+  async function runReadinessCheck() {
+    setReadinessBusy(true);
+    setReadinessMessage("Checking local readiness...");
+    try {
+      const result = await onCheckReadiness();
+      setReadiness(result);
+      setReadinessMessage("Readiness check complete.");
+    } catch (error) {
+      setReadiness(null);
+      setReadinessMessage(
+        error instanceof Error ? error.message : "Settings readiness check failed",
+      );
+    } finally {
+      setReadinessBusy(false);
+    }
   }
 
   function updatePromptEntry(
@@ -2790,16 +2851,27 @@ function SettingsModels({
             <div className="eyebrow">Model readiness</div>
             <h2>Configured local models</h2>
           </div>
-          <span className="badge badge-warn">
-            <span className="dot" />
-            Not checked
-          </span>
+          <button
+            className={`btn btn-primary ${readinessBusy ? "btn-running" : ""}`}
+            type="button"
+            onClick={() => void runReadinessCheck()}
+            disabled={readinessBusy || !repository || dirty || validationIssues.length > 0}
+            aria-busy={readinessBusy}
+          >
+            {readinessBusy ? "Checking..." : "Check readiness"}
+          </button>
         </div>
+        <p className="muted">
+          {dirty
+            ? "Save settings before checking readiness."
+            : validationIssues.length > 0
+              ? "Fix validation errors before checking readiness."
+              : readinessMessage}
+        </p>
         <div className="settings-readiness-grid">
-          <ReadinessPlaceholder label="Qdrant" value={draft.vector.collection_name} />
-          <ReadinessPlaceholder label="Chat" value={draft.model.ollama_chat_model} />
-          <ReadinessPlaceholder label="Embedding" value={draft.embedding.model} />
-          <ReadinessPlaceholder label="Reranker" value={draft.reranking.model ?? draft.reranking.strategy} />
+          {settingsReadinessItems(readiness, draft).map((item) => (
+            <ReadinessCard item={item} key={item.target} />
+          ))}
         </div>
         <div className="export-chip-list settings-chip-list">
           {requiredModels.length > 0 ? (
@@ -2993,12 +3065,13 @@ function SettingCheckbox({
   );
 }
 
-function ReadinessPlaceholder({ label, value }: { label: string; value: string }) {
+function ReadinessCard({ item }: { item: SettingsReadinessItem }) {
   return (
-    <div className="settings-readiness-card">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <em>Not checked</em>
+    <div className={`settings-readiness-card settings-readiness-${item.status}`}>
+      <span>{item.label}</span>
+      <strong>{item.model ?? item.target}</strong>
+      <em>{settingsReadinessStatusLabel(item.status)}</em>
+      <small>{item.message}</small>
     </div>
   );
 }
@@ -5090,6 +5163,64 @@ function validateSettingsDraft(settings: RepositorySettings | null): SettingsVal
     }
   }
   return issues;
+}
+
+function settingsReadinessItems(
+  readiness: SettingsReadinessResponse | null,
+  settings: RepositorySettings,
+): SettingsReadinessItem[] {
+  if (readiness) {
+    return readiness.items;
+  }
+  return [
+    {
+      target: "qdrant",
+      label: "Qdrant",
+      status: "not_checked",
+      ready: false,
+      message: "Run an explicit check before relying on vector rebuild or search.",
+      model: settings.vector.collection_name,
+    },
+    {
+      target: "chat",
+      label: "Chat model",
+      status: "not_checked",
+      ready: false,
+      message: "Run an explicit check before starting model-backed chat.",
+      model: settings.model.ollama_chat_model,
+    },
+    {
+      target: "embedding",
+      label: "Embedding model",
+      status: "not_checked",
+      ready: false,
+      message: "Run an explicit check before rebuilding embeddings.",
+      model: settings.embedding.model,
+    },
+    {
+      target: "reranker",
+      label: "Reranker",
+      status: "not_checked",
+      ready: false,
+      message:
+        settings.reranking.strategy === "none"
+          ? "Reranking is disabled; the explicit check will mark this as skipped."
+          : "Run an explicit check before using cross-encoder reranking.",
+      model: settings.reranking.model ?? settings.reranking.strategy,
+    },
+  ];
+}
+
+function settingsReadinessStatusLabel(status: SettingsReadinessStatus) {
+  const labels: Record<SettingsReadinessStatus, string> = {
+    not_checked: "Not checked",
+    unavailable_runtime: "Runtime unavailable",
+    not_installed: "Not installed",
+    ready: "Ready",
+    failed: "Failed",
+    skipped: "Skipped",
+  };
+  return labels[status];
 }
 
 function formatBoolean(value: boolean | undefined) {

@@ -11,10 +11,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from private_rag.api.app import create_app
-from private_rag.api.routes.repositories import get_db_session
+from private_rag.api.routes.repositories import (
+    get_db_session,
+    get_settings_chat_llm,
+    get_settings_readiness_checker,
+)
+from private_rag.chat.llm import ChatCompletion, ChatMessage
 from private_rag.db.base import Base
 from private_rag.repositories import models as repository_models  # noqa: F401
 from private_rag.repositories.models import Repository, RepositorySnapshot
+from private_rag.repositories.schemas import RepositorySettingsReadinessItem
 
 
 def _client_with_database() -> TestClient:
@@ -170,6 +176,102 @@ def test_repository_settings_impact_endpoint_reports_categories() -> None:
     assert "vector_rebuild" in categories
     assert "retrieval_defaults" in categories
     assert "export_recreate" in categories
+
+
+class FakeSettingsLLM:
+    def complete(self, *, model: str, messages: list[ChatMessage]) -> ChatCompletion:
+        return ChatCompletion(content="local model ready [1]", model=model)
+
+    def smoke(self, *, model: str) -> ChatCompletion:
+        return ChatCompletion(content="local model ready [1]", model=model)
+
+
+class FakeSettingsReadinessChecker:
+    def check_qdrant(
+        self, *, qdrant_url: str, collection_name: str
+    ) -> RepositorySettingsReadinessItem:
+        return RepositorySettingsReadinessItem(
+            target="qdrant",
+            label="Qdrant",
+            status="unavailable_runtime",
+            ready=False,
+            message="Qdrant is not reachable from this test runtime.",
+            model=collection_name,
+        )
+
+    def check_chat(
+        self,
+        *,
+        llm: FakeSettingsLLM,
+        model: str,
+    ) -> RepositorySettingsReadinessItem:
+        completion = llm.smoke(model=model)
+        return RepositorySettingsReadinessItem(
+            target="chat",
+            label="Chat model",
+            status="ready",
+            ready=True,
+            message=f"{completion.model} responded.",
+            model=completion.model,
+        )
+
+    def check_embedding(
+        self,
+        *,
+        provider: str,
+        model: str,
+        expected_vector_size: int,
+    ) -> RepositorySettingsReadinessItem:
+        return RepositorySettingsReadinessItem(
+            target="embedding",
+            label="Embedding model",
+            status="not_installed",
+            ready=False,
+            message=f"{model} is not cached locally.",
+            model=model,
+        )
+
+    def check_reranker(
+        self,
+        *,
+        strategy: str,
+        model: str | None,
+    ) -> RepositorySettingsReadinessItem:
+        return RepositorySettingsReadinessItem(
+            target="reranker",
+            label="Reranker",
+            status="skipped",
+            ready=True,
+            message="Reranking is disabled for this repository.",
+            model=model,
+        )
+
+
+def test_repository_settings_readiness_endpoint_uses_mocked_boundaries() -> None:
+    client = _client_with_database()
+    app = cast(Any, client.app)
+    app.dependency_overrides[get_settings_chat_llm] = lambda: FakeSettingsLLM()
+    app.dependency_overrides[get_settings_readiness_checker] = lambda: (
+        FakeSettingsReadinessChecker()
+    )
+    created = client.get("/repositories/default").json()
+    repository_id = created["repository"]["id"]
+    settings = created["settings"]
+    settings["reranking"] = {"strategy": "none", "model": None}
+    client.put(f"/repositories/{repository_id}/settings", json={"settings": settings})
+
+    response = client.post(f"/repositories/{repository_id}/settings/readiness")
+
+    assert response.status_code == 200
+    payload = response.json()
+    statuses = {item["target"]: item["status"] for item in payload["items"]}
+    assert payload["checked"] is True
+    assert statuses == {
+        "qdrant": "unavailable_runtime",
+        "chat": "ready",
+        "embedding": "not_installed",
+        "reranker": "skipped",
+    }
 
 
 def test_recreate_validation_endpoint_reports_clear_issues(tmp_path: Path) -> None:

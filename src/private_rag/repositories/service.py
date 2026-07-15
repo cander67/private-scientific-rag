@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+from typing import Protocol
+
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from private_rag.chat.llm import ChatLLM
 from private_rag.core.settings import Settings, get_settings
 from private_rag.ingestion.models import DocumentVersion
 from private_rag.repositories.models import Repository, RepositorySettingsRow, RepositorySnapshot
@@ -15,11 +19,211 @@ from private_rag.repositories.schemas import (
     RepositorySettings,
     RepositorySettingsImpact,
     RepositorySettingsImpactResponse,
+    RepositorySettingsReadinessItem,
+    RepositorySettingsReadinessResponse,
     RepositoryWithSettings,
     source_file_exists,
 )
+from private_rag.vector.embeddings import SentenceTransformersEmbeddingProvider
 
 DEFAULT_REPOSITORY_NAME = "Default Repository"
+
+
+class SettingsReadinessChecker(Protocol):
+    def check_qdrant(
+        self, *, qdrant_url: str, collection_name: str
+    ) -> RepositorySettingsReadinessItem:
+        """Check vector store connectivity."""
+
+    def check_chat(
+        self,
+        *,
+        llm: ChatLLM,
+        model: str,
+    ) -> RepositorySettingsReadinessItem:
+        """Check configured local chat model readiness."""
+
+    def check_embedding(
+        self,
+        *,
+        provider: str,
+        model: str,
+        expected_vector_size: int,
+    ) -> RepositorySettingsReadinessItem:
+        """Check configured embedding model readiness."""
+
+    def check_reranker(
+        self,
+        *,
+        strategy: str,
+        model: str | None,
+    ) -> RepositorySettingsReadinessItem:
+        """Check configured reranker readiness."""
+
+
+class LocalSettingsReadinessChecker:
+    def check_qdrant(
+        self, *, qdrant_url: str, collection_name: str
+    ) -> RepositorySettingsReadinessItem:
+        try:
+            response = httpx.get(f"{qdrant_url.rstrip('/')}/collections", timeout=5.0)
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return RepositorySettingsReadinessItem(
+                target="qdrant",
+                label="Qdrant",
+                status="unavailable_runtime",
+                ready=False,
+                message=(
+                    "Qdrant is not reachable. Start the configured local Qdrant service "
+                    "before rebuilding or searching vectors."
+                ),
+                model=collection_name,
+            )
+        return RepositorySettingsReadinessItem(
+            target="qdrant",
+            label="Qdrant",
+            status="ready",
+            ready=True,
+            message=f"Qdrant responded for configured collection policy '{collection_name}'.",
+            model=collection_name,
+        )
+
+    def check_chat(
+        self,
+        *,
+        llm: ChatLLM,
+        model: str,
+    ) -> RepositorySettingsReadinessItem:
+        try:
+            completion = llm.smoke(model=model)
+        except RuntimeError as exc:
+            return RepositorySettingsReadinessItem(
+                target="chat",
+                label="Chat model",
+                status="unavailable_runtime",
+                ready=False,
+                message=_windows_friendly_message(str(exc)),
+                model=model,
+            )
+        return RepositorySettingsReadinessItem(
+            target="chat",
+            label="Chat model",
+            status="ready" if completion.content.strip() else "failed",
+            ready=bool(completion.content.strip()),
+            message=f"{completion.model} responded to the smoke test.",
+            model=completion.model,
+        )
+
+    def check_embedding(
+        self,
+        *,
+        provider: str,
+        model: str,
+        expected_vector_size: int,
+    ) -> RepositorySettingsReadinessItem:
+        if provider != "sentence_transformers":
+            return RepositorySettingsReadinessItem(
+                target="embedding",
+                label="Embedding model",
+                status="skipped",
+                ready=False,
+                message=(
+                    "Embedding smoke checks are currently implemented for SentenceTransformers. "
+                    "Verify other providers manually before rebuilding vectors."
+                ),
+                model=model,
+            )
+        try:
+            embedder = SentenceTransformersEmbeddingProvider(model)
+            actual_vector_size = embedder.vector_size
+        except RuntimeError as exc:
+            return RepositorySettingsReadinessItem(
+                target="embedding",
+                label="Embedding model",
+                status="not_installed",
+                ready=False,
+                message=_windows_friendly_message(str(exc)),
+                model=model,
+            )
+        if actual_vector_size != expected_vector_size:
+            return RepositorySettingsReadinessItem(
+                target="embedding",
+                label="Embedding model",
+                status="failed",
+                ready=False,
+                message=(
+                    f"Embedding model vector size is {actual_vector_size}, but repository "
+                    f"settings expect {expected_vector_size}."
+                ),
+                model=model,
+            )
+        return RepositorySettingsReadinessItem(
+            target="embedding",
+            label="Embedding model",
+            status="ready",
+            ready=True,
+            message=f"{model} is cached and reports vector size {actual_vector_size}.",
+            model=model,
+        )
+
+    def check_reranker(
+        self,
+        *,
+        strategy: str,
+        model: str | None,
+    ) -> RepositorySettingsReadinessItem:
+        if strategy == "none":
+            return RepositorySettingsReadinessItem(
+                target="reranker",
+                label="Reranker",
+                status="skipped",
+                ready=True,
+                message="Reranking is disabled for this repository.",
+                model=None,
+            )
+        if not model:
+            return RepositorySettingsReadinessItem(
+                target="reranker",
+                label="Reranker",
+                status="failed",
+                ready=False,
+                message="Cross-encoder reranking is enabled but no reranker model is configured.",
+                model=None,
+            )
+        try:
+            from sentence_transformers import CrossEncoder
+
+            CrossEncoder(model, local_files_only=True)
+        except ImportError:
+            return RepositorySettingsReadinessItem(
+                target="reranker",
+                label="Reranker",
+                status="unavailable_runtime",
+                ready=False,
+                message="SentenceTransformers is not installed in the current Python environment.",
+                model=model,
+            )
+        except OSError:
+            return RepositorySettingsReadinessItem(
+                target="reranker",
+                label="Reranker",
+                status="not_installed",
+                ready=False,
+                message=(
+                    f"Cross-encoder model '{model}' is not cached locally. Cache it before "
+                    "using cross-encoder reranking; PowerShell or terminal commands both work."
+                ),
+                model=model,
+            )
+        return RepositorySettingsReadinessItem(
+            target="reranker",
+            label="Reranker",
+            status="ready",
+            ready=True,
+            message=f"{model} is cached locally for cross-encoder reranking.",
+            model=model,
+        )
 
 
 def ensure_default_repository(
@@ -105,6 +309,41 @@ def analyze_repository_settings_impact(
     if repository_settings is None:
         return None
     return analyze_settings_impact(repository_settings.settings, draft_settings)
+
+
+def check_repository_settings_readiness(
+    session: Session,
+    *,
+    repository_id: str,
+    app_settings: Settings,
+    llm: ChatLLM,
+    checker: SettingsReadinessChecker,
+) -> RepositorySettingsReadinessResponse | None:
+    repository_settings = get_repository_with_settings(session, repository_id)
+    if repository_settings is None:
+        return None
+    settings = repository_settings.settings
+    items = [
+        checker.check_qdrant(
+            qdrant_url=app_settings.qdrant_url,
+            collection_name=settings.vector.collection_name,
+        ),
+        checker.check_chat(llm=llm, model=settings.model.ollama_chat_model),
+        checker.check_embedding(
+            provider=settings.embedding.provider,
+            model=settings.embedding.model,
+            expected_vector_size=settings.vector.vector_size,
+        ),
+        checker.check_reranker(
+            strategy=settings.reranking.strategy,
+            model=settings.reranking.model,
+        ),
+    ]
+    return RepositorySettingsReadinessResponse(
+        repository_id=repository_id,
+        checked=True,
+        items=items,
+    )
 
 
 def analyze_settings_impact(
@@ -310,6 +549,14 @@ def _field_value(payload: dict[str, object], dotted_path: str) -> object:
             return None
         value = value.get(part)
     return value
+
+
+def _windows_friendly_message(message: str) -> str:
+    return (
+        message.replace("Start Ollama and run `", "Start Ollama, then pull the model with: ")
+        .replace("`.", ".")
+        .replace("`", "")
+    )
 
 
 def _manifest_for_repository(

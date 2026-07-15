@@ -10,7 +10,11 @@ from private_rag.repositories.schemas import (
     RecreateValidationRequest,
     RepositorySettings,
 )
-from private_rag.repositories.service import analyze_settings_impact, validate_recreate_request
+from private_rag.repositories.service import (
+    LocalSettingsReadinessChecker,
+    analyze_settings_impact,
+    validate_recreate_request,
+)
 
 
 def test_default_repository_settings_use_app_model_defaults() -> None:
@@ -107,6 +111,17 @@ def test_settings_impact_reports_no_changes_for_same_settings() -> None:
 
     assert result.has_changes is False
     assert result.impacts == []
+
+
+def test_readiness_checker_skips_disabled_reranker() -> None:
+    checker = LocalSettingsReadinessChecker()
+
+    result = checker.check_reranker(strategy="none", model=None)
+
+    assert result.target == "reranker"
+    assert result.status == "skipped"
+    assert result.ready is True
+    assert "disabled" in result.message
 
 
 def test_recreate_validation_reports_missing_files_and_models(tmp_path: Path) -> None:

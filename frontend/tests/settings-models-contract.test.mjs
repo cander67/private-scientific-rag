@@ -30,12 +30,21 @@ test("Settings / Models shows repository-scoped grouped defaults", () => {
 test("Settings / Models exposes required models and readiness placeholders", () => {
   assert.match(source, /Model readiness/);
   assert.match(source, /Configured local models/);
-  assert.match(source, /ReadinessPlaceholder/);
+  assert.match(source, /Check readiness/);
+  assert.match(source, /function checkRepositorySettingsReadiness/);
+  assert.match(source, /settings\/readiness/);
+  assert.match(source, /ReadinessCard/);
   assert.match(source, /Qdrant/);
   assert.match(source, /Embedding/);
   assert.match(source, /Reranker/);
   assert.match(source, /requiredModelsForSettings\(draft\)/);
   assert.match(source, /Not checked/);
+  assert.match(source, /Runtime unavailable/);
+  assert.match(source, /Not installed/);
+  assert.match(source, /Skipped/);
+  assert.match(styles, /\.settings-readiness-ready/);
+  assert.match(styles, /\.settings-readiness-unavailable_runtime/);
+  assert.match(styles, /\.settings-readiness-not_installed/);
 });
 
 test("Settings / Models supports edit, save, cancel, and field validation", () => {

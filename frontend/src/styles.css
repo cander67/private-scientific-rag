@@ -999,6 +999,43 @@ textarea {
   font-weight: 700;
 }
 
+.settings-readiness-card small {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  margin-top: var(--s2);
+}
+
+.settings-readiness-ready {
+  border-color: transparent;
+  background: var(--ok-soft);
+}
+
+.settings-readiness-ready em {
+  color: var(--ok);
+}
+
+.settings-readiness-unavailable_runtime,
+.settings-readiness-not_installed,
+.settings-readiness-failed {
+  border-color: transparent;
+  background: var(--danger-soft);
+}
+
+.settings-readiness-unavailable_runtime em,
+.settings-readiness-not_installed em,
+.settings-readiness-failed em {
+  color: var(--danger);
+}
+
+.settings-readiness-skipped {
+  border-color: transparent;
+  background: var(--surface-3);
+}
+
+.settings-readiness-not_checked {
+  border-style: dashed;
+}
+
 .settings-chip-list {
   margin-top: var(--s2);
 }
