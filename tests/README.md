@@ -119,6 +119,10 @@ Run all default tests plus all opted-in live tests in one coverage pass:
 RUN_LIVE_TESTS=1 uv run pytest -m "not live or live"
 ```
 
+```powershell
+$env:RUN_LIVE_TESTS="1"; uv run pytest -m "not live or live"
+```
+
 Run backend tests by tier, including live tests when ready:
 
 ```bash
