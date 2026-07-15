@@ -190,6 +190,65 @@ class RepositorySettingsReadinessResponse(BaseModel):
     items: list[RepositorySettingsReadinessItem]
 
 
+class RepositoryDashboardCounts(BaseModel):
+    documents: int = 0
+    parsed_documents: int = 0
+    chunks: int = 0
+    chat_sessions: int = 0
+    chat_messages: int = 0
+    retrieval_runs: int = 0
+    sandbox_runs: int = 0
+    sandbox_comparisons: int = 0
+    exports: int = 0
+    recreate_events: int = 0
+
+
+class RepositoryDashboardIndexStatus(BaseModel):
+    ready: bool
+    status: Literal["ready", "missing", "partial", "stale"]
+    message: str
+    indexed_chunks: int
+    parsed_chunks: int
+    model: str | None = None
+
+
+class RepositoryDashboardActiveConfig(BaseModel):
+    chunking: ChunkingSettings
+    full_text: FullTextSettings
+    vector: VectorSettings
+    embedding: EmbeddingSettings
+    reranking: RerankingSettings
+    chat_model: str
+    active_chat_prompt_id: str
+    active_chat_prompt_name: str
+
+
+class RepositoryDashboardActivityItem(BaseModel):
+    kind: Literal["document", "retrieval", "chat", "sandbox", "export", "recreate"]
+    label: str
+    detail: str
+    occurred_at: datetime
+    route: Literal[
+        "documents",
+        "search",
+        "chat",
+        "sandbox",
+        "export",
+        "recreate",
+    ]
+
+
+class RepositoryDashboardSummary(BaseModel):
+    repository: RepositoryRead
+    counts: RepositoryDashboardCounts
+    full_text: RepositoryDashboardIndexStatus
+    vector: RepositoryDashboardIndexStatus
+    settings_readiness: RepositorySettingsReadinessResponse
+    active_config: RepositoryDashboardActiveConfig
+    recent_activity: list[RepositoryDashboardActivityItem] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class RepositoryManifest(BaseModel):
     schema_version: int = 1
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

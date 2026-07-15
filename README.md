@@ -8,7 +8,7 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 through PRD9 and PRD21 are complete and closed. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, local Ollama-backed retrieval-augmented chat with citations, a Prompt Sandbox for prompt/retrieval/model comparisons, portable export/recreate workflows for moving repositories across supported local hosts, and a repository-scoped Settings / Models manager.
+PRD1 through PRD9 and PRD21 are complete and closed. PRD20 Repository Dashboard and Home Alias is implemented and ready for final review. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, local Ollama-backed retrieval-augmented chat with citations, a Prompt Sandbox for prompt/retrieval/model comparisons, portable export/recreate workflows for moving repositories across supported local hosts, a repository-scoped Settings / Models manager, and a dashboard home surface for repository status and workflow navigation.
 
 Later PRDs include OCR execution (PRD13), structured table extraction (PRD14), bulk patent downloads/raw patent-data feeds (PRD12), and clearer chunk-level versus document-level search labels (PRD17). Support for additional embedding models and immutable document storage are also planned.
 
@@ -16,6 +16,7 @@ The current scaffold provides:
 
 - FastAPI backend shell with `/health`.
 - Repository settings API for default repository creation, settings updates, settings impact analysis, explicit model/service readiness checks, manifest export, and recreate validation.
+- Repository dashboard summary API for repository-scoped counts, full-text/vector index readiness, local service/model readiness, active configuration, warnings, and recent activity.
 - Document upload, PDF parser fallback chain, page-thumbnail generation, parsing/chunking, source inspection, reprocess, and delete API for PDF, TXT, Markdown, and ANN files.
 - SQLite FTS5 rebuild and full-text search API for repository chunks, with BM25 scores, snippets, matched fields, metadata filters, citation-ready provenance, and CI exact-match recall evaluation.
 - Qdrant-backed vector index rebuild and vector search API for repository chunks, with local SentenceTransformers MiniLM embeddings, latest-index replacement, metadata filters, embedding run metadata, and CI semantic recall evaluation with deterministic fake embeddings.
@@ -24,7 +25,7 @@ The current scaffold provides:
 - Prompt Sandbox API for repository-scoped sandbox prompt versions, copy-to/from chat prompt library, prompt deletion, persisted sandbox runs, progressive side-by-side retrieval comparisons, context snapshots, citations, latency, and status.
 - Portable repository ZIP export/recreate bundle API with validation, a versioned manifest, settings, prompt library, document/chunk metadata, chat and retrieval history, citations, selected source files, external source mapping, rebuilt full-text/vector indexes, and opt-in sandbox data.
 - Deterministic comparison evaluation for full-text, vector, hybrid, and reranked hybrid retrieval, plus opt-in live Qdrant and cross-encoder checks.
-- React/Vite frontend document manager, source inspector, Search Lab, Chat Workspace, Prompt Sandbox, Settings / Models, Export Center, and Recreate Repository views for settings management, full-text, vector, hybrid, reranked retrieval inspection, local cited chat, prompt/retrieval/model comparison, portable ZIP export, and bundle validation/recreate, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
+- React/Vite frontend Repository Dashboard, document manager, source inspector, Search Lab, Chat Workspace, Prompt Sandbox, Settings / Models, Export Center, and Recreate Repository views for home/status navigation, settings management, full-text, vector, hybrid, reranked retrieval inspection, local cited chat, prompt/retrieval/model comparison, portable ZIP export, and bundle validation/recreate, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
 - SQLAlchemy/Alembic migration wiring for repository settings, document ingestion, vector embedding runs, and retrieval history/results.
 - Qdrant Docker Compose service.
 - Pytest, Ruff, Mypy, and CI configuration.
@@ -86,6 +87,8 @@ Unified retrieval defaults to a candidate pool of `top_k * 5` and an RRF constan
 Chat uses its own retrieval settings rather than inheriting Search Lab state. It does not rebuild indexes automatically. Before chatting, rebuild the full-text and vector indexes for the repository and confirm the local Ollama model is reachable from the Chat Workspace readiness panel. The default chat model is `gemma3:4b`; default chat retrieval is hybrid with cross-encoder reranking. Repository chat prompts live in repository settings, and the UI keeps chat-owned retrieval controls, readiness checks, session management, and citation source navigation inside Chat Workspace.
 
 Settings / Models is the repository-scoped place to edit parser/chunking, full-text, vector/embedding, reranking, chat prompt/model, and export defaults. It validates settings before save, records reproducibility snapshots through the repository settings API, previews rebuild/workflow impact, and only runs Qdrant/Ollama/SentenceTransformers/cross-encoder readiness checks when the user explicitly starts them. Missing runtime/model guidance avoids Bash-only assumptions so Windows users get usable setup wording.
+
+Repository Dashboard is the default home surface. Empty hash, `#home`, and `#repository-dashboard` all open the same view. It summarizes the active repository, counts documents/chunks/chats/retrieval/sandbox/export/recreate history, shows full-text and vector states as missing/partial/stale/ready, surfaces Qdrant/chat/embedding/reranker readiness using the Settings / Models vocabulary, lists active configuration defaults, and routes warnings, quick actions, and recent activity entries to workflow-owned pages. Dashboard actions are navigation-only; destructive repository administration remains PRD19 scope.
 
 Run the backend:
 

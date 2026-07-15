@@ -818,6 +818,190 @@ textarea {
   gap: var(--s2);
 }
 
+.dashboard-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.dashboard-overview,
+.dashboard-status,
+.dashboard-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.dashboard-empty {
+  max-width: 720px;
+}
+
+.dashboard-repository-picker {
+  display: grid;
+  grid-template-columns: 120px minmax(220px, 360px);
+  align-items: center;
+  gap: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: var(--s3);
+}
+
+.dashboard-repository-picker span {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.dashboard-kv dd {
+  overflow-wrap: anywhere;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: var(--s3);
+}
+
+.dashboard-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: var(--s3);
+}
+
+.dashboard-metric {
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: var(--s3);
+}
+
+.dashboard-metric span,
+.dashboard-metric small {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+}
+
+.dashboard-metric span {
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dashboard-metric strong {
+  font-size: 1.2rem;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+.dashboard-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(120px, 1fr));
+  gap: var(--s2);
+}
+
+.dashboard-quick-actions .btn {
+  justify-content: center;
+}
+
+.dashboard-index-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  border-left: 4px solid var(--border-strong);
+}
+
+.dashboard-index-ready {
+  border-left-color: var(--ok);
+}
+
+.dashboard-index-partial {
+  border-left-color: var(--warn);
+}
+
+.dashboard-index-stale,
+.dashboard-index-missing {
+  border-left-color: var(--danger);
+}
+
+.dashboard-readiness-grid {
+  margin-top: 0;
+}
+
+.dashboard-config {
+  margin: 0;
+}
+
+.dashboard-config dd {
+  overflow-wrap: anywhere;
+}
+
+.dashboard-warning-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.dashboard-activity-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: var(--s3);
+}
+
+.dashboard-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  padding: var(--s3);
+  text-align: left;
+}
+
+.dashboard-activity:hover {
+  border-color: var(--border-strong);
+}
+
+.dashboard-activity span,
+.dashboard-activity small {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+}
+
+.dashboard-activity span {
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.dashboard-activity strong {
+  overflow-wrap: anywhere;
+}
+
+.dashboard-warning {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: var(--s3);
+}
+
+.dashboard-warning p {
+  margin: 0 0 var(--s3);
+}
+
 .settings-layout {
   display: flex;
   flex-direction: column;
@@ -1933,7 +2117,11 @@ textarea {
     grid-template-columns: repeat(2, minmax(240px, 1fr));
   }
 
-  .export-metrics {
+  .export-metrics,
+  .dashboard-grid,
+  .dashboard-status-grid,
+  .dashboard-quick-actions,
+  .dashboard-activity-list {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
 
@@ -2002,6 +2190,10 @@ textarea {
     width: 100%;
   }
 
+  .dashboard-repository-picker {
+    grid-template-columns: 1fr;
+  }
+
   .page {
     padding: var(--s4);
   }
@@ -2011,6 +2203,10 @@ textarea {
   .chat-layout,
   .sandbox-run-grid,
   .export-grid,
+  .dashboard-grid,
+  .dashboard-status-grid,
+  .dashboard-quick-actions,
+  .dashboard-activity-list,
   .settings-grid,
   .settings-readiness-grid,
   .settings-prompt-list,

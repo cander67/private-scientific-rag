@@ -12,6 +12,7 @@ from private_rag.db.session import SessionLocal
 from private_rag.repositories.schemas import (
     RecreateValidationRequest,
     RecreateValidationResponse,
+    RepositoryDashboardSummary,
     RepositoryManifest,
     RepositoryRead,
     RepositorySettingsImpactRequest,
@@ -29,6 +30,7 @@ from private_rag.repositories.service import (
     export_manifest,
     get_repository_with_settings,
     list_repositories,
+    repository_dashboard_summary,
     update_repository_settings,
     validate_recreate_request,
 )
@@ -81,6 +83,25 @@ def read_repository_settings(
     if repository is None:
         raise HTTPException(status_code=404, detail="Repository not found")
     return repository
+
+
+@router.get("/{repository_id}/summary", response_model=RepositoryDashboardSummary)
+def read_repository_dashboard_summary(
+    repository_id: str,
+    session: DbSession,
+    llm: SettingsChatLLMDependency,
+    checker: SettingsReadinessCheckerDependency,
+) -> RepositoryDashboardSummary:
+    summary = repository_dashboard_summary(
+        session,
+        repository_id=repository_id,
+        app_settings=get_settings(),
+        llm=llm,
+        checker=checker,
+    )
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return summary
 
 
 @router.post("/{repository_id}/settings/impact", response_model=RepositorySettingsImpactResponse)

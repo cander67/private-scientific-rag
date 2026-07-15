@@ -7,7 +7,7 @@ Module boundaries:
 - `api/`: FastAPI application and routes.
 - `core/`: settings and shared application infrastructure.
 - `db/`: SQLAlchemy base, engine, and session wiring.
-- `repositories/`: repository SQLAlchemy models, Pydantic settings/manifest schemas, and reproducibility service logic.
+- `repositories/`: repository SQLAlchemy models, Pydantic settings/manifest/dashboard schemas, summary/status APIs, and reproducibility service logic.
 - `search/`: SQLite FTS5 schema management, sparse index rebuilds, query normalization, field weighting, result shaping, and exact-match recall evaluation.
 - `vector/`: embedding provider boundary, Qdrant vector-store boundary, latest embedding-run metadata, vector index rebuild/search orchestration, and semantic recall evaluation.
 - `retrieval/`: unified retrieval request/response schemas, retrieval run/result persistence, and orchestration across full-text, vector, hybrid, and reranked search modes.
@@ -25,6 +25,7 @@ Current API surface:
 - `PUT /repositories/{repository_id}/settings`: validates and saves repository settings.
 - `POST /repositories/{repository_id}/settings/impact`: previews rebuild, workflow, export/recreate, and evaluation-freshness impact for draft settings.
 - `POST /repositories/{repository_id}/settings/readiness`: runs explicit, opt-in Qdrant, chat model, embedding model, and reranker readiness checks through mockable service boundaries.
+- `GET /repositories/{repository_id}/summary`: returns Repository Dashboard data for one repository, including identity, counts, full-text/vector readiness, PRD21-style service/model readiness, active configuration, warnings, and recent activity.
 - `GET /repositories/{repository_id}/manifest`: exports a reproducibility manifest and stores a snapshot.
 - `POST /repositories/{repository_id}/exports/bundle`: exports a portable repository ZIP with manifest, settings, prompt library, document/chunk metadata, chat history, retrieval history, citations, and selected source files. PRD8 sandbox runs/comparisons are excluded by default and included only when explicitly requested.
 - `POST /repositories/recreate/bundle/validate`: validates a portable repository ZIP before recreate, including manifest/payload consistency, source hashes, external source mappings, model availability reports, parser fingerprints, and exported count summaries.
@@ -63,11 +64,14 @@ Current status:
 - PRD7 local RAG chat with citations is complete and closed: Ollama chat boundary, model registry, readiness checks, chat session persistence, prompt library settings, chat-owned retrieval controls, citation mapping, and Chat Workspace are available.
 - PRD8 Prompt Sandbox is complete and closed: repository-scoped sandbox prompt versions, copy-to/from chat prompt library, prompt deletion, persisted sandbox runs, progressive side-by-side retrieval comparisons, local-model generation, retrieved context snapshots, latency/status display, and the Prompt Sandbox workspace are available. Golden evaluation metrics and evidence-backed promotion are deferred to PRD18.
 - PRD9 export/import/recreate is complete and closed: portable ZIP export bundles, bundle validation, backend recreate execution, active history restore, full-text/vector index rebuild reporting, Export Center, Recreate Repository, and cross-platform transfer documentation are available.
+- PRD20 Repository Dashboard and Home Alias is implemented and ready for review: stable repository summary API, home/dashboard route aliases, dashboard status surface, repository switching, no-repository recovery, workflow quick actions, recent activity, and frontend/backend contract coverage are available.
 - PRD21 Settings / Models is complete and closed: repository-scoped settings editing, validation, impact analysis, explicit readiness checks, workflow follow-up links, chat/export default propagation, and frontend contract coverage are available.
 
 Repository chat prompts live in repository settings under `prompt.library`, with `prompt.active_chat_prompt_id` selecting the active prompt. The default prompt requires repository-grounded answers, inline citations, and explicit uncertainty when context is insufficient. Chat retrieval settings are stored on each chat session and may be overridden per question; they do not inherit frontend Search Lab state and do not trigger automatic index rebuilds. Readiness is explicit: full-text and vector status compare parsed chunks against indexed chunks, report missing/partial/stale/ready states, and require the selected retrieval mode plus a responding local model before chat is marked ready.
 
 Settings readiness is also explicit and opt-in. The Settings / Models readiness endpoint distinguishes not checked, unavailable runtime, not installed, ready, failed, and skipped states. Default tests mock Qdrant, chat, embedding, and reranker boundaries; live Qdrant/Ollama/SentenceTransformers/cross-encoder checks stay in the opt-in live test suite.
+
+Repository Dashboard summaries are read-mostly. The summary endpoint scopes all counts and activity to the requested repository, compares parsed chunks against full-text/vector indexed chunks to report missing/partial/stale/ready states, reuses Settings / Models readiness vocabulary for Qdrant/chat/embedding/reranker checks, and returns warnings and recent activity with workflow route targets. Dashboard mutations remain in workflow-owned pages; PRD19 owns destructive repository administration/reset actions.
 
 The default cross-encoder is `cross-encoder/ms-marco-MiniLM-L6-v2`. It must be downloaded into the local SentenceTransformers cache before live reranking; a missing model returns setup guidance instead of silently falling back. Diversity/MMR remains a future strategy. Default CI uses deterministic providers, while real Qdrant and cross-encoder checks are explicit opt-in tests documented in `tests/README.md`.
 
