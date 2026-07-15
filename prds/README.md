@@ -24,7 +24,7 @@ Current status:
 - Backlog: PRD18 golden evaluation and evidence-backed promotion.
 - Backlog: PRD19 repository administration and local reset.
 - Backlog: PRD20 repository dashboard and home alias.
-- Ready for review: PRD21 settings and model manager.
+- Complete: PRD21 settings and model manager.
 
 The intended flow is:
 
@@ -71,4 +71,4 @@ PRD files:
 18. [Golden evaluation and evidence-backed promotion](18-golden-evaluation-evidence-promotion.md) - backlog
 19. [Repository administration and local reset](19-repository-admin-reset.md) - backlog
 20. [Repository dashboard and home alias](20-repository-dashboard-home.md) - backlog
-21. [Settings and model manager](21-settings-models-manager.md) - ready for review
+21. [Settings and model manager](21-settings-models-manager.md) - complete
