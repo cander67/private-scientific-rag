@@ -1,6 +1,6 @@
 # PRD 9: Export, Import, and Recreate Repository
 
-**Status:** Implemented, ready for review.
+**Status:** Complete and closed.
 
 ## Goal
 

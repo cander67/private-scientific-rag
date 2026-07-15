@@ -8,7 +8,7 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 through PRD8 are complete and closed. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, local Ollama-backed retrieval-augmented chat with citations, and a Prompt Sandbox for prompt/retrieval/model comparisons. PRD9 export/import/recreate is implemented and ready for review.
+PRD1 through PRD9 are complete and closed. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, local Ollama-backed retrieval-augmented chat with citations, a Prompt Sandbox for prompt/retrieval/model comparisons, and portable export/recreate workflows for moving repositories across supported local hosts.
 
 Later PRDs include OCR execution (PRD13), structured table extraction (PRD14), bulk patent downloads/raw patent-data feeds (PRD12), and clearer chunk-level versus document-level search labels (PRD17). Support for additional embedding models and immutable document storage are also planned.
 

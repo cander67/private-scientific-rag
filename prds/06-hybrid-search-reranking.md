@@ -1,6 +1,6 @@
 # PRD 6: Hybrid Search and Reranking
 
-**Status:** Implemented, ready for review.
+**Status:** Complete and closed.
 
 ## Goal
 

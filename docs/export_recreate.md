@@ -1,6 +1,6 @@
 # Export and Recreate Transfer Guide
 
-PRD9 is ready for review. It adds portable repository ZIP bundles and a recreate workflow for moving a local research repository between supported hosts: macOS, Windows-native Python/Ollama, and Linux/Ubuntu.
+PRD9 is complete and closed. It adds portable repository ZIP bundles and a recreate workflow for moving a local research repository between supported hosts: macOS, Windows-native Python/Ollama, and Linux/Ubuntu.
 
 ## Bundle Contents
 
