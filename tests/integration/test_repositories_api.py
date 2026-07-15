@@ -822,6 +822,140 @@ def test_repository_delete_requires_confirmation_and_cleans_one_repository(
         assert other_fts == 1
 
 
+def test_clear_all_requires_strong_confirmation_and_recovers_default_repository(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("PRIVATE_RAG_DATA_DIR", str(data_dir))
+    get_settings.cache_clear()
+    client = _client_with_database()
+    _install_readiness_fakes(client)
+    app = cast(Any, client.app)
+    app.dependency_overrides[get_admin_vector_store] = lambda: FailingDeleteVectorStore()
+    created = client.get("/repositories/default").json()
+    first_repository_id = created["repository"]["id"]
+    first_managed = data_dir / "repositories" / first_repository_id / "sources" / "first.txt"
+    first_managed.parent.mkdir(parents=True)
+    first_managed.write_text("managed")
+    external_path = tmp_path / "external-clear-all.txt"
+    external_path.write_text("external")
+    with app.state.test_session_factory() as session:
+        first_document = _add_document_with_chunks(session, first_repository_id, "first.txt", 1)
+        second_repository = Repository(name="Second Repository", root_path=str(data_dir))
+        session.add(second_repository)
+        session.flush()
+        second_repository.settings = repository_models.RepositorySettingsRow(
+            settings=created["settings"]
+        )
+        second_document = _add_document_with_chunks(session, second_repository.id, "second.txt", 1)
+        session.flush()
+        session.query(DocumentVersion).filter_by(id=first_document.current_version_id).update(
+            {"storage_path": str(first_managed)}
+        )
+        session.query(DocumentVersion).filter_by(id=second_document.current_version_id).update(
+            {"storage_path": str(external_path)}
+        )
+        session.add(
+            EmbeddingRun(
+                repository_id=first_repository_id,
+                provider="sentence_transformers",
+                model="test-deterministic",
+                vector_size=8,
+                distance="cosine",
+                collection_name="first_collection",
+                status="indexed",
+                chunk_count=1,
+                settings_snapshot={},
+            )
+        )
+        session.add(
+            EmbeddingRun(
+                repository_id=second_repository.id,
+                provider="sentence_transformers",
+                model="test-deterministic",
+                vector_size=8,
+                distance="cosine",
+                collection_name="second_collection",
+                status="indexed",
+                chunk_count=1,
+                settings_snapshot={},
+            )
+        )
+        session.commit()
+        second_repository_id = second_repository.id
+        rebuild_full_text_index(session, first_repository_id)
+        rebuild_full_text_index(session, second_repository_id)
+
+    preview = client.get("/repositories/admin/clear-all/preview")
+
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    assert preview_payload["destructive"] is False
+    assert preview_payload["confirmation_value"] == "DELETE ALL LOCAL REPOSITORIES"
+    assert len(preview_payload["repositories"]) == 2
+    assert preview_payload["database_counts"]["repositories"] == 2
+    assert preview_payload["database_counts"]["documents"] == 2
+    assert preview_payload["database_counts"]["chunks"] == 2
+    assert {item["category"] for item in preview_payload["plan"]} >= {
+        "database_records",
+        "app_managed_sources",
+        "external_sources",
+        "full_text_index",
+        "vector_index",
+        "model_caches",
+    }
+
+    rejected = client.post(
+        "/repositories/admin/clear-all",
+        json={"confirmation_value": "Default Repository"},
+    )
+
+    assert rejected.status_code == 400
+    assert first_managed.exists()
+
+    response = client.post(
+        "/repositories/admin/clear-all",
+        json={"confirmation_value": "DELETE ALL LOCAL REPOSITORIES"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed_with_warnings"
+    assert payload["database_counts"]["repositories"] == 2
+    assert payload["default_repository"]["repository"]["name"] == "Default Repository"
+    assert {item["category"] for item in payload["removed"]} >= {
+        "database_records",
+        "app_managed_sources",
+        "full_text_index",
+    }
+    assert {item["category"] for item in payload["preserved"]} >= {
+        "external_sources",
+        "model_caches",
+    }
+    assert {item["category"] for item in payload["failed"]} == {"vector_index"}
+    assert not first_managed.exists()
+    assert external_path.exists()
+
+    repositories = client.get("/repositories").json()
+    assert len(repositories) == 1
+    assert repositories[0]["name"] == "Default Repository"
+    assert repositories[0]["id"] not in {first_repository_id, second_repository_id}
+    with app.state.test_session_factory() as session:
+        assert session.get(Repository, first_repository_id) is None
+        assert session.get(Repository, second_repository_id) is None
+        deleted_first_fts = session.scalar(
+            text("SELECT COUNT(*) FROM full_text_chunks WHERE repository_id = :repository_id"),
+            {"repository_id": first_repository_id},
+        )
+        deleted_second_fts = session.scalar(
+            text("SELECT COUNT(*) FROM full_text_chunks WHERE repository_id = :repository_id"),
+            {"repository_id": second_repository_id},
+        )
+        assert deleted_first_fts == 0
+        assert deleted_second_fts == 0
+
+
 def test_repository_summary_reports_partial_and_stale_indexes() -> None:
     client = _client_with_database()
     _install_readiness_fakes(client)

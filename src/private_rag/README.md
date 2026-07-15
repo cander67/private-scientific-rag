@@ -22,6 +22,8 @@ Current API surface:
 - `GET /health`: local app and dependency health check.
 - `GET /repositories/default`: creates or returns the default repository with validated settings.
 - `GET /repositories/admin/inventory`: lists local repository administration summaries with scoped counts, full-text/vector index status, and storage-category hints before destructive workflows are available.
+- `GET /repositories/admin/clear-all/preview`: previews aggregate local cleanup for all repositories without deleting anything, including preserved external files/model caches and retryable vector cleanup warnings.
+- `POST /repositories/admin/clear-all`: clears all local repositories after the stronger `DELETE ALL LOCAL REPOSITORIES` confirmation, then recreates the default repository for recovery.
 - `GET /repositories/{repository_id}/admin/delete-preview`: previews a repository cleanup plan without deleting anything, including database counts, app-managed sources, preserved external files, full-text/vector cleanup impact, model-cache preservation, and retryable Qdrant warnings.
 - `POST /repositories/{repository_id}/admin/delete`: deletes one repository after exact-name confirmation, removing repository-scoped database records, app-managed artifacts, full-text rows, and vector collections where reachable while preserving external files and model caches.
 - `GET /repositories/{repository_id}/settings`: loads repository settings.

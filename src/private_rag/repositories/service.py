@@ -26,6 +26,8 @@ from private_rag.repositories.schemas import (
     RepositoryCleanupPlanItem,
     RepositoryCleanupResultItem,
     RepositoryCleanupWarning,
+    RepositoryClearAllPreview,
+    RepositoryClearAllResult,
     RepositoryDashboardActiveConfig,
     RepositoryDashboardActivityItem,
     RepositoryDashboardCounts,
@@ -50,6 +52,7 @@ from private_rag.vector.models import EmbeddingRun
 from private_rag.vector.store import VectorStore, VectorStoreError
 
 DEFAULT_REPOSITORY_NAME = "Default Repository"
+CLEAR_ALL_CONFIRMATION_VALUE = "DELETE ALL LOCAL REPOSITORIES"
 DashboardIndexStatus = Literal["ready", "missing", "partial", "stale"]
 
 
@@ -472,6 +475,47 @@ def preview_repository_deletion(
     )
 
 
+def preview_clear_all_repositories(
+    session: Session,
+    *,
+    app_settings: Settings,
+    checker: SettingsReadinessChecker,
+) -> RepositoryClearAllPreview:
+    repository_ids = session.scalars(select(Repository.id).order_by(Repository.created_at)).all()
+    previews = [
+        preview
+        for repository_id in repository_ids
+        if (
+            preview := preview_repository_deletion(
+                session,
+                repository_id=repository_id,
+                app_settings=app_settings,
+                checker=checker,
+            )
+        )
+        is not None
+    ]
+    return RepositoryClearAllPreview(
+        repositories=previews,
+        database_counts=_aggregate_database_counts(
+            [preview.database_counts for preview in previews]
+        ),
+        plan=_aggregate_plan_items([item for preview in previews for item in preview.plan]),
+        warnings=[
+            RepositoryCleanupWarning(
+                code=warning.code,
+                category=warning.category,
+                message=f"{preview.repository.name}: {warning.message}",
+                retryable=warning.retryable,
+            )
+            for preview in previews
+            for warning in preview.warnings
+        ],
+        confirmation_value=CLEAR_ALL_CONFIRMATION_VALUE,
+        destructive=False,
+    )
+
+
 def delete_repository_with_cleanup(
     session: Session,
     *,
@@ -652,6 +696,56 @@ def delete_repository_with_cleanup(
         skipped=skipped,
         failed=failed,
         warnings=warnings,
+    )
+
+
+def clear_all_repositories_with_cleanup(
+    session: Session,
+    *,
+    confirmation_value: str,
+    app_settings: Settings,
+    checker: SettingsReadinessChecker,
+    vector_store: VectorStore,
+) -> RepositoryClearAllResult:
+    preview = preview_clear_all_repositories(
+        session,
+        app_settings=app_settings,
+        checker=checker,
+    )
+    if confirmation_value != CLEAR_ALL_CONFIRMATION_VALUE:
+        raise ValueError(f"confirmation_value must equal {CLEAR_ALL_CONFIRMATION_VALUE!r}")
+    repository_previews = list(preview.repositories)
+    results: list[RepositoryDeleteResult] = []
+    for repository_preview in repository_previews:
+        result = delete_repository_with_cleanup(
+            session,
+            repository_id=repository_preview.repository.id,
+            confirmation_value=repository_preview.repository.name,
+            app_settings=app_settings,
+            checker=checker,
+            vector_store=vector_store,
+        )
+        if result is not None:
+            results.append(result)
+
+    default_repository = ensure_default_repository(session, app_settings)
+    warnings = [warning for result in results for warning in result.warnings]
+    failed = [item for result in results for item in result.failed]
+    status: Literal["completed", "completed_with_warnings", "failed"] = "completed"
+    if failed or warnings:
+        status = "completed_with_warnings"
+    return RepositoryClearAllResult(
+        status=status,
+        repository_results=results,
+        database_counts=preview.database_counts,
+        removed=_aggregate_result_items([item for result in results for item in result.removed]),
+        preserved=_aggregate_result_items(
+            [item for result in results for item in result.preserved]
+        ),
+        skipped=_aggregate_result_items([item for result in results for item in result.skipped]),
+        failed=_aggregate_result_items(failed),
+        warnings=warnings,
+        default_repository=default_repository,
     )
 
 
@@ -1140,6 +1234,71 @@ def _repository_cleanup_database_counts(
             session, RepositorySnapshot, RepositorySnapshot.repository_id == repository_id
         ),
     )
+
+
+def _aggregate_database_counts(
+    counts: list[RepositoryCleanupDatabaseCounts],
+) -> RepositoryCleanupDatabaseCounts:
+    aggregate = RepositoryCleanupDatabaseCounts(repositories=0)
+    for item in counts:
+        for field, value in item.model_dump().items():
+            setattr(aggregate, field, getattr(aggregate, field) + int(value))
+    return aggregate
+
+
+def _aggregate_plan_items(
+    items: list[RepositoryCleanupPlanItem],
+) -> list[RepositoryCleanupPlanItem]:
+    grouped: dict[tuple[str, str], RepositoryCleanupPlanItem] = {}
+    action_priority = {
+        "retry_required": 3,
+        "remove": 2,
+        "preserve": 1,
+        "skip": 0,
+    }
+    for item in items:
+        key = (item.category, item.label)
+        existing = grouped.get(key)
+        if existing is None:
+            grouped[key] = item.model_copy(deep=True)
+            continue
+        existing.count += item.count
+        existing.paths.extend(item.paths)
+        if action_priority[item.action] > action_priority[existing.action]:
+            existing.action = item.action
+        existing.detail = _aggregate_detail(existing.category, existing.count)
+    return list(grouped.values())
+
+
+def _aggregate_result_items(
+    items: list[RepositoryCleanupResultItem],
+) -> list[RepositoryCleanupResultItem]:
+    grouped: dict[tuple[str, str], RepositoryCleanupResultItem] = {}
+    for item in items:
+        key = (item.category, item.label)
+        existing = grouped.get(key)
+        if existing is None:
+            grouped[key] = item.model_copy(deep=True)
+            continue
+        existing.count += item.count
+        existing.paths.extend(item.paths)
+        existing.detail = _aggregate_detail(existing.category, existing.count)
+    return list(grouped.values())
+
+
+def _aggregate_detail(category: str, count: int) -> str:
+    labels = {
+        "database_records": "database records",
+        "app_managed_sources": "app-managed paths",
+        "external_sources": "external source references",
+        "full_text_index": "full-text indexed chunks",
+        "vector_index": "vector indexed chunks",
+        "exports": "repository snapshots",
+        "prompt_sandbox_history": "prompt sandbox records",
+        "chat_retrieval_history": "chat and retrieval records",
+        "model_caches": "model cache records",
+    }
+    return f"{count} {labels.get(category, category.replace('_', ' '))} across all repositories."
 
 
 def _remove_paths(paths: list[str]) -> tuple[list[str], list[str]]:

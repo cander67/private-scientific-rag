@@ -221,6 +221,29 @@ type RepositoryDeleteResult = {
   warnings: RepositoryCleanupWarning[];
 };
 
+type RepositoryClearAllPreview = {
+  generated_at: string;
+  repositories: RepositoryDeletePreview[];
+  database_counts: RepositoryDeletePreview["database_counts"];
+  plan: RepositoryCleanupPlanItem[];
+  warnings: RepositoryCleanupWarning[];
+  confirmation_value: string;
+  destructive: boolean;
+};
+
+type RepositoryClearAllResult = {
+  generated_at: string;
+  status: RepositoryDeleteResult["status"];
+  repository_results: RepositoryDeleteResult[];
+  database_counts: RepositoryDeletePreview["database_counts"];
+  removed: RepositoryCleanupResultItem[];
+  preserved: RepositoryCleanupResultItem[];
+  skipped: RepositoryCleanupResultItem[];
+  failed: RepositoryCleanupResultItem[];
+  warnings: RepositoryCleanupWarning[];
+  default_repository: RepositorySettingsResponse;
+};
+
 type RepositoryCleanupPlanItem = {
   category: RepositoryAdminStorageHint["category"];
   label: string;
@@ -800,6 +823,10 @@ function App() {
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deletePreviewBusy, setDeletePreviewBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [clearAllPreview, setClearAllPreview] = useState<RepositoryClearAllPreview | null>(null);
+  const [clearAllResult, setClearAllResult] = useState<RepositoryClearAllResult | null>(null);
+  const [clearAllConfirmation, setClearAllConfirmation] = useState("");
+  const [clearAllBusy, setClearAllBusy] = useState(false);
   const [recreateFile, setRecreateFile] = useState<File | null>(null);
   const [recreateRepositoryName, setRecreateRepositoryName] = useState("");
   const [recreateTargetRepositoryId, setRecreateTargetRepositoryId] = useState("");
@@ -1000,6 +1027,9 @@ function App() {
     setDeletePreview(null);
     setDeleteResult(null);
     setDeleteConfirmation("");
+    setClearAllPreview(null);
+    setClearAllResult(null);
+    setClearAllConfirmation("");
     setChatSessions([]);
     setActiveChatSessionId(null);
     setActiveCitation(null);
@@ -1142,6 +1172,61 @@ function App() {
       setAdminMessage("Repository deletion failed");
     } finally {
       setDeleteBusy(false);
+    }
+  }
+
+  async function previewClearAllRepositories() {
+    setClearAllBusy(true);
+    setAdminMessage("Loading clear-all preview");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/admin/clear-all/preview`);
+      if (!response.ok) {
+        throw new Error("clear-all preview unavailable");
+      }
+      const payload = (await response.json()) as RepositoryClearAllPreview;
+      setClearAllPreview(payload);
+      setClearAllResult(null);
+      setClearAllConfirmation("");
+      setDeletePreview(null);
+      setDeleteResult(null);
+      setAdminMessage(`Clear-all preview loaded for ${payload.repositories.length} repositories`);
+    } catch {
+      setClearAllPreview(null);
+      setClearAllResult(null);
+      setAdminMessage("Could not load clear-all preview");
+    } finally {
+      setClearAllBusy(false);
+    }
+  }
+
+  async function clearAllRepositories() {
+    if (!clearAllPreview) {
+      return;
+    }
+    setClearAllBusy(true);
+    setAdminMessage("Clearing all local repositories");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/admin/clear-all`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation_value: clearAllConfirmation }),
+      });
+      if (!response.ok) {
+        throw new Error("clear all failed");
+      }
+      const payload = (await response.json()) as RepositoryClearAllResult;
+      setClearAllPreview(null);
+      setClearAllConfirmation("");
+      setRepositories([payload.default_repository.repository]);
+      activateRepository(payload.default_repository.repository);
+      setClearAllResult(payload);
+      setRepositorySettings(payload.default_repository.settings);
+      void loadAdminInventory();
+      setAdminMessage("Cleared all local repositories and recreated the default repository");
+    } catch {
+      setAdminMessage("Clear-all cleanup failed");
+    } finally {
+      setClearAllBusy(false);
     }
   }
 
@@ -2237,14 +2322,21 @@ function App() {
                 activeRepositoryId={repository?.id ?? null}
                 preview={deletePreview}
                 result={deleteResult}
+                clearAllPreview={clearAllPreview}
+                clearAllResult={clearAllResult}
                 previewBusy={deletePreviewBusy}
                 deleteBusy={deleteBusy}
                 confirmationValue={deleteConfirmation}
+                clearAllBusy={clearAllBusy}
+                clearAllConfirmationValue={clearAllConfirmation}
                 message={adminMessage}
                 onRefresh={() => void loadAdminInventory()}
                 onPreviewCleanup={(repositoryId) => void previewRepositoryCleanup(repositoryId)}
                 onConfirmationChange={setDeleteConfirmation}
                 onDeleteRepository={() => void deleteRepositoryFromPreview()}
+                onPreviewClearAll={() => void previewClearAllRepositories()}
+                onClearAllConfirmationChange={setClearAllConfirmation}
+                onClearAllRepositories={() => void clearAllRepositories()}
                 onSelectRepository={activateRepository}
                 onNavigate={navigateTo}
               />
@@ -2977,14 +3069,21 @@ function RepositoryAdministration({
   activeRepositoryId,
   preview,
   result,
+  clearAllPreview,
+  clearAllResult,
   previewBusy,
   deleteBusy,
   confirmationValue,
+  clearAllBusy,
+  clearAllConfirmationValue,
   message,
   onRefresh,
   onPreviewCleanup,
   onConfirmationChange,
   onDeleteRepository,
+  onPreviewClearAll,
+  onClearAllConfirmationChange,
+  onClearAllRepositories,
   onSelectRepository,
   onNavigate,
 }: {
@@ -2992,14 +3091,21 @@ function RepositoryAdministration({
   activeRepositoryId: string | null;
   preview: RepositoryDeletePreview | null;
   result: RepositoryDeleteResult | null;
+  clearAllPreview: RepositoryClearAllPreview | null;
+  clearAllResult: RepositoryClearAllResult | null;
   previewBusy: boolean;
   deleteBusy: boolean;
   confirmationValue: string;
+  clearAllBusy: boolean;
+  clearAllConfirmationValue: string;
   message: string;
   onRefresh: () => void;
   onPreviewCleanup: (repositoryId: string) => void;
   onConfirmationChange: (value: string) => void;
   onDeleteRepository: () => void;
+  onPreviewClearAll: () => void;
+  onClearAllConfirmationChange: (value: string) => void;
+  onClearAllRepositories: () => void;
   onSelectRepository: (repository: RepositoryRead) => void;
   onNavigate: (view: View) => void;
 }) {
@@ -3139,6 +3245,27 @@ function RepositoryAdministration({
         </section>
       )}
 
+      <section className="card admin-preview-panel" aria-label="Clear all local repositories">
+        <div className="row row-between">
+          <div>
+            <div className="eyebrow">Clear all</div>
+            <h2>All local repositories</h2>
+          </div>
+          <button
+            className="btn btn-ghost danger-action"
+            type="button"
+            onClick={onPreviewClearAll}
+            disabled={clearAllBusy || repositories.length === 0}
+          >
+            Preview clear all
+          </button>
+        </div>
+        <p className="hint">
+          Preview every local repository before clearing local records and app-managed artifacts.
+          External source files and model caches are preserved.
+        </p>
+      </section>
+
       {preview && (
         <RepositoryCleanupPreviewPanel
           preview={preview}
@@ -3149,6 +3276,18 @@ function RepositoryAdministration({
         />
       )}
       {result && <RepositoryCleanupResultPanel result={result} />}
+      {clearAllPreview && (
+        <RepositoryClearAllPreviewPanel
+          preview={clearAllPreview}
+          confirmationValue={clearAllConfirmationValue}
+          busy={clearAllBusy}
+          onConfirmationChange={onClearAllConfirmationChange}
+          onClearAllRepositories={onClearAllRepositories}
+        />
+      )}
+      {clearAllResult && (
+        <RepositoryClearAllResultPanel result={clearAllResult} onNavigate={onNavigate} />
+      )}
     </div>
   );
 }
@@ -3279,6 +3418,141 @@ function RepositoryCleanupResultPanel({ result }: { result: RepositoryDeleteResu
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+function RepositoryClearAllPreviewPanel({
+  preview,
+  confirmationValue,
+  busy,
+  onConfirmationChange,
+  onClearAllRepositories,
+}: {
+  preview: RepositoryClearAllPreview;
+  confirmationValue: string;
+  busy: boolean;
+  onConfirmationChange: (value: string) => void;
+  onClearAllRepositories: () => void;
+}) {
+  const databaseRows = Object.entries(preview.database_counts).filter(([, value]) => value > 0);
+  const confirmationMatches = confirmationValue === preview.confirmation_value;
+  return (
+    <section className="card admin-preview-panel" aria-label="Clear-all cleanup preview">
+      <div>
+        <div className="eyebrow">Clear-all preview</div>
+        <h2>{preview.repositories.length} local repositories</h2>
+      </div>
+      <p className="hint">
+        Preview generated {formatDate(preview.generated_at)}. Clearing all removes local
+        repository records and app-managed artifacts, then recreates the default repository.
+      </p>
+      <div className="admin-preview-grid">
+        <section>
+          <h3>Aggregate database records</h3>
+          <dl className="kv dashboard-kv">
+            {databaseRows.map(([label, value]) => (
+              <React.Fragment key={label}>
+                <dt>{label.replace(/_/g, " ")}</dt>
+                <dd>{value}</dd>
+              </React.Fragment>
+            ))}
+          </dl>
+        </section>
+        <section>
+          <h3>Repositories</h3>
+          <div className="admin-plan-list">
+            {preview.repositories.map((item) => (
+              <article className="admin-result-item" key={item.repository.id}>
+                <strong>{item.repository.name}</strong>
+                <p>
+                  {item.database_counts.documents} documents · {item.database_counts.chunks} chunks
+                </p>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+      <div className="admin-plan-list">
+        {preview.plan.map((item) => (
+          <article className={`admin-plan-item admin-plan-${item.action}`} key={item.category}>
+            <div className="row row-between">
+              <div>
+                <span>{adminCleanupActionLabel(item.action)}</span>
+                <strong>{item.label}</strong>
+              </div>
+              <b>{item.count}</b>
+            </div>
+            <p>{item.detail}</p>
+          </article>
+        ))}
+      </div>
+      {preview.warnings.length > 0 && (
+        <div className="admin-warning-list">
+          {preview.warnings.map((warning) => (
+            <article className="dashboard-warning" key={`${warning.code}-${warning.message}`}>
+              <strong>{warning.code.replace(/_/g, " ")}</strong>
+              <p>{warning.message}</p>
+              {warning.retryable && <small>Retry cleanup after the local service is reachable.</small>}
+            </article>
+          ))}
+        </div>
+      )}
+      <div className="admin-confirm-delete">
+        <label htmlFor="clear-all-confirmation">
+          <span>Type confirmation phrase</span>
+          <input
+            id="clear-all-confirmation"
+            type="text"
+            value={confirmationValue}
+            onChange={(event) => onConfirmationChange(event.target.value)}
+            placeholder={preview.confirmation_value}
+          />
+        </label>
+        <button
+          className="btn btn-ghost danger-action"
+          type="button"
+          onClick={onClearAllRepositories}
+          disabled={!confirmationMatches || busy}
+        >
+          Clear all local repositories
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function RepositoryClearAllResultPanel({
+  result,
+  onNavigate,
+}: {
+  result: RepositoryClearAllResult;
+  onNavigate: (view: View) => void;
+}) {
+  return (
+    <section className="card admin-preview-panel" aria-label="Clear-all cleanup result">
+      <div>
+        <div className="eyebrow">Clear-all result</div>
+        <h2>{repositoryDeleteStatusLabel(result.status)}</h2>
+      </div>
+      <p className="hint">
+        Cleared {result.repository_results.length} repositories and recreated{" "}
+        {result.default_repository.repository.name}.
+      </p>
+      <div className="admin-result-grid">
+        <RepositoryCleanupResultGroup title="Removed" items={result.removed} />
+        <RepositoryCleanupResultGroup title="Preserved" items={result.preserved} />
+        <RepositoryCleanupResultGroup title="Skipped" items={result.skipped} />
+        <RepositoryCleanupResultGroup title="Failed" items={result.failed} />
+      </div>
+      <div className="dashboard-actions">
+        <button className="btn btn-primary" type="button" onClick={() => onNavigate("dashboard")}>
+          Open Repository Dashboard
+        </button>
+        <button className="btn" type="button" onClick={() => onNavigate("recreate")}>
+          Open Recreate Repository
+        </button>
+      </div>
     </section>
   );
 }

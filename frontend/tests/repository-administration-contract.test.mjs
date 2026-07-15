@@ -31,7 +31,7 @@ test("Repository Administration loads local inventory before destructive actions
   assert.match(source, /adminStorageStatusLabel/);
 
   const adminComponent = source.match(/function RepositoryAdministration[\s\S]*?function RepositoryCleanupPreviewPanel/)?.[0] ?? "";
-  assert.doesNotMatch(adminComponent, /method: "DELETE"|Clear all|Execute cleanup/);
+  assert.doesNotMatch(adminComponent, /method: "DELETE"|Execute cleanup/);
 });
 
 test("Repository Administration previews cleanup plans before confirmed deletion", () => {
@@ -56,6 +56,24 @@ test("Repository Administration previews cleanup plans before confirmed deletion
   assert.match(source, /failed: RepositoryCleanupResultItem\[\]/);
   assert.match(source, /No records, files, indexes, or model\s+[\s\S]*?caches are changed by this preview/);
   assert.match(source, /Retry available after the local service is reachable/);
+});
+
+test("Repository Administration supports guarded clear-all preview and recovery", () => {
+  assert.match(source, /type RepositoryClearAllPreview =/);
+  assert.match(source, /type RepositoryClearAllResult =/);
+  assert.match(source, /previewClearAllRepositories/);
+  assert.match(source, /clearAllRepositories/);
+  assert.match(source, /repositories\/admin\/clear-all\/preview/);
+  assert.match(source, /repositories\/admin\/clear-all/);
+  assert.match(source, /Preview clear all/);
+  assert.match(source, /RepositoryClearAllPreviewPanel/);
+  assert.match(source, /RepositoryClearAllResultPanel/);
+  assert.match(source, /confirmationValue === preview\.confirmation_value/);
+  assert.match(source, /Type confirmation phrase/);
+  assert.match(source, /Clear all local repositories/);
+  assert.match(source, /default_repository: RepositorySettingsResponse/);
+  assert.match(source, /Open Repository Dashboard/);
+  assert.match(source, /Open Recreate Repository/);
 });
 
 test("Repository Administration has stable layout hooks", () => {
