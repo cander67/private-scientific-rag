@@ -13,9 +13,18 @@ Current status:
 - Complete: PRD7 local RAG chat with citations.
 - Complete: PRD8 prompt sandbox.
 - Complete: PRD9 export, import, and recreate repository.
+- Backlog: PRD10 structured scientific and multimodal parsing.
+- Backlog: PRD11 chemistry and patent extensions.
+- Backlog: PRD12 bulk patent data integration.
+- Backlog: PRD13 OCR and page-image text recovery.
+- Backlog: PRD14 structured table extraction.
+- Backlog: PRD15 additional embedding models.
+- Backlog: PRD16 immutable embedding indexes.
 - Backlog: PRD17 search metadata quality and result labeling.
 - Backlog: PRD18 golden evaluation and evidence-backed promotion.
 - Backlog: PRD19 repository administration and local reset.
+- Backlog: PRD20 repository dashboard and home alias.
+- Backlog: PRD21 settings and model manager.
 
 The intended flow is:
 
@@ -51,13 +60,15 @@ PRD files:
 7. [Local RAG chat with citations](07-local-rag-chat-citations.md) - complete
 8. [Prompt sandbox](08-prompt-sandbox-evaluation.md) - complete
 9. [Export, import, and recreate repository](09-export-import-recreate.md) - complete
-10. [Structured scientific and multimodal parsing](10-structured-scientific-multimodal-parsing.md)
-11. [Chemistry and patent extensions](11-chemistry-patent-extensions.md)
-12. [Bulk patent data integration](12-bulk-patent-data-integration.md)
-13. [OCR and page-image text recovery](13-ocr-page-image-text-recovery.md)
-14. [Structured table extraction](14-structured-table-extraction.md)
-15. [Additional embedding models](15-additional-embedding-models.md)
-16. [Immutable embedding indexes](16-immutable-embedding-indexes.md)
-17. [Search metadata quality and result labeling](17-search-metadata-quality-result-labeling.md)
+10. [Structured scientific and multimodal parsing](10-structured-scientific-multimodal-parsing.md) - backlog
+11. [Chemistry and patent extensions](11-chemistry-patent-extensions.md) - backlog
+12. [Bulk patent data integration](12-bulk-patent-data-integration.md) - backlog
+13. [OCR and page-image text recovery](13-ocr-page-image-text-recovery.md) - backlog
+14. [Structured table extraction](14-structured-table-extraction.md) - backlog
+15. [Additional embedding models](15-additional-embedding-models.md) - backlog
+16. [Immutable embedding indexes](16-immutable-embedding-indexes.md) - backlog
+17. [Search metadata quality and result labeling](17-search-metadata-quality-result-labeling.md) - backlog
 18. [Golden evaluation and evidence-backed promotion](18-golden-evaluation-evidence-promotion.md) - backlog
 19. [Repository administration and local reset](19-repository-admin-reset.md) - backlog
+20. [Repository dashboard and home alias](20-repository-dashboard-home.md) - backlog
+21. [Settings and model manager](21-settings-models-manager.md) - backlog
