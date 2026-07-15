@@ -216,7 +216,16 @@ type RecreateBundleResponse = {
   warnings: ExportBundleValidationIssue[];
 };
 
-type View = "documents" | "source" | "search" | "sandbox" | "chat" | "settings" | "export" | "recreate";
+type View =
+  | "dashboard"
+  | "documents"
+  | "source"
+  | "search"
+  | "sandbox"
+  | "chat"
+  | "settings"
+  | "export"
+  | "recreate";
 
 type DocumentVersion = {
   id: string;
@@ -1701,7 +1710,9 @@ function App() {
   }
 
   const title =
-    activeView === "search"
+    activeView === "dashboard"
+      ? "Repository Dashboard"
+      : activeView === "search"
       ? "Search Lab"
       : activeView === "source"
         ? "Source Viewer"
@@ -1717,7 +1728,9 @@ function App() {
                 ? "Recreate Repository"
           : "Document Manager";
   const subtitle =
-    activeView === "search"
+    activeView === "dashboard"
+      ? `${repository?.name ?? "Default Repository"} · repository overview`
+      : activeView === "search"
       ? "Inspect full-text retrieval with BM25 scores and citation provenance"
       : activeView === "sandbox"
         ? `${repository?.name ?? "Default Repository"} · ${sandboxMessage}`
@@ -1746,9 +1759,21 @@ function App() {
             </div>
           </div>
           <nav className="nav">
-            <a>Home</a>
+            <a
+              className={activeView === "dashboard" ? "active" : ""}
+              href="#home"
+              onClick={() => navigateTo("dashboard")}
+            >
+              Home
+            </a>
             <span className="nav-label">Workspace</span>
-            <a>Repository Dashboard</a>
+            <a
+              className={activeView === "dashboard" ? "active" : ""}
+              href="#repository-dashboard"
+              onClick={() => navigateTo("dashboard")}
+            >
+              Repository Dashboard
+            </a>
             <a
               className={activeView === "documents" ? "active" : ""}
               href="#documents"
@@ -1882,7 +1907,16 @@ function App() {
           </header>
 
           <div className="page">
-            {activeView === "search" ? (
+            {activeView === "dashboard" ? (
+              <RepositoryDashboard
+                repository={repository}
+                documents={documents}
+                totalChunks={totalChunks}
+                chatSessions={chatSessions}
+                settings={repositorySettings}
+                onNavigate={navigateTo}
+              />
+            ) : activeView === "search" ? (
               <SearchLab
                 documents={documents}
                 repositoryReady={Boolean(repository)}
@@ -2362,6 +2396,105 @@ function App() {
         </main>
       </div>
     </>
+  );
+}
+
+function RepositoryDashboard({
+  repository,
+  documents,
+  totalChunks,
+  chatSessions,
+  settings,
+  onNavigate,
+}: {
+  repository: RepositoryResponse["repository"] | null;
+  documents: DocumentSummary[];
+  totalChunks: number;
+  chatSessions: ChatSession[];
+  settings: RepositorySettings | null;
+  onNavigate: (view: View) => void;
+}) {
+  const parsedDocuments = documents.filter((document) => document.current_version?.status === "parsed").length;
+  const activePrompt = settings?.prompt.library.find(
+    (prompt) => prompt.id === settings.prompt.active_chat_prompt_id,
+  );
+
+  return (
+    <div className="dashboard-layout">
+      <section className="card dashboard-overview">
+        <div className="row row-between">
+          <div>
+            <div className="eyebrow">Repository dashboard</div>
+            <h2>{repository?.name ?? "No active repository"}</h2>
+          </div>
+          <span className={`badge ${repository ? "badge-ok" : "badge-warn"}`}>
+            <span className="dot" />
+            {repository ? "Active repository" : "No repository selected"}
+          </span>
+        </div>
+        <dl className="kv dashboard-kv">
+          <dt>repository id</dt>
+          <dd>{repository?.id ?? "unavailable"}</dd>
+          <dt>root path</dt>
+          <dd>{repository?.root_path ?? "local default"}</dd>
+          <dt>created</dt>
+          <dd>{repository?.created_at ? formatDate(repository.created_at) : "unavailable"}</dd>
+          <dt>updated</dt>
+          <dd>{repository?.updated_at ? formatDate(repository.updated_at) : "unavailable"}</dd>
+        </dl>
+      </section>
+
+      <div className="dashboard-grid">
+        <DashboardMetric label="Documents" value={documents.length} detail={`${parsedDocuments} parsed`} />
+        <DashboardMetric label="Chunks" value={totalChunks} detail="parsed repository context" />
+        <DashboardMetric label="Chat sessions" value={chatSessions.length} detail="saved normal chats" />
+        <DashboardMetric
+          label="Chat default"
+          value={settings?.model.ollama_chat_model ?? "unavailable"}
+          detail={activePrompt?.name ?? "active prompt"}
+        />
+      </div>
+
+      <section className="card dashboard-status">
+        <div>
+          <div className="eyebrow">Status shell</div>
+          <h2>Summary API coming next</h2>
+          <p>
+            This dashboard route is live. Detailed index, readiness, warning, and activity summaries arrive in
+            the next PRD20 phases.
+          </p>
+        </div>
+        <div className="dashboard-actions">
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("documents")}>
+            Document Manager
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("search")}>
+            Search Lab
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("settings")}>
+            Settings / Models
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DashboardMetric({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: string | number;
+  detail: string;
+}) {
+  return (
+    <article className="dashboard-metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </article>
   );
 }
 
@@ -5531,6 +5664,8 @@ function issueLabel(code: string) {
 
 function hashForView(view: View) {
   switch (view) {
+    case "dashboard":
+      return "repository-dashboard";
     case "documents":
       return "documents";
     case "source":
@@ -5551,6 +5686,9 @@ function hashForView(view: View) {
 }
 
 function viewFromHash(hash: string): View {
+  if (hash === "" || hash === "#" || hash === "#home" || hash === "#repository-dashboard") {
+    return "dashboard";
+  }
   if (hash === "#recreate-repository") {
     return "recreate";
   }

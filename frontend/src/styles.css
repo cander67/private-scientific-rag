@@ -818,6 +818,63 @@ textarea {
   gap: var(--s2);
 }
 
+.dashboard-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.dashboard-overview,
+.dashboard-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.dashboard-kv dd {
+  overflow-wrap: anywhere;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: var(--s3);
+}
+
+.dashboard-metric {
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: var(--s3);
+}
+
+.dashboard-metric span,
+.dashboard-metric small {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+}
+
+.dashboard-metric span {
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.dashboard-metric strong {
+  font-size: 1.2rem;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
 .settings-layout {
   display: flex;
   flex-direction: column;
@@ -1933,7 +1990,8 @@ textarea {
     grid-template-columns: repeat(2, minmax(240px, 1fr));
   }
 
-  .export-metrics {
+  .export-metrics,
+  .dashboard-grid {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
 
@@ -2011,6 +2069,7 @@ textarea {
   .chat-layout,
   .sandbox-run-grid,
   .export-grid,
+  .dashboard-grid,
   .settings-grid,
   .settings-readiness-grid,
   .settings-prompt-list,
