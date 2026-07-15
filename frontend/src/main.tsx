@@ -808,6 +808,24 @@ function App() {
     }
   }
 
+  async function saveRepositorySettings(nextSettings: RepositorySettings) {
+    if (!repository) {
+      throw new Error("No active repository");
+    }
+    const response = await fetch(`${API_BASE}/repositories/${repository.id}/settings`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: nextSettings }),
+    });
+    if (!response.ok) {
+      throw new Error(await settingsSaveErrorMessage(response));
+    }
+    const payload = (await response.json()) as RepositorySettingsResponse;
+    setRepositorySettings(payload.settings);
+    setExportIncludeSources(payload.settings.export.include_sources);
+    return payload.settings;
+  }
+
   async function inspectDocument(repositoryId: string, documentId: string) {
     try {
       const response = await fetch(`${API_BASE}/repositories/${repositoryId}/documents/${documentId}`);
@@ -1918,6 +1936,7 @@ function App() {
                 repository={repository}
                 settings={repositorySettings}
                 onNavigate={navigateTo}
+                onSave={saveRepositorySettings}
               />
             ) : activeView === "recreate" ? (
               <RecreateRepository
@@ -2272,15 +2291,118 @@ function SettingsModels({
   repository,
   settings,
   onNavigate,
+  onSave,
 }: {
   repository: RepositoryResponse["repository"] | null;
   settings: RepositorySettings | null;
   onNavigate: (view: View) => void;
+  onSave: (settings: RepositorySettings) => Promise<RepositorySettings>;
 }) {
-  const requiredModels = requiredModelsForSettings(settings);
-  const activePrompt = settings?.prompt.library.find(
-    (prompt) => prompt.id === settings.prompt.active_chat_prompt_id,
+  const [draft, setDraft] = useState<RepositorySettings | null>(() => cloneSettings(settings));
+  const [saveMessage, setSaveMessage] = useState("Loaded repository defaults");
+  const [saveBusy, setSaveBusy] = useState(false);
+
+  useEffect(() => {
+    setDraft(cloneSettings(settings));
+    setSaveMessage("Loaded repository defaults");
+  }, [settings, repository?.id]);
+
+  const validationIssues = useMemo(() => validateSettingsDraft(draft), [draft]);
+  const validationByField = useMemo(
+    () => new Map(validationIssues.map((issue) => [issue.field, issue.message])),
+    [validationIssues],
   );
+  const requiredModels = requiredModelsForSettings(draft);
+  const dirty = Boolean(settings && draft && JSON.stringify(settings) !== JSON.stringify(draft));
+
+  function updateDraft(updater: (next: RepositorySettings) => void) {
+    setDraft((current) => {
+      if (!current) {
+        return current;
+      }
+      const next = cloneSettings(current);
+      if (!next) {
+        return current;
+      }
+      updater(next);
+      return next;
+    });
+  }
+
+  async function handleSave() {
+    if (!draft) {
+      setSaveMessage("Settings unavailable");
+      return;
+    }
+    if (validationIssues.length > 0) {
+      setSaveMessage("Fix validation errors before saving");
+      return;
+    }
+    setSaveBusy(true);
+    setSaveMessage("Saving settings...");
+    try {
+      const saved = await onSave(draft);
+      setDraft(cloneSettings(saved));
+      setSaveMessage("Settings saved");
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : "Settings save failed");
+    } finally {
+      setSaveBusy(false);
+    }
+  }
+
+  function cancelEdits() {
+    setDraft(cloneSettings(settings));
+    setSaveMessage("Edits discarded");
+  }
+
+  function updatePromptEntry(
+    promptId: string,
+    field: "name" | "text",
+    value: string,
+  ) {
+    updateDraft((next) => {
+      next.prompt.library = next.prompt.library.map((prompt) =>
+        prompt.id === promptId ? { ...prompt, [field]: value } : prompt,
+      );
+    });
+  }
+
+  function addPromptEntry() {
+    updateDraft((next) => {
+      const promptId = `chat-prompt-${Date.now()}`;
+      next.prompt.library = [
+        ...next.prompt.library,
+        {
+          id: promptId,
+          name: "New chat prompt",
+          text: "Answer from repository context and cite supporting evidence.",
+        },
+      ];
+      next.prompt.active_chat_prompt_id = promptId;
+    });
+  }
+
+  function removePromptEntry(promptId: string) {
+    updateDraft((next) => {
+      if (next.prompt.library.length <= 1) {
+        return;
+      }
+      next.prompt.library = next.prompt.library.filter((prompt) => prompt.id !== promptId);
+      if (next.prompt.active_chat_prompt_id === promptId) {
+        next.prompt.active_chat_prompt_id = next.prompt.library[0]?.id ?? "";
+      }
+    });
+  }
+
+  if (!draft) {
+    return (
+      <div className="empty">
+        <h3>Settings unavailable</h3>
+        <p>Repository settings will appear here when the backend is available.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="settings-layout">
@@ -2290,11 +2412,35 @@ function SettingsModels({
             <div className="eyebrow">Repository settings</div>
             <h2>{repository?.name ?? "Default Repository"}</h2>
           </div>
-          <span className="badge">
+          <span className={`badge ${validationIssues.length > 0 ? "badge-danger" : dirty ? "badge-warn" : "badge-ok"}`}>
             <span className="dot" />
-            Read only
+            {validationIssues.length > 0 ? "Needs fixes" : dirty ? "Unsaved edits" : "Saved"}
           </span>
         </div>
+        <div className="row row-between settings-save-row">
+          <span className="muted">{saveMessage}</span>
+          <div className="row">
+            <button className="btn btn-ghost" type="button" onClick={cancelEdits} disabled={!dirty || saveBusy}>
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={() => void handleSave()}
+              disabled={!dirty || saveBusy || validationIssues.length > 0}
+            >
+              {saveBusy ? "Saving..." : "Save settings"}
+            </button>
+          </div>
+        </div>
+        {validationIssues.length > 0 && (
+          <div className="banner banner-warn settings-validation">
+            <div>
+              <strong>Validation</strong>
+              <span>{validationIssues.map((issue) => issue.message).join(" ")}</span>
+            </div>
+          </div>
+        )}
         <div className="settings-actions">
           <button className="btn btn-sm" type="button" onClick={() => onNavigate("documents")}>
             Document Manager
@@ -2315,58 +2461,225 @@ function SettingsModels({
       </section>
 
       <div className="settings-grid">
-        <SettingsSection
-          title="Chunking and parser"
-          rows={[
-            ["chunking mode", settings?.chunking.mode ?? "unavailable"],
-            ["chunk size", String(settings?.chunking.chunk_size ?? "unavailable")],
-            ["chunk overlap", String(settings?.chunking.chunk_overlap ?? "unavailable")],
-            ["structured parser", settings?.parser.structured_parser ?? "unavailable"],
-            ["fallback parser", settings?.parser.fallback_parser ?? "unavailable"],
-          ]}
-        />
-        <SettingsSection
-          title="Full-text"
-          rows={[
-            ["tokenizer", settings?.full_text.tokenizer ?? "unavailable"],
-            ["prefix index", formatBoolean(settings?.full_text.prefix_index)],
-            ["porter stemming", formatBoolean(settings?.full_text.porter_stemming)],
-          ]}
-        />
-        <SettingsSection
-          title="Vector and embedding"
-          rows={[
-            ["provider", settings?.embedding.provider ?? "unavailable"],
-            ["embedding model", settings?.embedding.model ?? "unavailable"],
-            ["collection", settings?.vector.collection_name ?? "unavailable"],
-            ["vector size", String(settings?.vector.vector_size ?? "unavailable")],
-            ["distance", settings?.vector.distance ?? "unavailable"],
-          ]}
-        />
-        <SettingsSection
-          title="Reranking"
-          rows={[
-            ["strategy", settings?.reranking.strategy ?? "unavailable"],
-            ["model", settings?.reranking.model ?? "none"],
-          ]}
-        />
-        <SettingsSection
-          title="Chat defaults"
-          rows={[
-            ["chat model", settings?.model.ollama_chat_model ?? "unavailable"],
-            ["active prompt", activePrompt?.name ?? settings?.prompt.active_chat_prompt_id ?? "unavailable"],
-            ["prompt library", `${settings?.prompt.library.length ?? 0} entries`],
-          ]}
-        />
-        <SettingsSection
-          title="Export defaults"
-          rows={[
-            ["include sources", formatBoolean(settings?.export.include_sources)],
-            ["include indexes", formatBoolean(settings?.export.include_indexes)],
-            ["format", settings?.export.format ?? "unavailable"],
-          ]}
-        />
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Chunking and parser</h2>
+          <SettingSelect
+            id="settings-chunking-mode"
+            label="Chunking mode"
+            value={draft.chunking.mode}
+            options={["recursive", "semantic", "fixed"]}
+            onChange={(value) => updateDraft((next) => { next.chunking.mode = value; })}
+          />
+          <SettingNumber
+            id="settings-chunk-size"
+            label="Chunk size"
+            value={draft.chunking.chunk_size}
+            error={validationByField.get("chunking.chunk_size")}
+            onChange={(value) => updateDraft((next) => { next.chunking.chunk_size = value; })}
+          />
+          <SettingNumber
+            id="settings-chunk-overlap"
+            label="Chunk overlap"
+            value={draft.chunking.chunk_overlap}
+            error={validationByField.get("chunking.chunk_overlap")}
+            onChange={(value) => updateDraft((next) => { next.chunking.chunk_overlap = value; })}
+          />
+          <SettingText
+            id="settings-structured-parser"
+            label="Structured parser"
+            value={draft.parser.structured_parser}
+            error={validationByField.get("parser.structured_parser")}
+            onChange={(value) => updateDraft((next) => { next.parser.structured_parser = value; })}
+          />
+          <SettingText
+            id="settings-fallback-parser"
+            label="Fallback parser"
+            value={draft.parser.fallback_parser}
+            error={validationByField.get("parser.fallback_parser")}
+            onChange={(value) => updateDraft((next) => { next.parser.fallback_parser = value; })}
+          />
+        </section>
+
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Full-text</h2>
+          <SettingSelect
+            id="settings-tokenizer"
+            label="Tokenizer"
+            value={draft.full_text.tokenizer}
+            options={["unicode61", "porter"]}
+            onChange={(value) => updateDraft((next) => { next.full_text.tokenizer = value; })}
+          />
+          <SettingCheckbox
+            id="settings-prefix-index"
+            label="Prefix index"
+            checked={draft.full_text.prefix_index}
+            onChange={(value) => updateDraft((next) => { next.full_text.prefix_index = value; })}
+          />
+          <SettingCheckbox
+            id="settings-porter-stemming"
+            label="Porter stemming"
+            checked={draft.full_text.porter_stemming}
+            onChange={(value) => updateDraft((next) => { next.full_text.porter_stemming = value; })}
+          />
+        </section>
+
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Vector and embedding</h2>
+          <SettingSelect
+            id="settings-embedding-provider"
+            label="Embedding provider"
+            value={draft.embedding.provider}
+            options={["sentence_transformers", "ollama"]}
+            onChange={(value) => updateDraft((next) => { next.embedding.provider = value; })}
+          />
+          <SettingText
+            id="settings-embedding-model"
+            label="Embedding model"
+            value={draft.embedding.model}
+            error={validationByField.get("embedding.model")}
+            onChange={(value) => updateDraft((next) => { next.embedding.model = value; })}
+          />
+          <SettingText
+            id="settings-vector-collection"
+            label="Qdrant collection"
+            value={draft.vector.collection_name}
+            error={validationByField.get("vector.collection_name")}
+            onChange={(value) => updateDraft((next) => { next.vector.collection_name = value; })}
+          />
+          <SettingNumber
+            id="settings-vector-size"
+            label="Vector size"
+            value={draft.vector.vector_size}
+            error={validationByField.get("vector.vector_size")}
+            onChange={(value) => updateDraft((next) => { next.vector.vector_size = value; })}
+          />
+          <SettingSelect
+            id="settings-vector-distance"
+            label="Distance"
+            value={draft.vector.distance}
+            options={["cosine", "dot", "euclid"]}
+            error={validationByField.get("vector.distance")}
+            onChange={(value) => updateDraft((next) => { next.vector.distance = value; })}
+          />
+        </section>
+
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Reranking</h2>
+          <SettingSelect
+            id="settings-reranking-strategy"
+            label="Strategy"
+            value={draft.reranking.strategy}
+            options={["cross_encoder", "none"]}
+            onChange={(value) => updateDraft((next) => {
+              next.reranking.strategy = value;
+              if (value === "none") {
+                next.reranking.model = null;
+              }
+            })}
+          />
+          <SettingText
+            id="settings-reranking-model"
+            label="Reranker model"
+            value={draft.reranking.model ?? ""}
+            error={validationByField.get("reranking.model")}
+            disabled={draft.reranking.strategy === "none"}
+            onChange={(value) => updateDraft((next) => { next.reranking.model = value; })}
+          />
+        </section>
+
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Chat defaults</h2>
+          <SettingText
+            id="settings-chat-model"
+            label="Chat model"
+            value={draft.model.ollama_chat_model}
+            error={validationByField.get("model.ollama_chat_model")}
+            onChange={(value) => updateDraft((next) => { next.model.ollama_chat_model = value; })}
+          />
+          <SettingSelect
+            id="settings-active-prompt"
+            label="Active chat prompt"
+            value={draft.prompt.active_chat_prompt_id}
+            options={draft.prompt.library.map((prompt) => prompt.id)}
+            labels={Object.fromEntries(draft.prompt.library.map((prompt) => [prompt.id, prompt.name]))}
+            error={validationByField.get("prompt.active_chat_prompt_id")}
+            onChange={(value) => updateDraft((next) => { next.prompt.active_chat_prompt_id = value; })}
+          />
+          <span className="muted">{draft.prompt.library.length} prompt library entries</span>
+        </section>
+
+        <section className="card settings-section">
+          <div className="eyebrow">Defaults</div>
+          <h2>Export defaults</h2>
+          <SettingCheckbox
+            id="settings-export-sources"
+            label="Include sources"
+            checked={draft.export.include_sources}
+            onChange={(value) => updateDraft((next) => { next.export.include_sources = value; })}
+          />
+          <SettingCheckbox
+            id="settings-export-indexes"
+            label="Include indexes"
+            checked={draft.export.include_indexes}
+            onChange={(value) => updateDraft((next) => { next.export.include_indexes = value; })}
+          />
+          <SettingSelect
+            id="settings-export-format"
+            label="Format"
+            value={draft.export.format}
+            options={["json"]}
+            onChange={(value) => updateDraft((next) => { next.export.format = value; })}
+          />
+        </section>
       </div>
+
+      <section className="card settings-prompts">
+        <div className="row row-between">
+          <div>
+            <div className="eyebrow">Chat prompt library</div>
+            <h2>Normal chat prompts</h2>
+          </div>
+          <button className="btn btn-sm" type="button" onClick={addPromptEntry}>
+            Add prompt
+          </button>
+        </div>
+        <div className="settings-prompt-list">
+          {draft.prompt.library.map((prompt, index) => (
+            <div className="settings-prompt-row" key={prompt.id}>
+              <div className="row row-between">
+                <strong>Prompt {index + 1}</strong>
+                <button
+                  className="btn btn-sm btn-ghost danger-action"
+                  type="button"
+                  onClick={() => removePromptEntry(prompt.id)}
+                  disabled={draft.prompt.library.length <= 1}
+                >
+                  Remove
+                </button>
+              </div>
+              <SettingText
+                id={`settings-prompt-name-${prompt.id}`}
+                label="Name"
+                value={prompt.name}
+                error={validationByField.get(`prompt.library.${prompt.id}.name`)}
+                onChange={(value) => updatePromptEntry(prompt.id, "name", value)}
+              />
+              <SettingTextarea
+                id={`settings-prompt-text-${prompt.id}`}
+                label="Prompt text"
+                value={prompt.text}
+                error={validationByField.get(`prompt.library.${prompt.id}.text`)}
+                onChange={(value) => updatePromptEntry(prompt.id, "text", value)}
+              />
+            </div>
+          ))}
+        </div>
+      </section>
 
       <section className="card settings-models">
         <div className="row row-between">
@@ -2380,10 +2693,10 @@ function SettingsModels({
           </span>
         </div>
         <div className="settings-readiness-grid">
-          <ReadinessPlaceholder label="Qdrant" value={settings?.vector.collection_name ?? "vector store"} />
-          <ReadinessPlaceholder label="Chat" value={settings?.model.ollama_chat_model ?? "chat model"} />
-          <ReadinessPlaceholder label="Embedding" value={settings?.embedding.model ?? "embedding model"} />
-          <ReadinessPlaceholder label="Reranker" value={settings?.reranking.model ?? settings?.reranking.strategy ?? "reranker"} />
+          <ReadinessPlaceholder label="Qdrant" value={draft.vector.collection_name} />
+          <ReadinessPlaceholder label="Chat" value={draft.model.ollama_chat_model} />
+          <ReadinessPlaceholder label="Embedding" value={draft.embedding.model} />
+          <ReadinessPlaceholder label="Reranker" value={draft.reranking.model ?? draft.reranking.strategy} />
         </div>
         <div className="export-chip-list settings-chip-list">
           {requiredModels.length > 0 ? (
@@ -2402,20 +2715,127 @@ function SettingsModels({
   );
 }
 
-function SettingsSection({ title, rows }: { title: string; rows: Array<[string, string]> }) {
+function SettingText({
+  id,
+  label,
+  value,
+  error,
+  disabled = false,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  error?: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
   return (
-    <section className="card settings-section">
-      <div className="eyebrow">Defaults</div>
-      <h2>{title}</h2>
-      <dl className="kv settings-kv">
-        {rows.map(([label, value]) => (
-          <React.Fragment key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </React.Fragment>
+    <label className="settings-field" htmlFor={id}>
+      <span>{label}</span>
+      <input id={id} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+      {error && <small className="settings-field-error">{error}</small>}
+    </label>
+  );
+}
+
+function SettingTextarea({
+  id,
+  label,
+  value,
+  error,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  error?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="settings-field" htmlFor={id}>
+      <span>{label}</span>
+      <textarea id={id} rows={4} value={value} onChange={(event) => onChange(event.target.value)} />
+      {error && <small className="settings-field-error">{error}</small>}
+    </label>
+  );
+}
+
+function SettingNumber({
+  id,
+  label,
+  value,
+  error,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: number;
+  error?: string;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="settings-field" htmlFor={id}>
+      <span>{label}</span>
+      <input
+        id={id}
+        type="number"
+        value={Number.isFinite(value) ? value : 0}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+      {error && <small className="settings-field-error">{error}</small>}
+    </label>
+  );
+}
+
+function SettingSelect({
+  id,
+  label,
+  value,
+  options,
+  labels = {},
+  error,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  options: string[];
+  labels?: Record<string, string>;
+  error?: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="settings-field" htmlFor={id}>
+      <span>{label}</span>
+      <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map((option) => (
+          <option value={option} key={option}>
+            {labels[option] ?? option}
+          </option>
         ))}
-      </dl>
-    </section>
+      </select>
+      {error && <small className="settings-field-error">{error}</small>}
+    </label>
+  );
+}
+
+function SettingCheckbox({
+  id,
+  label,
+  checked,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label className="settings-checkbox" htmlFor={id}>
+      <input id={id} type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>{label}</span>
+    </label>
   );
 }
 
@@ -4457,11 +4877,89 @@ function settingsSummaryRows(settings: RepositorySettings | null) {
   ];
 }
 
+function cloneSettings(settings: RepositorySettings | null) {
+  return settings ? (JSON.parse(JSON.stringify(settings)) as RepositorySettings) : null;
+}
+
+type SettingsValidationIssue = {
+  field: string;
+  message: string;
+};
+
+function validateSettingsDraft(settings: RepositorySettings | null): SettingsValidationIssue[] {
+  if (!settings) {
+    return [{ field: "settings", message: "Settings are unavailable." }];
+  }
+  const issues: SettingsValidationIssue[] = [];
+  if (settings.chunking.chunk_size < 100 || settings.chunking.chunk_size > 8000) {
+    issues.push({ field: "chunking.chunk_size", message: "Chunk size must be between 100 and 8000." });
+  }
+  if (settings.chunking.chunk_overlap < 0) {
+    issues.push({ field: "chunking.chunk_overlap", message: "Chunk overlap cannot be negative." });
+  }
+  if (settings.chunking.chunk_overlap >= settings.chunking.chunk_size) {
+    issues.push({ field: "chunking.chunk_overlap", message: "Chunk overlap must be smaller than chunk size." });
+  }
+  if (!settings.parser.structured_parser.trim()) {
+    issues.push({ field: "parser.structured_parser", message: "Structured parser is required." });
+  }
+  if (!settings.parser.fallback_parser.trim()) {
+    issues.push({ field: "parser.fallback_parser", message: "Fallback parser is required." });
+  }
+  if (!settings.embedding.model.trim()) {
+    issues.push({ field: "embedding.model", message: "Embedding model is required." });
+  }
+  if (!settings.vector.collection_name.trim()) {
+    issues.push({ field: "vector.collection_name", message: "Qdrant collection is required." });
+  }
+  if (settings.vector.vector_size < 1) {
+    issues.push({ field: "vector.vector_size", message: "Vector size must be at least 1." });
+  }
+  if (settings.embedding.provider === "ollama" && settings.vector.distance === "dot") {
+    issues.push({ field: "vector.distance", message: "Ollama embeddings currently require cosine distance." });
+  }
+  if (settings.reranking.strategy === "cross_encoder" && !settings.reranking.model?.trim()) {
+    issues.push({ field: "reranking.model", message: "Cross-encoder reranking requires a model." });
+  }
+  if (!settings.model.ollama_chat_model.trim()) {
+    issues.push({ field: "model.ollama_chat_model", message: "Chat model is required." });
+  }
+  if (!settings.prompt.library.some((prompt) => prompt.id === settings.prompt.active_chat_prompt_id)) {
+    issues.push({ field: "prompt.active_chat_prompt_id", message: "Active chat prompt must exist in the prompt library." });
+  }
+  for (const prompt of settings.prompt.library) {
+    if (!prompt.name.trim()) {
+      issues.push({ field: `prompt.library.${prompt.id}.name`, message: "Prompt names are required." });
+    }
+    if (!prompt.text.trim()) {
+      issues.push({ field: `prompt.library.${prompt.id}.text`, message: "Prompt text is required." });
+    }
+  }
+  return issues;
+}
+
 function formatBoolean(value: boolean | undefined) {
   if (value === undefined) {
     return "unavailable";
   }
   return value ? "enabled" : "disabled";
+}
+
+async function settingsSaveErrorMessage(response: Response) {
+  try {
+    const payload = await response.json();
+    if (Array.isArray(payload.detail)) {
+      return payload.detail
+        .map((detail: { msg?: string; loc?: string[] }) => detail.msg ?? detail.loc?.join(".") ?? "Invalid settings")
+        .join(" ");
+    }
+    if (typeof payload.detail === "string") {
+      return payload.detail;
+    }
+  } catch {
+    // Fall through to a generic message when the backend response is not JSON.
+  }
+  return "Settings save failed";
 }
 
 function buildExportManifestSummary({

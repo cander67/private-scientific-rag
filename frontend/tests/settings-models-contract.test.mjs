@@ -23,8 +23,8 @@ test("Settings / Models shows repository-scoped grouped defaults", () => {
   assert.match(source, /Reranking/);
   assert.match(source, /Chat defaults/);
   assert.match(source, /Export defaults/);
-  assert.match(source, /settings\?\.chunking\.chunk_size/);
-  assert.match(source, /settings\?\.export\.include_sources/);
+  assert.match(source, /draft\.chunking\.chunk_size/);
+  assert.match(source, /draft\.export\.include_sources/);
 });
 
 test("Settings / Models exposes required models and readiness placeholders", () => {
@@ -34,8 +34,32 @@ test("Settings / Models exposes required models and readiness placeholders", () 
   assert.match(source, /Qdrant/);
   assert.match(source, /Embedding/);
   assert.match(source, /Reranker/);
-  assert.match(source, /requiredModelsForSettings\(settings\)/);
+  assert.match(source, /requiredModelsForSettings\(draft\)/);
   assert.match(source, /Not checked/);
+});
+
+test("Settings / Models supports edit, save, cancel, and field validation", () => {
+  assert.match(source, /function saveRepositorySettings/);
+  assert.match(source, /method: "PUT"/);
+  assert.match(source, /JSON\.stringify\(\{ settings: nextSettings \}\)/);
+  assert.match(source, /Save settings/);
+  assert.match(source, /Cancel/);
+  assert.match(source, /validateSettingsDraft/);
+  assert.match(source, /Chunk overlap must be smaller than chunk size/);
+  assert.match(source, /Ollama embeddings currently require cosine distance/);
+  assert.match(source, /Cross-encoder reranking requires a model/);
+  assert.match(styles, /\.settings-field-error/);
+});
+
+test("Settings / Models manages normal chat prompt library entries", () => {
+  assert.match(source, /Chat prompt library/);
+  assert.match(source, /Add prompt/);
+  assert.match(source, /removePromptEntry/);
+  assert.match(source, /active_chat_prompt_id/);
+  assert.match(source, /Prompt names are required/);
+  assert.match(source, /Prompt text is required/);
+  assert.match(styles, /\.settings-prompts/);
+  assert.match(styles, /\.settings-prompt-list/);
 });
 
 test("Settings / Models links back to workflow-owned pages", () => {

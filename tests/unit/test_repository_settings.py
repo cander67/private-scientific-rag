@@ -36,6 +36,34 @@ def test_repository_settings_reject_chunk_overlap_larger_than_chunk_size() -> No
         RepositorySettings.model_validate(payload)
 
 
+def test_repository_settings_reject_cross_encoder_without_model() -> None:
+    app_settings = Settings()
+    payload = RepositorySettings.from_app_settings(app_settings).model_dump(mode="json")
+    payload["reranking"] = {"strategy": "cross_encoder", "model": None}
+
+    with pytest.raises(ValidationError, match="reranking.model is required"):
+        RepositorySettings.model_validate(payload)
+
+
+def test_repository_settings_reject_ollama_dot_distance() -> None:
+    app_settings = Settings()
+    payload = RepositorySettings.from_app_settings(app_settings).model_dump(mode="json")
+    payload["embedding"]["provider"] = "ollama"
+    payload["vector"]["distance"] = "dot"
+
+    with pytest.raises(ValidationError, match="Ollama embeddings currently require cosine"):
+        RepositorySettings.model_validate(payload)
+
+
+def test_repository_settings_reject_invalid_active_prompt() -> None:
+    app_settings = Settings()
+    payload = RepositorySettings.from_app_settings(app_settings).model_dump(mode="json")
+    payload["prompt"]["active_chat_prompt_id"] = "missing-prompt"
+
+    with pytest.raises(ValidationError, match="active_chat_prompt_id"):
+        RepositorySettings.model_validate(payload)
+
+
 def test_recreate_validation_reports_missing_files_and_models(tmp_path: Path) -> None:
     existing_source = tmp_path / "paper.pdf"
     existing_source.write_text("source", encoding="utf-8")

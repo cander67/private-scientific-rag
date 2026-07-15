@@ -82,6 +82,13 @@ def update_repository_settings(
     else:
         repository.settings.settings = settings.model_dump(mode="json")
     session.add(repository)
+    session.flush()
+    session.add(
+        RepositorySnapshot(
+            repository_id=repository_id,
+            manifest=_manifest_for_repository(repository, settings),
+        )
+    )
     session.commit()
     session.refresh(repository)
     return _with_settings(repository)
@@ -103,6 +110,23 @@ def export_manifest(session: Session, repository_id: str) -> RepositoryManifest 
     session.add(snapshot)
     session.commit()
     return manifest
+
+
+def _manifest_for_repository(
+    repository: Repository,
+    settings: RepositorySettings,
+) -> dict[str, object]:
+    return RepositoryManifest(
+        repository=RepositoryRead(
+            id=repository.id,
+            name=repository.name,
+            root_path=repository.root_path,
+            created_at=repository.created_at,
+            updated_at=repository.updated_at,
+        ),
+        settings=settings,
+        source_files=[],
+    ).model_dump(mode="json")
 
 
 def validate_recreate_request(request: RecreateValidationRequest) -> RecreateValidationResponse:
