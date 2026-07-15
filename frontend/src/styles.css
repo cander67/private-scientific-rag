@@ -841,6 +841,12 @@ textarea {
   gap: var(--s3);
 }
 
+.dashboard-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: var(--s3);
+}
+
 .dashboard-metric {
   min-height: 96px;
   display: flex;
@@ -873,6 +879,55 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: var(--s2);
+}
+
+.dashboard-index-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  border-left: 4px solid var(--border-strong);
+}
+
+.dashboard-index-ready {
+  border-left-color: var(--ok);
+}
+
+.dashboard-index-partial {
+  border-left-color: var(--warn);
+}
+
+.dashboard-index-stale,
+.dashboard-index-missing {
+  border-left-color: var(--danger);
+}
+
+.dashboard-readiness-grid {
+  margin-top: 0;
+}
+
+.dashboard-config {
+  margin: 0;
+}
+
+.dashboard-config dd {
+  overflow-wrap: anywhere;
+}
+
+.dashboard-warning-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.dashboard-warning {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: var(--s3);
+}
+
+.dashboard-warning p {
+  margin: 0 0 var(--s3);
 }
 
 .settings-layout {
@@ -1991,7 +2046,8 @@ textarea {
   }
 
   .export-metrics,
-  .dashboard-grid {
+  .dashboard-grid,
+  .dashboard-status-grid {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
 
@@ -2070,6 +2126,7 @@ textarea {
   .sandbox-run-grid,
   .export-grid,
   .dashboard-grid,
+  .dashboard-status-grid,
   .settings-grid,
   .settings-readiness-grid,
   .settings-prompt-list,

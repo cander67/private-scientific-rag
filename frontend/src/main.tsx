@@ -112,6 +112,47 @@ type SettingsReadinessResponse = {
   items: SettingsReadinessItem[];
 };
 
+type DashboardIndexStatus = "ready" | "missing" | "partial" | "stale";
+
+type DashboardIndexSummary = {
+  ready: boolean;
+  status: DashboardIndexStatus;
+  message: string;
+  indexed_chunks: number;
+  parsed_chunks: number;
+  model: string | null;
+};
+
+type DashboardSummary = {
+  repository: RepositoryRead;
+  counts: {
+    documents: number;
+    parsed_documents: number;
+    chunks: number;
+    chat_sessions: number;
+    chat_messages: number;
+    retrieval_runs: number;
+    sandbox_runs: number;
+    sandbox_comparisons: number;
+    exports: number;
+    recreate_events: number;
+  };
+  full_text: DashboardIndexSummary;
+  vector: DashboardIndexSummary;
+  settings_readiness: SettingsReadinessResponse;
+  active_config: {
+    chunking: RepositorySettings["chunking"];
+    full_text: RepositorySettings["full_text"];
+    vector: RepositorySettings["vector"];
+    embedding: RepositorySettings["embedding"];
+    reranking: RepositorySettings["reranking"];
+    chat_model: string;
+    active_chat_prompt_id: string;
+    active_chat_prompt_name: string;
+  };
+  warnings: string[];
+};
+
 type ExportManifestSummary = {
   generated_at: string;
   repository: {
@@ -649,6 +690,8 @@ function App() {
   const [exportDownloadUrl, setExportDownloadUrl] = useState<string | null>(null);
   const [exportFilename, setExportFilename] = useState<string | null>(null);
   const [exportSummary, setExportSummary] = useState<ExportManifestSummary | null>(null);
+  const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
+  const [dashboardMessage, setDashboardMessage] = useState("Loading repository summary");
   const [recreateFile, setRecreateFile] = useState<File | null>(null);
   const [recreateRepositoryName, setRecreateRepositoryName] = useState("");
   const [recreateTargetRepositoryId, setRecreateTargetRepositoryId] = useState("");
@@ -681,6 +724,7 @@ function App() {
     if (repository) {
       void loadDocuments(repository.id);
       void loadRepositorySettings(repository.id);
+      void loadDashboardSummary(repository.id);
       void loadChatSessions(repository.id);
       void loadChatReadiness(repository.id);
       void loadSandboxPrompts(repository.id);
@@ -819,6 +863,8 @@ function App() {
     setSearchDocumentId("");
     setSearchResults([]);
     setLastRebuild(null);
+    setDashboardSummary(null);
+    setDashboardMessage("Loading repository summary");
     setChatSessions([]);
     setActiveChatSessionId(null);
     setActiveCitation(null);
@@ -862,6 +908,20 @@ function App() {
     }
   }
 
+  async function loadDashboardSummary(repositoryId: string) {
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repositoryId}/summary`);
+      if (!response.ok) {
+        throw new Error("summary unavailable");
+      }
+      setDashboardSummary((await response.json()) as DashboardSummary);
+      setDashboardMessage("Repository summary loaded");
+    } catch {
+      setDashboardSummary(null);
+      setDashboardMessage("Could not load repository summary");
+    }
+  }
+
   async function saveRepositorySettings(nextSettings: RepositorySettings) {
     if (!repository) {
       throw new Error("No active repository");
@@ -877,6 +937,7 @@ function App() {
     const payload = (await response.json()) as RepositorySettingsResponse;
     setRepositorySettings(payload.settings);
     setExportIncludeSources(payload.settings.export.include_sources);
+    void loadDashboardSummary(repository.id);
     return payload.settings;
   }
 
@@ -1025,6 +1086,7 @@ function App() {
       const prompt = (await response.json()) as SandboxPromptVersion;
       setSandboxPrompts((current) => [...current, prompt]);
       setSelectedSandboxPromptId(prompt.id);
+      void loadDashboardSummary(repository.id);
       setSandboxMessage("Prompt version saved");
       return prompt;
     } catch {
@@ -1064,6 +1126,7 @@ function App() {
         }
         return remaining;
       });
+      void loadDashboardSummary(repository.id);
       setSandboxMessage("Prompt version deleted");
     } catch {
       setSandboxMessage("Could not delete prompt version");
@@ -1126,6 +1189,7 @@ function App() {
           ? `Comparison finished with ${failedCount} failed run${failedCount === 1 ? "" : "s"}`
           : `Comparison complete · ${successfulRuns.length} runs`,
       );
+      void loadDashboardSummary(repository.id);
     } catch {
       setSandboxProgressRuns((current) =>
         current.map((run) =>
@@ -1224,6 +1288,7 @@ function App() {
       const payload = (await response.json()) as ChatSession;
       setChatSessions((current) => [payload, ...current]);
       setActiveChatSessionId(payload.id);
+      void loadDashboardSummary(repository.id);
       setChatMessage("Ready");
       return payload;
     } catch {
@@ -1267,6 +1332,7 @@ function App() {
       setActiveChatSessionId(payload.session.id);
       setChatRetrievalSettings(payload.session.retrieval_settings);
       void loadChatReadiness(repository.id);
+      void loadDashboardSummary(repository.id);
       setChatMessage(
         `${payload.assistant_message.citations.length} citations · run ${
           payload.assistant_message.retrieval_run_id?.slice(0, 8) ?? "local"
@@ -1296,6 +1362,7 @@ function App() {
       setActiveChatSessionId((current) =>
         current === chatSessionId ? chatSessions.find((session) => session.id !== chatSessionId)?.id ?? null : current,
       );
+      void loadDashboardSummary(repository.id);
       setChatMessage("Chat session deleted");
     } catch {
       setChatMessage("Could not delete chat session");
@@ -1321,6 +1388,7 @@ function App() {
       setChatSessions([]);
       setActiveChatSessionId(null);
       setActiveCitation(null);
+      void loadDashboardSummary(repository.id);
       setChatMessage("All chat sessions cleared");
     } catch {
       setChatMessage("Could not clear chat sessions");
@@ -1344,6 +1412,7 @@ function App() {
       const payload = (await response.json()) as SearchRebuildResponse;
       setChatMessage(`Indexed ${payload.indexed_chunks} ${kind} chunks`);
       await loadChatReadiness(repository.id);
+      await loadDashboardSummary(repository.id);
     } catch {
       setChatMessage(`${kind} rebuild failed`);
     } finally {
@@ -1372,6 +1441,7 @@ function App() {
         setSelectedDocumentId(payload.document.id);
       }
       await loadDocuments(repository.id);
+      await loadDashboardSummary(repository.id);
       setMessage("Upload complete");
     } catch {
       setMessage("Upload failed");
@@ -1393,6 +1463,7 @@ function App() {
       );
       setInspection((await response.json()) as Inspection);
       await loadDocuments(repository.id);
+      await loadDashboardSummary(repository.id);
       setMessage("Reprocess complete");
     } catch {
       setMessage("Reprocess failed");
@@ -1432,6 +1503,7 @@ function App() {
       }
       await loadDocuments(repository.id);
       await loadChatReadiness(repository.id);
+      await loadDashboardSummary(repository.id);
       setMessage("Deleted");
     } catch {
       setMessage("Delete failed");
@@ -1462,6 +1534,7 @@ function App() {
       setSelectedChunkId(null);
       await loadDocuments(repository.id);
       await loadChatReadiness(repository.id);
+      await loadDashboardSummary(repository.id);
       setMessage("All documents deleted");
     } catch {
       setMessage("Delete all failed");
@@ -1507,6 +1580,7 @@ function App() {
         setLastRebuild(payload);
         setSearchMessage(`Indexed ${payload.indexed_chunks} chunks`);
       }
+      await loadDashboardSummary(repository.id);
     } catch {
       setSearchMessage(`${searchModeLabel(searchMode)} rebuild failed`);
     } finally {
@@ -1553,6 +1627,7 @@ function App() {
       }
       const payload = (await response.json()) as RetrievalSearchResponse;
       setSearchResults(payload.results.map((result) => ({ ...result, mode: searchMode })));
+      void loadDashboardSummary(repository.id);
       setSearchMessage(`${payload.results.length} results · run ${payload.run_id.slice(0, 8)}`);
     } catch {
       setSearchMessage(`${searchModeLabel(searchMode)} search failed. Rebuild the index and try again.`);
@@ -1603,6 +1678,7 @@ function App() {
           includeSandbox: exportIncludeSandbox,
         }),
       );
+      void loadDashboardSummary(repository.id);
       setExportMessage(`Export ready · ${formatBytes(blob.size)}`);
     } catch {
       setExportDownloadUrl(null);
@@ -1914,6 +1990,8 @@ function App() {
                 totalChunks={totalChunks}
                 chatSessions={chatSessions}
                 settings={repositorySettings}
+                summary={dashboardSummary}
+                message={dashboardMessage}
                 onNavigate={navigateTo}
               />
             ) : activeView === "search" ? (
@@ -2405,6 +2483,8 @@ function RepositoryDashboard({
   totalChunks,
   chatSessions,
   settings,
+  summary,
+  message,
   onNavigate,
 }: {
   repository: RepositoryResponse["repository"] | null;
@@ -2412,12 +2492,16 @@ function RepositoryDashboard({
   totalChunks: number;
   chatSessions: ChatSession[];
   settings: RepositorySettings | null;
+  summary: DashboardSummary | null;
+  message: string;
   onNavigate: (view: View) => void;
 }) {
-  const parsedDocuments = documents.filter((document) => document.current_version?.status === "parsed").length;
-  const activePrompt = settings?.prompt.library.find(
-    (prompt) => prompt.id === settings.prompt.active_chat_prompt_id,
-  );
+  const fallbackParsedDocuments = documents.filter((document) => document.current_version?.status === "parsed").length;
+  const counts = summary?.counts;
+  const activeConfig = summary?.active_config;
+  const activePrompt = settings?.prompt.library.find((prompt) => prompt.id === settings.prompt.active_chat_prompt_id);
+  const configRows = dashboardConfigRows(summary, settings);
+  const warnings = summary?.warnings ?? [];
 
   return (
     <div className="dashboard-layout">
@@ -2432,6 +2516,7 @@ function RepositoryDashboard({
             {repository ? "Active repository" : "No repository selected"}
           </span>
         </div>
+        <p className="hint">{message}</p>
         <dl className="kv dashboard-kv">
           <dt>repository id</dt>
           <dd>{repository?.id ?? "unavailable"}</dd>
@@ -2445,38 +2530,140 @@ function RepositoryDashboard({
       </section>
 
       <div className="dashboard-grid">
-        <DashboardMetric label="Documents" value={documents.length} detail={`${parsedDocuments} parsed`} />
-        <DashboardMetric label="Chunks" value={totalChunks} detail="parsed repository context" />
-        <DashboardMetric label="Chat sessions" value={chatSessions.length} detail="saved normal chats" />
+        <DashboardMetric
+          label="Documents"
+          value={counts?.documents ?? documents.length}
+          detail={`${counts?.parsed_documents ?? fallbackParsedDocuments} parsed`}
+        />
+        <DashboardMetric
+          label="Chunks"
+          value={counts?.chunks ?? totalChunks}
+          detail="parsed repository context"
+        />
+        <DashboardMetric
+          label="Chat"
+          value={counts?.chat_sessions ?? chatSessions.length}
+          detail={`${counts?.chat_messages ?? 0} messages`}
+        />
+        <DashboardMetric
+          label="Retrieval"
+          value={counts?.retrieval_runs ?? 0}
+          detail="saved search runs"
+        />
+        <DashboardMetric
+          label="Sandbox"
+          value={counts?.sandbox_runs ?? 0}
+          detail={`${counts?.sandbox_comparisons ?? 0} comparisons`}
+        />
+        <DashboardMetric label="Exports" value={counts?.exports ?? 0} detail="portable bundles" />
+        <DashboardMetric label="Recreate" value={counts?.recreate_events ?? 0} detail="restore events" />
         <DashboardMetric
           label="Chat default"
-          value={settings?.model.ollama_chat_model ?? "unavailable"}
-          detail={activePrompt?.name ?? "active prompt"}
+          value={activeConfig?.chat_model ?? settings?.model.ollama_chat_model ?? "unavailable"}
+          detail={activeConfig?.active_chat_prompt_name ?? activePrompt?.name ?? "active prompt"}
         />
       </div>
 
-      <section className="card dashboard-status">
+      <div className="dashboard-status-grid">
+        <DashboardIndexCard label="Full-text" item={summary?.full_text ?? null} onNavigate={onNavigate} />
+        <DashboardIndexCard label="Vector" item={summary?.vector ?? null} onNavigate={onNavigate} />
+      </div>
+
+      <section className="card dashboard-status" aria-label="Model and service readiness">
         <div>
-          <div className="eyebrow">Status shell</div>
-          <h2>Summary API coming next</h2>
-          <p>
-            This dashboard route is live. Detailed index, readiness, warning, and activity summaries arrive in
-            the next PRD20 phases.
-          </p>
+          <div className="eyebrow">Runtime readiness</div>
+          <h2>Models and local services</h2>
         </div>
-        <div className="dashboard-actions">
-          <button className="btn btn-sm" type="button" onClick={() => onNavigate("documents")}>
-            Document Manager
-          </button>
-          <button className="btn btn-sm" type="button" onClick={() => onNavigate("search")}>
-            Search Lab
-          </button>
-          <button className="btn btn-sm" type="button" onClick={() => onNavigate("settings")}>
-            Settings / Models
-          </button>
+        <div className="settings-readiness-grid dashboard-readiness-grid">
+          {dashboardReadinessItems(summary, settings).map((item) => (
+            <ReadinessCard item={item} onNavigate={onNavigate} key={item.target} />
+          ))}
         </div>
       </section>
+
+      <section className="card dashboard-status" aria-label="Active configuration">
+        <div>
+          <div className="eyebrow">Active configuration</div>
+          <h2>Saved defaults</h2>
+        </div>
+        <dl className="kv dashboard-config">
+          {configRows.map((row) => (
+            <React.Fragment key={row.label}>
+              <dt>{row.label}</dt>
+              <dd>{row.value}</dd>
+            </React.Fragment>
+          ))}
+        </dl>
+      </section>
+
+      <section className="card dashboard-status" aria-label="Dashboard warnings">
+        <div>
+          <div className="eyebrow">Warnings</div>
+          <h2>{warnings.length > 0 ? `${warnings.length} items need attention` : "No blocking warnings"}</h2>
+        </div>
+        {warnings.length > 0 ? (
+          <div className="dashboard-warning-list">
+            {warnings.map((warning, index) => (
+              <article className="dashboard-warning" key={`${warning}-${index}`}>
+                <p>{warning}</p>
+                <div className="dashboard-actions">
+                  {dashboardWarningLinks(warning).map((link) => (
+                    <button className="btn btn-sm" type="button" onClick={() => onNavigate(link.view)} key={link.view}>
+                      {link.label}
+                    </button>
+                  ))}
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="hint">Repository indexes and runtime checks have no dashboard warnings.</p>
+        )}
+      </section>
     </div>
+  );
+}
+
+function DashboardIndexCard({
+  label,
+  item,
+  onNavigate,
+}: {
+  label: string;
+  item: DashboardIndexSummary | null;
+  onNavigate: (view: View) => void;
+}) {
+  const status = item?.status ?? "missing";
+  return (
+    <section className={`card dashboard-index-card dashboard-index-${status}`} data-dashboard-status={status}>
+      <div className="row row-between">
+        <div>
+          <div className="eyebrow">{label} index</div>
+          <h2>{dashboardIndexStatusLabel(status)}</h2>
+        </div>
+        <span className={`badge ${item?.ready ? "badge-ok" : "badge-warn"}`}>
+          <span className="dot" />
+          {item?.ready ? "Ready" : "Needs attention"}
+        </span>
+      </div>
+      <p>{item?.message ?? "Dashboard summary has not loaded yet."}</p>
+      <dl className="kv dashboard-kv">
+        <dt>indexed chunks</dt>
+        <dd>{item?.indexed_chunks ?? 0}</dd>
+        <dt>parsed chunks</dt>
+        <dd>{item?.parsed_chunks ?? 0}</dd>
+        <dt>model</dt>
+        <dd>{item?.model ?? "not applicable"}</dd>
+      </dl>
+      <div className="dashboard-actions">
+        <button className="btn btn-sm" type="button" onClick={() => onNavigate("search")}>
+          Open Search Lab
+        </button>
+        <button className="btn btn-sm" type="button" onClick={() => onNavigate("chat")}>
+          Open Chat Workspace
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -5396,6 +5583,83 @@ function settingsReadinessItems(
   ];
 }
 
+function dashboardReadinessItems(
+  summary: DashboardSummary | null,
+  settings: RepositorySettings | null,
+): SettingsReadinessItem[] {
+  if (summary) {
+    return summary.settings_readiness.items;
+  }
+  if (settings) {
+    return settingsReadinessItems(null, settings);
+  }
+  return [
+    {
+      target: "qdrant",
+      label: "Qdrant",
+      status: "not_checked",
+      ready: false,
+      message: "Repository summary has not loaded yet.",
+      model: null,
+    },
+    {
+      target: "chat",
+      label: "Chat model",
+      status: "not_checked",
+      ready: false,
+      message: "Repository summary has not loaded yet.",
+      model: null,
+    },
+    {
+      target: "embedding",
+      label: "Embedding model",
+      status: "not_checked",
+      ready: false,
+      message: "Repository summary has not loaded yet.",
+      model: null,
+    },
+    {
+      target: "reranker",
+      label: "Reranker",
+      status: "not_checked",
+      ready: false,
+      message: "Repository summary has not loaded yet.",
+      model: null,
+    },
+  ];
+}
+
+function dashboardConfigRows(summary: DashboardSummary | null, settings: RepositorySettings | null) {
+  if (summary) {
+    const config = summary.active_config;
+    return [
+      { label: "chunking", value: `${config.chunking.mode} ${config.chunking.chunk_size}/${config.chunking.chunk_overlap}` },
+      { label: "embedding", value: `${config.embedding.provider} / ${config.embedding.model}` },
+      { label: "vector", value: `${config.vector.collection_name} · ${config.vector.vector_size} · ${config.vector.distance}` },
+      {
+        label: "reranking",
+        value: config.reranking.model
+          ? `${config.reranking.strategy} / ${config.reranking.model}`
+          : config.reranking.strategy,
+      },
+      { label: "full-text", value: `${config.full_text.tokenizer} · prefix ${formatBoolean(config.full_text.prefix_index)}` },
+      { label: "chat", value: config.chat_model },
+      { label: "active prompt", value: config.active_chat_prompt_name },
+    ];
+  }
+  return settingsSummaryRows(settings).filter((row) => row.label !== "parser");
+}
+
+function dashboardIndexStatusLabel(status: DashboardIndexStatus) {
+  const labels: Record<DashboardIndexStatus, string> = {
+    ready: "Ready",
+    missing: "Missing",
+    partial: "Partial",
+    stale: "Stale",
+  };
+  return labels[status];
+}
+
 function settingsReadinessStatusLabel(status: SettingsReadinessStatus) {
   const labels: Record<SettingsReadinessStatus, string> = {
     not_checked: "Not checked",
@@ -5450,6 +5714,36 @@ function workflowLinksForReadiness(item: SettingsReadinessItem) {
     return [{ view: "chat" as const, label: "Open Chat Workspace" }];
   }
   return [{ view: "search" as const, label: "Open Search Lab" }];
+}
+
+function dashboardWarningLinks(warning: string) {
+  const lower = warning.toLowerCase();
+  const links: Array<{ view: View; label: string }> = [];
+  const add = (view: View, label: string) => {
+    if (!links.some((link) => link.view === view)) {
+      links.push({ view, label });
+    }
+  };
+
+  if (
+    lower.includes("full-text") ||
+    lower.includes("vector") ||
+    lower.includes("embedding") ||
+    lower.includes("qdrant")
+  ) {
+    add("search", "Open Search Lab");
+  }
+  if (lower.includes("chat") || lower.includes("model")) {
+    add("chat", "Open Chat Workspace");
+  }
+  if (lower.includes("document") || lower.includes("chunk")) {
+    add("documents", "Open Document Manager");
+  }
+  if (lower.includes("source") || lower.includes("bundle") || lower.includes("recreate")) {
+    add("recreate", "Open Recreate Repository");
+  }
+  add("settings", "Open Settings / Models");
+  return links;
 }
 
 function formatBoolean(value: boolean | undefined) {

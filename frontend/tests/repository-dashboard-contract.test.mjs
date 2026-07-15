@@ -27,10 +27,35 @@ test("Dashboard shell shows active repository identity and basic metadata", () =
   assert.match(source, /repository\?\.root_path \?\? "local default"/);
   assert.match(source, /repository\?\.created_at \? formatDate\(repository\.created_at\)/);
   assert.match(source, /repository\?\.updated_at \? formatDate\(repository\.updated_at\)/);
-  assert.match(source, /Summary API coming next/);
+  assert.match(source, /repositories\/\${repositoryId}\/summary/);
   assert.match(styles, /\.dashboard-layout/);
   assert.match(styles, /\.dashboard-grid/);
   assert.match(styles, /\.dashboard-metric/);
+});
+
+test("Dashboard status surface renders summary counts, readiness, config, and warnings", () => {
+  assert.match(source, /type DashboardSummary =/);
+  assert.match(source, /counts\?\.documents/);
+  assert.match(source, /counts\?\.retrieval_runs/);
+  assert.match(source, /counts\?\.sandbox_runs/);
+  assert.match(source, /counts\?\.exports/);
+  assert.match(source, /counts\?\.recreate_events/);
+  assert.match(source, /DashboardIndexCard/);
+  assert.match(source, /dashboardIndexStatusLabel/);
+  assert.match(source, /Runtime readiness/);
+  assert.match(source, /dashboardReadinessItems/);
+  assert.match(source, /dashboardConfigRows/);
+  assert.match(source, /dashboardWarningLinks/);
+  assert.match(source, /Open Settings \/ Models/);
+  assert.match(source, /Open Search Lab/);
+  assert.match(source, /Open Chat Workspace/);
+  assert.match(source, /Open Document Manager/);
+  assert.match(source, /Open Recreate Repository/);
+  assert.match(styles, /\.dashboard-status-grid/);
+  assert.match(styles, /\.dashboard-index-ready/);
+  assert.match(styles, /\.dashboard-index-partial/);
+  assert.match(styles, /\.dashboard-index-stale/);
+  assert.match(styles, /\.dashboard-warning-list/);
 });
 
 test("Existing workspace routes remain routed after dashboard aliasing", () => {
