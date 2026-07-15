@@ -22,6 +22,8 @@ test("Recreate Repository validates uploaded bundles before enabling recreate", 
   assert.match(source, /validation\?\.can_recreate/);
   assert.match(source, /disabled=\{!canRecreate\}/);
   assert.match(source, /Bundle has blocking issues/);
+  assert.match(source, /availableModels\.length > 0/);
+  assert.match(source, /model_availability_unconfirmed/);
 });
 
 test("Recreate Repository supports source mappings and model hints", () => {
@@ -64,4 +66,16 @@ test("Recreate Repository calls execution endpoint with target options", () => {
   assert.match(source, /Recreating repository/);
   assert.match(source, /Recreate complete/);
   assert.match(source, /Recreate failed/);
+});
+
+test("Recreate Repository activates the recreated repository for the rest of the app", () => {
+  assert.match(source, /const \[repositories, setRepositories\] = useState<RepositoryRead\[\]>\(\[\]\)/);
+  assert.match(source, /fetch\(`\$\{API_BASE\}\/repositories`\)/);
+  assert.match(source, /function activateRepository/);
+  assert.match(source, /activeRepositoryId/);
+  assert.match(source, /mergeRepositories/);
+  assert.match(source, /activateRepository\(recreatedRepository\)/);
+  assert.match(source, /id="active-repository"/);
+  assert.match(source, /Repository/);
+  assert.match(styles, /\.repository-picker/);
 });

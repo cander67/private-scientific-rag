@@ -219,6 +219,23 @@ p {
   gap: var(--s3);
 }
 
+.repository-picker {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 240px);
+  gap: var(--s2);
+  align-items: center;
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.repository-picker select {
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-transform: none;
+}
+
 .row-between {
   justify-content: space-between;
 }
@@ -1695,6 +1712,11 @@ textarea {
 
   .topbar {
     padding: var(--s4);
+  }
+
+  .repository-picker {
+    grid-template-columns: 1fr;
+    width: 100%;
   }
 
   .page {

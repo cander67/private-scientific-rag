@@ -44,6 +44,16 @@ def test_default_repository_is_created_on_first_request() -> None:
     assert payload["settings"]["embedding"]["model"]
 
 
+def test_repository_list_includes_default_repository() -> None:
+    client = _client_with_database()
+    created = client.get("/repositories/default").json()
+
+    response = client.get("/repositories")
+
+    assert response.status_code == 200
+    assert response.json() == [created["repository"]]
+
+
 def test_repository_settings_round_trip_and_manifest_export() -> None:
     client = _client_with_database()
     created = client.get("/repositories/default").json()

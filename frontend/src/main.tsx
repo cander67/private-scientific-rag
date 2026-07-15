@@ -5,10 +5,15 @@ import "./styles.css";
 const API_BASE = "http://127.0.0.1:8000";
 
 type RepositoryResponse = {
-  repository: {
-    id: string;
-    name: string;
-  };
+  repository: RepositoryRead;
+};
+
+type RepositoryRead = {
+  id: string;
+  name: string;
+  root_path?: string | null;
+  created_at?: string;
+  updated_at?: string;
 };
 
 type RepositorySettings = {
@@ -524,6 +529,7 @@ type SandboxProgressRun = {
 
 function App() {
   const [repository, setRepository] = useState<RepositoryResponse["repository"] | null>(null);
+  const [repositories, setRepositories] = useState<RepositoryRead[]>([]);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [inspection, setInspection] = useState<Inspection | null>(null);
@@ -714,13 +720,56 @@ function App() {
 
   async function loadRepository() {
     try {
-      const response = await fetch(`${API_BASE}/repositories/default`);
-      const payload = (await response.json()) as RepositoryResponse;
-      setRepository(payload.repository);
+      const response = await fetch(`${API_BASE}/repositories`);
+      if (!response.ok) {
+        throw new Error("repositories unavailable");
+      }
+      const payload = (await response.json()) as RepositoryRead[];
+      setRepositories(payload);
+      const storedRepositoryId = window.localStorage.getItem("activeRepositoryId");
+      const selectedRepository =
+        (storedRepositoryId ? payload.find((item) => item.id === storedRepositoryId) : null) ??
+        payload.find((item) => item.name === "Default Repository") ??
+        payload[0] ??
+        null;
+      if (selectedRepository) {
+        activateRepository(selectedRepository);
+      }
       setMessage("Ready");
     } catch {
-      setMessage("Backend unavailable");
+      try {
+        const response = await fetch(`${API_BASE}/repositories/default`);
+        const payload = (await response.json()) as RepositoryResponse;
+        activateRepository(payload.repository);
+        setRepositories([payload.repository]);
+        setMessage("Ready");
+      } catch {
+        setMessage("Backend unavailable");
+      }
     }
+  }
+
+  function activateRepository(nextRepository: RepositoryRead) {
+    window.localStorage.setItem("activeRepositoryId", nextRepository.id);
+    setRepository(nextRepository);
+    setDocuments([]);
+    setSelectedDocumentId(null);
+    setSelectedChunkId(null);
+    setInspection(null);
+    setSearchDocumentId("");
+    setSearchResults([]);
+    setLastRebuild(null);
+    setChatSessions([]);
+    setActiveChatSessionId(null);
+    setActiveCitation(null);
+    setChatMessage("Loading chat sessions");
+    setChatReadiness(null);
+    setChatReadinessCheckedAt(null);
+    setSandboxPrompts([]);
+    setSelectedSandboxPromptId(null);
+    setSandboxComparison(null);
+    setSandboxProgressRuns([]);
+    setSandboxMessage("Loading sandbox prompts");
   }
 
   async function loadDocuments(repositoryId: string) {
@@ -728,9 +777,11 @@ function App() {
       const response = await fetch(`${API_BASE}/repositories/${repositoryId}/documents`);
       const payload = (await response.json()) as DocumentSummary[];
       setDocuments(payload);
-      if (!selectedDocumentId && payload.length > 0) {
-        setSelectedDocumentId(payload[0].id);
-      }
+      setSelectedDocumentId((current) =>
+        current && payload.some((document) => document.id === current)
+          ? current
+          : (payload[0]?.id ?? null),
+      );
     } catch {
       setMessage("Could not load documents");
     }
@@ -769,7 +820,11 @@ function App() {
       }
       const payload = (await response.json()) as ChatSession[];
       setChatSessions(payload);
-      setActiveChatSessionId((current) => current ?? payload[0]?.id ?? null);
+      setActiveChatSessionId((current) =>
+        current && payload.some((session) => session.id === current)
+          ? current
+          : (payload[0]?.id ?? null),
+      );
       setChatMessage(payload.length > 0 ? "Ready" : "No chat sessions yet");
     } catch {
       setChatMessage("Could not load chat sessions");
@@ -811,11 +866,14 @@ function App() {
       }
       const payload = (await response.json()) as SandboxPromptVersion[];
       setSandboxPrompts(payload);
-      if (!selectedSandboxPromptId && payload.length > 0) {
+      const selectedPromptStillExists = payload.some((prompt) => prompt.id === selectedSandboxPromptId);
+      if (!selectedPromptStillExists && payload.length > 0) {
         const latest = payload[payload.length - 1];
         setSelectedSandboxPromptId(latest.id);
         setSandboxPromptName(latest.name);
         setSandboxPromptBody(latest.body);
+      } else if (!selectedPromptStillExists) {
+        setSelectedSandboxPromptId(null);
       }
     } catch {
       setSandboxMessage("Could not load sandbox prompts");
@@ -1487,6 +1545,14 @@ function App() {
       const payload = (await response.json()) as RecreateBundleResponse;
       setRecreateResult(payload);
       setRecreateValidation(payload.validation);
+      if (payload.status === "completed" && payload.repository_id) {
+        const recreatedRepository = {
+          id: payload.repository_id,
+          name: payload.repository_name ?? "Recreated repository",
+        };
+        setRepositories((current) => mergeRepositories(current, recreatedRepository));
+        activateRepository(recreatedRepository);
+      }
       setRecreateMessage(payload.status === "completed" ? "Recreate complete" : "Recreate failed");
     } catch {
       setRecreateResult(null);
@@ -1653,6 +1719,26 @@ function App() {
               </div>
             </div>
             <div className="topbar-actions">
+              <label className="repository-picker" htmlFor="active-repository">
+                <span>Repository</span>
+                <select
+                  id="active-repository"
+                  value={repository?.id ?? ""}
+                  onChange={(event) => {
+                    const selectedRepository = repositories.find((item) => item.id === event.target.value);
+                    if (selectedRepository) {
+                      activateRepository(selectedRepository);
+                    }
+                  }}
+                  disabled={repositories.length === 0}
+                >
+                  {repositories.map((item) => (
+                    <option value={item.id} key={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               {activeView === "documents" && (
                 <>
                   <label className="btn btn-primary upload-button">
@@ -4250,8 +4336,11 @@ function recreateFormData(
   formData.append("file", file);
   const repositoryName = options.repositoryName?.trim();
   const targetRepositoryId = options.targetRepositoryId?.trim();
+  const availableModels = parseAvailableModels(options.availableModelsText);
   const sourceMappings = normalizeSourceMappings(options.sourceMappings);
-  formData.append("available_models_json", JSON.stringify(parseAvailableModels(options.availableModelsText)));
+  if (availableModels.length > 0) {
+    formData.append("available_models_json", JSON.stringify(availableModels));
+  }
   if (repositoryName) {
     formData.append("repository_name", repositoryName);
   }
@@ -4279,6 +4368,12 @@ function normalizeSourceMappings(sourceMappings: RecreateSourceMapping[]) {
       document_version_id: mapping.document_version_id?.trim() || undefined,
     }))
     .filter((mapping) => mapping.sha256 && mapping.path);
+}
+
+function mergeRepositories(current: RepositoryRead[], repository: RepositoryRead) {
+  const repositoriesById = new Map(current.map((item) => [item.id, item]));
+  repositoriesById.set(repository.id, { ...repositoriesById.get(repository.id), ...repository });
+  return Array.from(repositoriesById.values());
 }
 
 function mergeSourceMappings(
@@ -4353,6 +4448,7 @@ function issueLabel(code: string) {
     external_source_renamed: "External source path changed",
     missing_model: "Missing model",
     unconfirmed_model: "Model not confirmed",
+    model_availability_unconfirmed: "Model availability not checked",
     parser_fingerprint: "Parser/settings fingerprint",
     count_mismatch: "Count mismatch",
     source_hash_verified: "Source hash verified",

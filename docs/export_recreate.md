@@ -50,7 +50,9 @@ Source exclusion is useful when source files are large or already available on t
 6. Recreate into a new repository by default, or provide an existing empty repository ID.
 7. Review the final source and index report.
 
-Recreate restores chat and retrieval history as active records. It remaps restored chunk IDs so citations and retrieval results point at the recreated repository data.
+Recreate restores documents, chat history, retrieval history, and optionally sandbox data into the recreated repository. The app activates the recreated repository after a successful restore; the topbar repository selector can switch between local repositories later. Search Lab does not show prior query results by default, but searches run against the active repository. Prompt Sandbox shows restored sandbox runs only when sandbox data was included during export.
+
+Recreate remaps restored chunk IDs so citations and retrieval results point at the recreated repository data.
 
 ## Warning And Error Meanings
 
@@ -58,7 +60,8 @@ Recreate restores chat and retrieval history as active records. It remaps restor
 - **Source hash mismatch**: A packaged or mapped source file does not match the deterministic SHA-256 hash in the manifest. The bundle cannot be recreated from that file.
 - **Missing external source mapping**: The bundle excluded source bytes and the target machine has not supplied a local file path for that source hash.
 - **External source path changed**: A mapped file has the right hash but a different filename or location. Recreate can continue, and the change is reported for provenance.
-- **Missing model / model not confirmed**: A required embedding, reranking, or chat model was not listed as available. Validation reports this as a warning because local model availability is host-specific.
+- **Model availability not checked**: No available-model list was supplied. Validation does not inspect local Ollama or SentenceTransformers caches automatically.
+- **Missing model**: A required embedding, reranking, or chat model was checked against a supplied available-model list and was not found in that list.
 - **Parser/settings fingerprint**: Parser, chunking, or settings fingerprints may produce different chunks on another host or dependency version.
 - **Count mismatch**: Payload counts differ from manifest counts. Treat this as a bundle consistency problem.
 - **Index difference**: Recreate reports full-text and vector indexed chunk counts after rebuild. Differences usually mean parsing or source mapping changed what chunks were available.
@@ -115,12 +118,34 @@ npm run build
 npm test
 ```
 
+PowerShell:
+
+```powershell
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src tests
+uv run pytest
+Set-Location frontend
+npm run build
+npm test
+Set-Location ..
+```
+
 PRD9-focused deterministic checks:
 
 ```bash
 uv run pytest tests/unit/test_export_bundle.py tests/integration/test_export_bundle_api.py
 cd frontend
 npm test
+```
+
+PowerShell:
+
+```powershell
+uv run pytest tests/unit/test_export_bundle.py tests/integration/test_export_bundle_api.py
+Set-Location frontend
+npm test
+Set-Location ..
 ```
 
 Optional live checks when local services and models are available:
@@ -132,6 +157,17 @@ RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_ollama_live.py
 RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_chat_rag_live.py
 ```
 
+PowerShell:
+
+```powershell
+docker compose up -d qdrant
+$env:RUN_LIVE_TESTS = "1"
+uv run pytest -m live tests/integration/test_vector_live.py
+uv run pytest -m live tests/integration/test_ollama_live.py
+uv run pytest -m live tests/integration/test_chat_rag_live.py
+Remove-Item Env:\RUN_LIVE_TESTS
+```
+
 Live cross-encoder checks require the configured cross-encoder in the local SentenceTransformers cache:
 
 ```bash
@@ -139,5 +175,39 @@ uv run python -c "from sentence_transformers import CrossEncoder; CrossEncoder('
 RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_cross_encoder_live.py
 ```
 
+PowerShell:
+
+```powershell
+uv run python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')"
+$env:RUN_LIVE_TESTS = "1"
+uv run pytest -m live tests/integration/test_cross_encoder_live.py
+Remove-Item Env:\RUN_LIVE_TESTS
+```
+
 Manual cross-platform transfer remains a review checklist item unless each target OS is available during the review window.
 
+## Clean Environment Reset
+
+There is no app-level "delete all repositories and reset local state" workflow yet. For now, reset a local development environment manually while the backend, frontend, workers, and Qdrant are stopped.
+
+Typical reset:
+
+```bash
+rm -rf data exports .qdrant
+docker compose down
+docker volume prune
+uv run alembic upgrade head
+```
+
+PowerShell equivalent:
+
+```powershell
+Remove-Item -Recurse -Force .\data, .\exports, .\.qdrant -ErrorAction SilentlyContinue
+docker compose down
+docker volume prune
+uv run alembic upgrade head
+```
+
+Only remove `models/` if you intentionally want to delete local model caches managed inside the workspace. Ollama and SentenceTransformers commonly store model caches outside this repository, so resetting repo data does not remove those models.
+
+A first-class repository administration/reset workflow should be a follow-up PRD. It should cover listing repositories, deleting selected repositories, clearing all local repositories, removing derived indexes, and making destructive actions explicit.
