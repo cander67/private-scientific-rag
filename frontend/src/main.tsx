@@ -154,6 +154,35 @@ type DashboardSummary = {
   warnings: string[];
 };
 
+type RepositoryAdminInventory = {
+  generated_at: string;
+  repositories: RepositoryAdminSummary[];
+};
+
+type RepositoryAdminSummary = {
+  repository: RepositoryRead;
+  counts: DashboardSummary["counts"];
+  full_text: DashboardIndexSummary;
+  vector: DashboardIndexSummary;
+  storage_hints: RepositoryAdminStorageHint[];
+};
+
+type RepositoryAdminStorageHint = {
+  category:
+    | "database_records"
+    | "app_managed_sources"
+    | "external_sources"
+    | "full_text_index"
+    | "vector_index"
+    | "exports"
+    | "prompt_sandbox_history"
+    | "chat_retrieval_history"
+    | "model_caches";
+  label: string;
+  status: "tracked" | "present" | "not_found" | "preserved" | "out_of_scope";
+  detail: string;
+};
+
 type DashboardActivityItem = {
   kind: "document" | "retrieval" | "chat" | "sandbox" | "export" | "recreate";
   label: string;
@@ -274,6 +303,7 @@ type View =
   | "sandbox"
   | "chat"
   | "settings"
+  | "admin"
   | "export"
   | "recreate";
 
@@ -701,6 +731,8 @@ function App() {
   const [exportSummary, setExportSummary] = useState<ExportManifestSummary | null>(null);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [dashboardMessage, setDashboardMessage] = useState("Loading repository summary");
+  const [adminInventory, setAdminInventory] = useState<RepositoryAdminInventory | null>(null);
+  const [adminMessage, setAdminMessage] = useState("Loading local repository inventory");
   const [recreateFile, setRecreateFile] = useState<File | null>(null);
   const [recreateRepositoryName, setRecreateRepositoryName] = useState("");
   const [recreateTargetRepositoryId, setRecreateTargetRepositoryId] = useState("");
@@ -739,6 +771,12 @@ function App() {
       void loadSandboxPrompts(repository.id);
     }
   }, [repository]);
+
+  useEffect(() => {
+    if (activeView === "admin") {
+      void loadAdminInventory();
+    }
+  }, [activeView, repository?.id]);
 
   useEffect(() => {
     return () => {
@@ -946,6 +984,28 @@ function App() {
     } catch {
       setDashboardSummary(null);
       setDashboardMessage("Could not load repository summary");
+    }
+  }
+
+  async function loadAdminInventory() {
+    setAdminMessage("Loading local repository inventory");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/admin/inventory`);
+      if (!response.ok) {
+        throw new Error("inventory unavailable");
+      }
+      const payload = (await response.json()) as RepositoryAdminInventory;
+      setAdminInventory(payload);
+      setRepositories((current) =>
+        payload.repositories.reduce(
+          (items, item) => mergeRepositories(items, item.repository),
+          current,
+        ),
+      );
+      setAdminMessage("Local repository inventory loaded");
+    } catch {
+      setAdminInventory(null);
+      setAdminMessage("Could not load repository administration inventory");
     }
   }
 
@@ -1825,6 +1885,8 @@ function App() {
             ? "Prompt Sandbox"
             : activeView === "settings"
               ? "Settings / Models"
+              : activeView === "admin"
+                ? "Repository Administration"
             : activeView === "export"
               ? "Export Center"
               : activeView === "recreate"
@@ -1841,6 +1903,8 @@ function App() {
         ? `${repository?.name ?? "Default Repository"} · ${exportMessage}`
       : activeView === "settings"
         ? `${repository?.name ?? "Default Repository"} · repository defaults`
+      : activeView === "admin"
+        ? `${adminInventory?.repositories.length ?? repositories.length} local repositories · ${adminMessage}`
       : activeView === "recreate"
         ? `${repository?.name ?? "Default Repository"} · ${recreateMessage}`
       : activeView === "chat"
@@ -1919,6 +1983,13 @@ function App() {
               onClick={() => navigateTo("settings")}
             >
               Settings / Models
+            </a>
+            <a
+              className={activeView === "admin" ? "active" : ""}
+              href="#repository-administration"
+              onClick={() => navigateTo("admin")}
+            >
+              Repository Administration
             </a>
             <a
               className={activeView === "recreate" ? "active" : ""}
@@ -2022,6 +2093,15 @@ function App() {
                 message={dashboardMessage}
                 onSelectRepository={activateRepository}
                 onUseDefaultRepository={() => void useDefaultRepository()}
+                onNavigate={navigateTo}
+              />
+            ) : activeView === "admin" ? (
+              <RepositoryAdministration
+                inventory={adminInventory}
+                activeRepositoryId={repository?.id ?? null}
+                message={adminMessage}
+                onRefresh={() => void loadAdminInventory()}
+                onSelectRepository={activateRepository}
                 onNavigate={navigateTo}
               />
             ) : activeView === "search" ? (
@@ -2745,6 +2825,160 @@ function RepositoryDashboard({
         )}
       </section>
     </div>
+  );
+}
+
+function RepositoryAdministration({
+  inventory,
+  activeRepositoryId,
+  message,
+  onRefresh,
+  onSelectRepository,
+  onNavigate,
+}: {
+  inventory: RepositoryAdminInventory | null;
+  activeRepositoryId: string | null;
+  message: string;
+  onRefresh: () => void;
+  onSelectRepository: (repository: RepositoryRead) => void;
+  onNavigate: (view: View) => void;
+}) {
+  const repositories = inventory?.repositories ?? [];
+  const totals = repositories.reduce(
+    (sum, item) => ({
+      documents: sum.documents + item.counts.documents,
+      chunks: sum.chunks + item.counts.chunks,
+      chat: sum.chat + item.counts.chat_sessions,
+      retrieval: sum.retrieval + item.counts.retrieval_runs,
+      sandbox: sum.sandbox + item.counts.sandbox_runs,
+    }),
+    { documents: 0, chunks: 0, chat: 0, retrieval: 0, sandbox: 0 },
+  );
+
+  return (
+    <div className="admin-layout">
+      <section className="card admin-overview">
+        <div className="row row-between">
+          <div>
+            <div className="eyebrow">Repository administration</div>
+            <h2>Local repository inventory</h2>
+          </div>
+          <button className="btn btn-sm" type="button" onClick={onRefresh}>
+            Refresh
+          </button>
+        </div>
+        <p className="hint">
+          {message}. This inventory is local to this machine and does not manage remote or cloud
+          repositories.
+        </p>
+        <div className="dashboard-grid admin-totals">
+          <DashboardMetric label="Repositories" value={repositories.length} detail="local only" />
+          <DashboardMetric label="Documents" value={totals.documents} detail="tracked records" />
+          <DashboardMetric label="Chunks" value={totals.chunks} detail="parsed context" />
+          <DashboardMetric label="Chat" value={totals.chat} detail="saved sessions" />
+          <DashboardMetric label="Retrieval" value={totals.retrieval} detail="saved runs" />
+          <DashboardMetric label="Sandbox" value={totals.sandbox} detail="saved runs" />
+        </div>
+      </section>
+
+      {repositories.length === 0 ? (
+        <section className="card dashboard-empty">
+          <div>
+            <div className="eyebrow">No repositories</div>
+            <h2>No local repositories were found</h2>
+            <p>Create or use the default repository, or recreate from a portable export bundle.</p>
+          </div>
+          <div className="dashboard-actions">
+            <button className="btn btn-primary" type="button" onClick={() => onNavigate("dashboard")}>
+              Open Repository Dashboard
+            </button>
+            <button className="btn" type="button" onClick={() => onNavigate("recreate")}>
+              Open Recreate Repository
+            </button>
+          </div>
+        </section>
+      ) : (
+        <section className="card admin-table-card" aria-label="Repository administration list">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Repository</th>
+                  <th>Created</th>
+                  <th>Updated</th>
+                  <th>Counts</th>
+                  <th>Indexes</th>
+                  <th>Storage hints</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {repositories.map((item) => (
+                  <tr key={item.repository.id}>
+                    <td>
+                      <span className="name">{item.repository.name}</span>
+                      <span className="table-sub">{item.repository.root_path ?? "local default"}</span>
+                      {item.repository.id === activeRepositoryId && (
+                        <span className="badge badge-ok admin-active-badge">
+                          <span className="dot" />
+                          Active
+                        </span>
+                      )}
+                    </td>
+                    <td>{item.repository.created_at ? formatDate(item.repository.created_at) : "unavailable"}</td>
+                    <td>{item.repository.updated_at ? formatDate(item.repository.updated_at) : "unavailable"}</td>
+                    <td>
+                      <span className="table-sub">
+                        {item.counts.documents} docs · {item.counts.chunks} chunks
+                      </span>
+                      <span className="table-sub">
+                        {item.counts.chat_sessions} chats · {item.counts.retrieval_runs} retrieval
+                      </span>
+                      <span className="table-sub">
+                        {item.counts.sandbox_runs} sandbox · {item.counts.sandbox_comparisons} comparisons
+                      </span>
+                    </td>
+                    <td>
+                      <AdminIndexPill label="Full-text" item={item.full_text} />
+                      <AdminIndexPill label="Vector" item={item.vector} />
+                    </td>
+                    <td>
+                      <div className="admin-hints">
+                        {item.storage_hints.slice(0, 5).map((hint) => (
+                          <span className="admin-hint" key={hint.category} title={hint.detail}>
+                            {hint.label}: {adminStorageStatusLabel(hint.status)}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-sm"
+                        type="button"
+                        onClick={() => {
+                          onSelectRepository(item.repository);
+                          onNavigate("dashboard");
+                        }}
+                      >
+                        Open
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function AdminIndexPill({ label, item }: { label: string; item: DashboardIndexSummary }) {
+  return (
+    <span className={`admin-index-pill dashboard-index-${item.status}`}>
+      {label}: {dashboardIndexStatusLabel(item.status)} ({item.indexed_chunks}/{item.parsed_chunks})
+    </span>
   );
 }
 
@@ -5784,6 +6018,17 @@ function dashboardIndexStatusLabel(status: DashboardIndexStatus) {
   return labels[status];
 }
 
+function adminStorageStatusLabel(status: RepositoryAdminStorageHint["status"]) {
+  const labels: Record<RepositoryAdminStorageHint["status"], string> = {
+    tracked: "tracked",
+    present: "present",
+    not_found: "not found",
+    preserved: "preserved",
+    out_of_scope: "out of scope",
+  };
+  return labels[status];
+}
+
 function dashboardQuickActions() {
   return [
     { view: "documents" as const, label: "Document Manager" },
@@ -6118,6 +6363,8 @@ function hashForView(view: View) {
       return "prompt-sandbox";
     case "settings":
       return "settings-models";
+    case "admin":
+      return "repository-administration";
     case "export":
       return "export-center";
     case "recreate":
@@ -6139,6 +6386,9 @@ function viewFromHash(hash: string): View {
   }
   if (hash === "#settings-models") {
     return "settings";
+  }
+  if (hash === "#repository-administration" || hash === "#admin") {
+    return "admin";
   }
   if (hash === "#chat-workspace") {
     return "chat";

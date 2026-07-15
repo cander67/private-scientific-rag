@@ -249,6 +249,36 @@ class RepositoryDashboardSummary(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class RepositoryAdminStorageHint(BaseModel):
+    category: Literal[
+        "database_records",
+        "app_managed_sources",
+        "external_sources",
+        "full_text_index",
+        "vector_index",
+        "exports",
+        "prompt_sandbox_history",
+        "chat_retrieval_history",
+        "model_caches",
+    ]
+    label: str
+    status: Literal["tracked", "present", "not_found", "preserved", "out_of_scope"]
+    detail: str
+
+
+class RepositoryAdminSummary(BaseModel):
+    repository: RepositoryRead
+    counts: RepositoryDashboardCounts
+    full_text: RepositoryDashboardIndexStatus
+    vector: RepositoryDashboardIndexStatus
+    storage_hints: list[RepositoryAdminStorageHint] = Field(default_factory=list)
+
+
+class RepositoryAdminInventory(BaseModel):
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    repositories: list[RepositoryAdminSummary] = Field(default_factory=list)
+
+
 class RepositoryManifest(BaseModel):
     schema_version: int = 1
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

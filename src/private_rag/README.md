@@ -21,6 +21,7 @@ Current API surface:
 
 - `GET /health`: local app and dependency health check.
 - `GET /repositories/default`: creates or returns the default repository with validated settings.
+- `GET /repositories/admin/inventory`: lists local repository administration summaries with scoped counts, full-text/vector index status, and storage-category hints before destructive workflows are available.
 - `GET /repositories/{repository_id}/settings`: loads repository settings.
 - `PUT /repositories/{repository_id}/settings`: validates and saves repository settings.
 - `POST /repositories/{repository_id}/settings/impact`: previews rebuild, workflow, export/recreate, and evaluation-freshness impact for draft settings.

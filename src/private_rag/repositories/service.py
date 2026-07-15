@@ -17,6 +17,9 @@ from private_rag.repositories.schemas import (
     RecreateValidationIssue,
     RecreateValidationRequest,
     RecreateValidationResponse,
+    RepositoryAdminInventory,
+    RepositoryAdminStorageHint,
+    RepositoryAdminSummary,
     RepositoryDashboardActiveConfig,
     RepositoryDashboardActivityItem,
     RepositoryDashboardCounts,
@@ -287,6 +290,15 @@ def list_repositories(session: Session) -> list[RepositoryRead]:
     ]
 
 
+def repository_admin_inventory(session: Session) -> RepositoryAdminInventory:
+    repositories = session.scalars(select(Repository).order_by(Repository.created_at)).all()
+    return RepositoryAdminInventory(
+        repositories=[
+            _repository_admin_summary(session, repository=repository) for repository in repositories
+        ]
+    )
+
+
 def update_repository_settings(
     session: Session,
     repository_id: str,
@@ -370,11 +382,8 @@ def repository_dashboard_summary(
     if repository_settings is None:
         return None
     settings = repository_settings.settings
-    parsed_chunks = _count(
-        session,
-        DocumentChunk,
-        DocumentChunk.repository_id == repository_id,
-    )
+    counts = _repository_counts(session, repository_id)
+    parsed_chunks = counts.chunks
     full_text_count = _full_text_count(session, repository_id)
     embedding_run = session.scalar(
         select(EmbeddingRun).where(EmbeddingRun.repository_id == repository_id)
@@ -406,37 +415,7 @@ def repository_dashboard_summary(
     )
     return RepositoryDashboardSummary(
         repository=repository_settings.repository,
-        counts=RepositoryDashboardCounts(
-            documents=_count(session, Document, Document.repository_id == repository_id),
-            parsed_documents=_count(
-                session,
-                DocumentVersion,
-                DocumentVersion.repository_id == repository_id,
-                DocumentVersion.status == "parsed",
-            ),
-            chunks=parsed_chunks,
-            chat_sessions=_count(
-                session,
-                ChatSession,
-                ChatSession.repository_id == repository_id,
-            ),
-            chat_messages=_count(
-                session,
-                ChatMessageRow,
-                ChatMessageRow.repository_id == repository_id,
-            ),
-            retrieval_runs=_count(
-                session,
-                RetrievalRun,
-                RetrievalRun.repository_id == repository_id,
-            ),
-            sandbox_runs=_count(session, SandboxRun, SandboxRun.repository_id == repository_id),
-            sandbox_comparisons=_count(
-                session,
-                SandboxComparison,
-                SandboxComparison.repository_id == repository_id,
-            ),
-        ),
+        counts=counts,
         full_text=RepositoryDashboardIndexStatus(
             ready=full_text_ready,
             status=full_text_status,
@@ -662,6 +641,179 @@ def export_manifest(session: Session, repository_id: str) -> RepositoryManifest 
     session.add(snapshot)
     session.commit()
     return manifest
+
+
+def _repository_admin_summary(
+    session: Session,
+    *,
+    repository: Repository,
+) -> RepositoryAdminSummary:
+    repository_id = repository.id
+    counts = _repository_counts(session, repository_id, include_exports=True)
+    full_text_count = _full_text_count(session, repository_id)
+    embedding_run = session.scalar(
+        select(EmbeddingRun).where(EmbeddingRun.repository_id == repository_id)
+    )
+    vector_count = embedding_run.chunk_count if embedding_run is not None else 0
+    full_text_status, full_text_ready = _index_readiness_status(
+        parsed_chunks=counts.chunks,
+        indexed_chunks=full_text_count,
+    )
+    vector_status, vector_ready = _index_readiness_status(
+        parsed_chunks=counts.chunks,
+        indexed_chunks=vector_count,
+        index_state=embedding_run.status if embedding_run is not None else None,
+    )
+    return RepositoryAdminSummary(
+        repository=RepositoryRead(
+            id=repository.id,
+            name=repository.name,
+            root_path=repository.root_path,
+            created_at=repository.created_at,
+            updated_at=repository.updated_at,
+        ),
+        counts=counts,
+        full_text=RepositoryDashboardIndexStatus(
+            ready=full_text_ready,
+            status=full_text_status,
+            message=_full_text_readiness_message(counts.chunks, full_text_count),
+            indexed_chunks=full_text_count,
+            parsed_chunks=counts.chunks,
+        ),
+        vector=RepositoryDashboardIndexStatus(
+            ready=vector_ready,
+            status=vector_status,
+            message=_vector_readiness_message(counts.chunks, embedding_run),
+            indexed_chunks=vector_count,
+            parsed_chunks=counts.chunks,
+            model=embedding_run.model if embedding_run is not None else None,
+        ),
+        storage_hints=_repository_storage_hints(
+            counts=counts,
+            full_text_indexed_chunks=full_text_count,
+            vector_indexed_chunks=vector_count,
+            root_path=repository.root_path,
+        ),
+    )
+
+
+def _repository_counts(
+    session: Session,
+    repository_id: str,
+    *,
+    include_exports: bool = False,
+) -> RepositoryDashboardCounts:
+    return RepositoryDashboardCounts(
+        documents=_count(session, Document, Document.repository_id == repository_id),
+        parsed_documents=_count(
+            session,
+            DocumentVersion,
+            DocumentVersion.repository_id == repository_id,
+            DocumentVersion.status == "parsed",
+        ),
+        chunks=_count(session, DocumentChunk, DocumentChunk.repository_id == repository_id),
+        chat_sessions=_count(
+            session,
+            ChatSession,
+            ChatSession.repository_id == repository_id,
+        ),
+        chat_messages=_count(
+            session,
+            ChatMessageRow,
+            ChatMessageRow.repository_id == repository_id,
+        ),
+        retrieval_runs=_count(
+            session,
+            RetrievalRun,
+            RetrievalRun.repository_id == repository_id,
+        ),
+        sandbox_runs=_count(session, SandboxRun, SandboxRun.repository_id == repository_id),
+        sandbox_comparisons=_count(
+            session,
+            SandboxComparison,
+            SandboxComparison.repository_id == repository_id,
+        ),
+        exports=(
+            _count(session, RepositorySnapshot, RepositorySnapshot.repository_id == repository_id)
+            if include_exports
+            else 0
+        ),
+    )
+
+
+def _repository_storage_hints(
+    *,
+    counts: RepositoryDashboardCounts,
+    full_text_indexed_chunks: int,
+    vector_indexed_chunks: int,
+    root_path: str | None,
+) -> list[RepositoryAdminStorageHint]:
+    history_count = counts.chat_sessions + counts.chat_messages + counts.retrieval_runs
+    sandbox_count = counts.sandbox_runs + counts.sandbox_comparisons
+    app_source_status: Literal["present", "not_found"] = "present" if root_path else "not_found"
+    return [
+        RepositoryAdminStorageHint(
+            category="database_records",
+            label="Database records",
+            status="tracked",
+            detail=(
+                f"{counts.documents} documents, {counts.chunks} chunks, "
+                f"{history_count} chat/retrieval records"
+            ),
+        ),
+        RepositoryAdminStorageHint(
+            category="app_managed_sources",
+            label="App-managed source copies",
+            status=app_source_status,
+            detail=(
+                "Repository root is tracked for app-managed copies."
+                if root_path
+                else "No repository root path is recorded."
+            ),
+        ),
+        RepositoryAdminStorageHint(
+            category="external_sources",
+            label="External source files",
+            status="preserved",
+            detail="External files are referenced only and are preserved by default.",
+        ),
+        RepositoryAdminStorageHint(
+            category="full_text_index",
+            label="Full-text index",
+            status="present" if full_text_indexed_chunks else "not_found",
+            detail=f"{full_text_indexed_chunks} indexed chunks tracked locally.",
+        ),
+        RepositoryAdminStorageHint(
+            category="vector_index",
+            label="Vector index",
+            status="present" if vector_indexed_chunks else "not_found",
+            detail=f"{vector_indexed_chunks} indexed chunks reported by latest vector run.",
+        ),
+        RepositoryAdminStorageHint(
+            category="exports",
+            label="Export artifacts",
+            status="tracked" if counts.exports else "not_found",
+            detail=f"{counts.exports} repository manifest snapshots recorded.",
+        ),
+        RepositoryAdminStorageHint(
+            category="prompt_sandbox_history",
+            label="Prompt sandbox history",
+            status="tracked" if sandbox_count else "not_found",
+            detail=f"{sandbox_count} sandbox runs or comparisons recorded.",
+        ),
+        RepositoryAdminStorageHint(
+            category="chat_retrieval_history",
+            label="Chat and retrieval history",
+            status="tracked" if history_count else "not_found",
+            detail=f"{history_count} chat sessions, messages, or retrieval runs recorded.",
+        ),
+        RepositoryAdminStorageHint(
+            category="model_caches",
+            label="Local model caches",
+            status="out_of_scope",
+            detail="Ollama and embedding model caches are preserved by default.",
+        ),
+    ]
 
 
 def _field_value(payload: dict[str, object], dotted_path: str) -> object:

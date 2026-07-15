@@ -12,6 +12,7 @@ from private_rag.db.session import SessionLocal
 from private_rag.repositories.schemas import (
     RecreateValidationRequest,
     RecreateValidationResponse,
+    RepositoryAdminInventory,
     RepositoryDashboardSummary,
     RepositoryManifest,
     RepositoryRead,
@@ -30,6 +31,7 @@ from private_rag.repositories.service import (
     export_manifest,
     get_repository_with_settings,
     list_repositories,
+    repository_admin_inventory,
     repository_dashboard_summary,
     update_repository_settings,
     validate_recreate_request,
@@ -72,6 +74,12 @@ def read_default_repository(session: DbSession) -> RepositoryWithSettings:
 def read_repositories(session: DbSession) -> list[RepositoryRead]:
     ensure_default_repository(session)
     return list_repositories(session)
+
+
+@router.get("/admin/inventory", response_model=RepositoryAdminInventory)
+def read_repository_admin_inventory(session: DbSession) -> RepositoryAdminInventory:
+    ensure_default_repository(session)
+    return repository_admin_inventory(session)
 
 
 @router.get("/{repository_id}/settings", response_model=RepositoryWithSettings)

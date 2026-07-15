@@ -1002,6 +1002,51 @@ textarea {
   margin: 0 0 var(--s3);
 }
 
+.admin-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.admin-overview,
+.admin-table-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.admin-totals {
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
+}
+
+.admin-active-badge {
+  display: inline-flex;
+  margin-top: var(--s2);
+}
+
+.admin-index-pill {
+  display: block;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text);
+  font-size: 0.78rem;
+  margin-bottom: var(--s2);
+  padding-left: var(--s2);
+  white-space: nowrap;
+}
+
+.admin-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 190px;
+}
+
+.admin-hint {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
 .settings-layout {
   display: flex;
   flex-direction: column;
@@ -2119,6 +2164,7 @@ textarea {
 
   .export-metrics,
   .dashboard-grid,
+  .admin-totals,
   .dashboard-status-grid,
   .dashboard-quick-actions,
   .dashboard-activity-list {
@@ -2204,6 +2250,7 @@ textarea {
   .sandbox-run-grid,
   .export-grid,
   .dashboard-grid,
+  .admin-totals,
   .dashboard-status-grid,
   .dashboard-quick-actions,
   .dashboard-activity-list,

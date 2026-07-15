@@ -481,6 +481,126 @@ def test_repository_summary_counts_are_repository_scoped() -> None:
     )
 
 
+def test_repository_admin_inventory_lists_scoped_counts_and_index_status() -> None:
+    client = _client_with_database()
+    created = client.get("/repositories/default").json()
+    repository_id = created["repository"]["id"]
+    test_app = cast(Any, client.app)
+    with test_app.state.test_session_factory() as session:
+        other_repository = Repository(name="Other Repository", root_path="/tmp/other")
+        session.add(other_repository)
+        session.flush()
+        other_repository.settings = repository_models.RepositorySettingsRow(
+            settings=created["settings"]
+        )
+        _add_document_with_chunks(session, repository_id, "admin.txt", 2)
+        _add_document_with_chunks(session, other_repository.id, "other-admin.txt", 1)
+        chat_session = ChatSession(
+            repository_id=repository_id,
+            title="Admin chat",
+            model="local",
+            retrieval_settings={},
+            prompt_id="rag-chat-default-v1",
+        )
+        session.add(chat_session)
+        session.flush()
+        session.add(
+            ChatMessageRow(
+                session_id=chat_session.id,
+                repository_id=repository_id,
+                sequence=1,
+                role="user",
+                content="inventory",
+            )
+        )
+        session.add(
+            RetrievalRun(
+                repository_id=repository_id,
+                mode="hybrid",
+                query="inventory",
+                filters={},
+                top_k=5,
+                candidate_pool_size=25,
+                rrf_constant=60,
+                reranker_strategy="none",
+                metadata_boosts={},
+                settings_snapshot={},
+            )
+        )
+        session.add(
+            SandboxRun(
+                repository_id=repository_id,
+                prompt_version_id=None,
+                query="inventory",
+                model="local",
+                retrieval_settings={},
+                prompt_snapshot={},
+                answer="answer",
+                latency_ms=1,
+                status="complete",
+            )
+        )
+        session.add(RepositorySnapshot(repository_id=repository_id, manifest={"kind": "export"}))
+        session.commit()
+        rebuild_full_text_index(session, repository_id)
+        session.add(
+            EmbeddingRun(
+                repository_id=repository_id,
+                provider="sentence_transformers",
+                model="test-deterministic",
+                vector_size=8,
+                distance="cosine",
+                collection_name="default_repository",
+                status="indexed",
+                chunk_count=2,
+                settings_snapshot={},
+            )
+        )
+        session.commit()
+
+    response = client.get("/repositories/admin/inventory")
+
+    assert response.status_code == 200
+    payload = response.json()
+    summaries = {item["repository"]["name"]: item for item in payload["repositories"]}
+    assert {"Default Repository", "Other Repository"} <= summaries.keys()
+    default = summaries["Default Repository"]
+    other = summaries["Other Repository"]
+    assert default["counts"]["documents"] == 1
+    assert default["counts"]["chunks"] == 2
+    assert default["counts"]["chat_sessions"] == 1
+    assert default["counts"]["chat_messages"] == 1
+    assert default["counts"]["retrieval_runs"] == 1
+    assert default["counts"]["sandbox_runs"] == 1
+    assert default["counts"]["exports"] == 1
+    assert default["full_text"]["status"] == "ready"
+    assert default["vector"]["status"] == "ready"
+    assert other["counts"]["documents"] == 1
+    assert other["counts"]["chunks"] == 1
+    assert other["counts"]["chat_sessions"] == 0
+    assert other["full_text"]["status"] == "missing"
+    hint_categories = {hint["category"] for hint in default["storage_hints"]}
+    assert {
+        "database_records",
+        "app_managed_sources",
+        "external_sources",
+        "full_text_index",
+        "vector_index",
+        "exports",
+        "prompt_sandbox_history",
+        "chat_retrieval_history",
+        "model_caches",
+    } <= hint_categories
+    assert any(
+        hint["category"] == "model_caches" and hint["status"] == "out_of_scope"
+        for hint in default["storage_hints"]
+    )
+    assert any(
+        hint["category"] == "external_sources" and hint["status"] == "preserved"
+        for hint in default["storage_hints"]
+    )
+
+
 def test_repository_summary_reports_partial_and_stale_indexes() -> None:
     client = _client_with_database()
     _install_readiness_fakes(client)
