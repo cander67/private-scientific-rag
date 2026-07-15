@@ -49,15 +49,33 @@ Install backend dependencies:
 uv sync --all-extras --dev
 ```
 
+PowerShell:
+
+```powershell
+uv sync --all-extras --dev
+```
+
 Apply database migrations:
 
 ```bash
 uv run alembic upgrade head
 ```
 
+PowerShell:
+
+```powershell
+uv run alembic upgrade head
+```
+
 Start Qdrant:
 
 ```bash
+docker compose up -d qdrant
+```
+
+PowerShell:
+
+```powershell
 docker compose up -d qdrant
 ```
 
@@ -73,6 +91,12 @@ Run the backend:
 uv run uvicorn private_rag.api.app:app --reload
 ```
 
+PowerShell:
+
+```powershell
+uv run uvicorn private_rag.api.app:app --reload
+```
+
 Defaults to `http://127.0.0.1:8000`
 Docs available at `http://127.0.0.1:8000/docs`
 
@@ -84,11 +108,31 @@ npm install
 npm run dev
 ```
 
+PowerShell:
+
+```powershell
+Set-Location frontend
+npm install
+npm run dev
+Set-Location ..
+```
+
 Defaults to `http://127.0.0.1:5173`
 
 ## Checks
 
+Backend:
+
 ```bash
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src tests
+uv run pytest
+```
+
+PowerShell:
+
+```powershell
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy src tests
@@ -103,6 +147,15 @@ npm run build
 npm test
 ```
 
+PowerShell:
+
+```powershell
+Set-Location frontend
+npm run build
+npm test
+Set-Location ..
+```
+
 ## Local Data
 
 Runtime data belongs outside Git:
@@ -113,7 +166,15 @@ Runtime data belongs outside Git:
 - `.qdrant/`
 - private document corpora
 
-The `documents/` folder is a local/manual workspace. Do not commit private, licensed, downloaded, generated, or restricted research documents. Use `scripts/prepare_golden_corpus.sh` to recreate the golden-corpus folder layout and optional public candidates. CI tests use `tests/fixtures/`, not `documents/`.
+The `documents/` folder is a local/manual workspace. Do not commit private, licensed, downloaded, generated, or restricted research documents. On macOS/Linux or Git Bash, use `scripts/prepare_golden_corpus.sh` to recreate the golden-corpus folder layout and optional public candidates. On Windows PowerShell, create the local folders with:
+
+```powershell
+$folders = "checks", "markdown", "notes", "ocr", "patents_uploaded", "pdf", "source_bundles", "text"
+$folders | ForEach-Object { New-Item -ItemType Directory -Force -Path "documents/golden_corpus/$_" | Out-Null }
+New-Item -ItemType File -Force -Path "documents/golden_corpus/source_bundles/.gitkeep", "documents/golden_corpus/text/.gitkeep" | Out-Null
+```
+
+CI tests use `tests/fixtures/`, not `documents/`.
 
 The `example_code/` folder is local inspiration code and should not be committed.
 

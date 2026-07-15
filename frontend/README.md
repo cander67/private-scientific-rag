@@ -29,15 +29,34 @@ npm install
 npm run dev
 ```
 
+PowerShell:
+
+```powershell
+npm install
+npm run dev
+```
+
 Build:
 
 ```bash
 npm run build
 ```
 
+PowerShell:
+
+```powershell
+npm run build
+```
+
 Run frontend contract tests:
 
 ```bash
+npm test
+```
+
+PowerShell:
+
+```powershell
 npm test
 ```
 
