@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Literal, Protocol
 
@@ -23,6 +24,7 @@ from private_rag.repositories.schemas import (
     RepositoryAdminSummary,
     RepositoryCleanupDatabaseCounts,
     RepositoryCleanupPlanItem,
+    RepositoryCleanupResultItem,
     RepositoryCleanupWarning,
     RepositoryDashboardActiveConfig,
     RepositoryDashboardActivityItem,
@@ -30,6 +32,7 @@ from private_rag.repositories.schemas import (
     RepositoryDashboardIndexStatus,
     RepositoryDashboardSummary,
     RepositoryDeletePreview,
+    RepositoryDeleteResult,
     RepositoryManifest,
     RepositoryRead,
     RepositorySettings,
@@ -44,6 +47,7 @@ from private_rag.retrieval.models import RetrievalResult, RetrievalRun
 from private_rag.search.service import FTS_TABLE
 from private_rag.vector.embeddings import SentenceTransformersEmbeddingProvider
 from private_rag.vector.models import EmbeddingRun
+from private_rag.vector.store import VectorStore, VectorStoreError
 
 DEFAULT_REPOSITORY_NAME = "Default Repository"
 DashboardIndexStatus = Literal["ready", "missing", "partial", "stale"]
@@ -465,6 +469,189 @@ def preview_repository_deletion(
         ],
         warnings=warnings,
         destructive=False,
+    )
+
+
+def delete_repository_with_cleanup(
+    session: Session,
+    *,
+    repository_id: str,
+    confirmation_value: str,
+    app_settings: Settings,
+    checker: SettingsReadinessChecker,
+    vector_store: VectorStore,
+) -> RepositoryDeleteResult | None:
+    preview = preview_repository_deletion(
+        session,
+        repository_id=repository_id,
+        app_settings=app_settings,
+        checker=checker,
+    )
+    if preview is None:
+        return None
+    if confirmation_value != preview.repository.name:
+        raise ValueError("confirmation_value must match the selected repository name")
+
+    removed: list[RepositoryCleanupResultItem] = []
+    preserved: list[RepositoryCleanupResultItem] = []
+    skipped: list[RepositoryCleanupResultItem] = []
+    failed: list[RepositoryCleanupResultItem] = []
+    warnings = list(preview.warnings)
+    plan_by_category = {item.category: item for item in preview.plan}
+
+    app_sources = plan_by_category["app_managed_sources"]
+    removed_paths, failed_paths = _remove_paths(app_sources.paths)
+    if removed_paths:
+        removed.append(
+            RepositoryCleanupResultItem(
+                category="app_managed_sources",
+                label=app_sources.label,
+                count=len(removed_paths),
+                paths=removed_paths,
+                detail="App-managed source copies and generated artifacts were removed.",
+            )
+        )
+    if failed_paths:
+        failed.append(
+            RepositoryCleanupResultItem(
+                category="app_managed_sources",
+                label=app_sources.label,
+                count=len(failed_paths),
+                paths=failed_paths,
+                detail="Some app-managed files could not be removed.",
+            )
+        )
+
+    external_sources = plan_by_category["external_sources"]
+    preserved.append(
+        RepositoryCleanupResultItem(
+            category="external_sources",
+            label=external_sources.label,
+            count=external_sources.count,
+            paths=external_sources.paths,
+            detail="External source files were preserved.",
+        )
+    )
+    model_caches = plan_by_category["model_caches"]
+    preserved.append(
+        RepositoryCleanupResultItem(
+            category="model_caches",
+            label=model_caches.label,
+            count=0,
+            detail="Local model caches were preserved.",
+        )
+    )
+
+    full_text_item = plan_by_category["full_text_index"]
+    removed_full_text = _delete_full_text_index(session, repository_id)
+    if removed_full_text:
+        removed.append(
+            RepositoryCleanupResultItem(
+                category="full_text_index",
+                label=full_text_item.label,
+                count=removed_full_text,
+                detail=f"{removed_full_text} full-text indexed chunks were removed.",
+            )
+        )
+    else:
+        skipped.append(
+            RepositoryCleanupResultItem(
+                category="full_text_index",
+                label=full_text_item.label,
+                count=0,
+                detail="No full-text indexed chunks were present.",
+            )
+        )
+
+    vector_item = plan_by_category["vector_index"]
+    if vector_item.paths:
+        collection_name = vector_item.paths[0]
+        try:
+            vector_store.delete_collection(collection_name)
+        except VectorStoreError as exc:
+            failed.append(
+                RepositoryCleanupResultItem(
+                    category="vector_index",
+                    label=vector_item.label,
+                    count=vector_item.count,
+                    paths=vector_item.paths,
+                    detail=str(exc),
+                )
+            )
+            warnings.append(
+                RepositoryCleanupWarning(
+                    code="vector_cleanup_incomplete",
+                    category="vector_index",
+                    message=(
+                        f"Vector collection '{collection_name}' was not removed. Retry cleanup "
+                        "after Qdrant is reachable."
+                    ),
+                    retryable=True,
+                )
+            )
+        else:
+            removed.append(
+                RepositoryCleanupResultItem(
+                    category="vector_index",
+                    label=vector_item.label,
+                    count=vector_item.count,
+                    paths=vector_item.paths,
+                    detail=f"Vector collection '{collection_name}' was removed.",
+                )
+            )
+    else:
+        skipped.append(
+            RepositoryCleanupResultItem(
+                category="vector_index",
+                label=vector_item.label,
+                count=0,
+                detail="No vector collection was recorded.",
+            )
+        )
+
+    _delete_repository_database_rows(session, repository_id)
+    removed.append(
+        RepositoryCleanupResultItem(
+            category="database_records",
+            label=plan_by_category["database_records"].label,
+            count=sum(preview.database_counts.model_dump().values()),
+            detail="Repository-scoped database records were removed.",
+        )
+    )
+
+    for category in ("exports", "prompt_sandbox_history", "chat_retrieval_history"):
+        item = plan_by_category[category]
+        if item.count:
+            removed.append(
+                RepositoryCleanupResultItem(
+                    category=item.category,
+                    label=item.label,
+                    count=item.count,
+                    detail=item.detail.replace("would be", "were"),
+                )
+            )
+        else:
+            skipped.append(
+                RepositoryCleanupResultItem(
+                    category=item.category,
+                    label=item.label,
+                    count=0,
+                    detail=item.detail,
+                )
+            )
+
+    status: Literal["completed", "completed_with_warnings", "failed"] = "completed"
+    if failed or warnings:
+        status = "completed_with_warnings"
+    return RepositoryDeleteResult(
+        repository=preview.repository,
+        status=status,
+        database_counts=preview.database_counts,
+        removed=removed,
+        preserved=preserved,
+        skipped=skipped,
+        failed=failed,
+        warnings=warnings,
     )
 
 
@@ -953,6 +1140,84 @@ def _repository_cleanup_database_counts(
             session, RepositorySnapshot, RepositorySnapshot.repository_id == repository_id
         ),
     )
+
+
+def _remove_paths(paths: list[str]) -> tuple[list[str], list[str]]:
+    removed: list[str] = []
+    failed: list[str] = []
+    for path_text in paths:
+        path = Path(path_text).expanduser()
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+                removed.append(path_text)
+            elif path.exists():
+                path.unlink()
+                removed.append(path_text)
+        except OSError:
+            failed.append(path_text)
+    return removed, failed
+
+
+def _delete_full_text_index(session: Session, repository_id: str) -> int:
+    existing = _full_text_count(session, repository_id)
+    if existing == 0:
+        return 0
+    try:
+        session.execute(
+            text(f"DELETE FROM {FTS_TABLE} WHERE repository_id = :repository_id"),
+            {"repository_id": repository_id},
+        )
+    except Exception:
+        session.rollback()
+        return 0
+    return existing
+
+
+def _delete_repository_database_rows(session: Session, repository_id: str) -> None:
+    session.query(RetrievalResult).filter(RetrievalResult.repository_id == repository_id).delete(
+        synchronize_session=False
+    )
+    session.query(RetrievalRun).filter(RetrievalRun.repository_id == repository_id).delete(
+        synchronize_session=False
+    )
+    session.query(ChatMessageRow).filter(ChatMessageRow.repository_id == repository_id).delete(
+        synchronize_session=False
+    )
+    session.query(ChatSession).filter(ChatSession.repository_id == repository_id).delete(
+        synchronize_session=False
+    )
+    session.query(SandboxRun).filter(SandboxRun.repository_id == repository_id).delete(
+        synchronize_session=False
+    )
+    session.query(SandboxComparison).filter(
+        SandboxComparison.repository_id == repository_id
+    ).delete(synchronize_session=False)
+    session.query(SandboxPromptVersion).filter(
+        SandboxPromptVersion.repository_id == repository_id
+    ).delete(synchronize_session=False)
+    session.query(DocumentChunk).filter(DocumentChunk.repository_id == repository_id).delete(
+        synchronize_session=False
+    )
+    session.query(DocumentVersion).filter(DocumentVersion.repository_id == repository_id).delete(
+        synchronize_session=False
+    )
+    session.query(Document).filter(Document.repository_id == repository_id).delete(
+        synchronize_session=False
+    )
+    session.query(EmbeddingRun).filter(EmbeddingRun.repository_id == repository_id).delete(
+        synchronize_session=False
+    )
+    session.query(RepositorySnapshot).filter(
+        RepositorySnapshot.repository_id == repository_id
+    ).delete(synchronize_session=False)
+    session.query(RepositorySettingsRow).filter(
+        RepositorySettingsRow.repository_id == repository_id
+    ).delete(synchronize_session=False)
+    session.query(Repository).filter(Repository.id == repository_id).delete(
+        synchronize_session=False
+    )
+    session.commit()
 
 
 def _classify_repository_source_paths(

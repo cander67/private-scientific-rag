@@ -209,10 +209,30 @@ type RepositoryDeletePreview = {
   destructive: boolean;
 };
 
+type RepositoryDeleteResult = {
+  repository: RepositoryRead;
+  generated_at: string;
+  status: "completed" | "completed_with_warnings" | "failed";
+  database_counts: RepositoryDeletePreview["database_counts"];
+  removed: RepositoryCleanupResultItem[];
+  preserved: RepositoryCleanupResultItem[];
+  skipped: RepositoryCleanupResultItem[];
+  failed: RepositoryCleanupResultItem[];
+  warnings: RepositoryCleanupWarning[];
+};
+
 type RepositoryCleanupPlanItem = {
   category: RepositoryAdminStorageHint["category"];
   label: string;
   action: RepositoryCleanupAction;
+  count: number;
+  paths: string[];
+  detail: string;
+};
+
+type RepositoryCleanupResultItem = {
+  category: RepositoryAdminStorageHint["category"];
+  label: string;
   count: number;
   paths: string[];
   detail: string;
@@ -776,7 +796,10 @@ function App() {
   const [adminInventory, setAdminInventory] = useState<RepositoryAdminInventory | null>(null);
   const [adminMessage, setAdminMessage] = useState("Loading local repository inventory");
   const [deletePreview, setDeletePreview] = useState<RepositoryDeletePreview | null>(null);
+  const [deleteResult, setDeleteResult] = useState<RepositoryDeleteResult | null>(null);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deletePreviewBusy, setDeletePreviewBusy] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   const [recreateFile, setRecreateFile] = useState<File | null>(null);
   const [recreateRepositoryName, setRecreateRepositoryName] = useState("");
   const [recreateTargetRepositoryId, setRecreateTargetRepositoryId] = useState("");
@@ -975,6 +998,8 @@ function App() {
     setDashboardSummary(null);
     setDashboardMessage("Loading repository summary");
     setDeletePreview(null);
+    setDeleteResult(null);
+    setDeleteConfirmation("");
     setChatSessions([]);
     setActiveChatSessionId(null);
     setActiveCitation(null);
@@ -1064,12 +1089,59 @@ function App() {
       }
       const payload = (await response.json()) as RepositoryDeletePreview;
       setDeletePreview(payload);
+      setDeleteResult(null);
+      setDeleteConfirmation("");
       setAdminMessage(`Cleanup preview loaded for ${payload.repository.name}`);
     } catch {
       setDeletePreview(null);
+      setDeleteResult(null);
       setAdminMessage("Could not load repository cleanup preview");
     } finally {
       setDeletePreviewBusy(false);
+    }
+  }
+
+  async function deleteRepositoryFromPreview() {
+    if (!deletePreview) {
+      return;
+    }
+    setDeleteBusy(true);
+    setAdminMessage(`Deleting ${deletePreview.repository.name}`);
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${deletePreview.repository.id}/admin/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation_value: deleteConfirmation }),
+      });
+      if (!response.ok) {
+        throw new Error("repository deletion failed");
+      }
+      const payload = (await response.json()) as RepositoryDeleteResult;
+      setDeleteResult(payload);
+      setDeletePreview(null);
+      setDeleteConfirmation("");
+      setRepositories((current) => current.filter((item) => item.id !== payload.repository.id));
+      setAdminInventory((current) =>
+        current
+          ? {
+              ...current,
+              repositories: current.repositories.filter((item) => item.repository.id !== payload.repository.id),
+            }
+          : current,
+      );
+      if (repository?.id === payload.repository.id) {
+        window.localStorage.removeItem("activeRepositoryId");
+        setRepository(null);
+        setDocuments([]);
+        setRepositorySettings(null);
+        setDashboardSummary(null);
+      }
+      void loadAdminInventory();
+      setAdminMessage(`Deleted ${payload.repository.name}`);
+    } catch {
+      setAdminMessage("Repository deletion failed");
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -2164,10 +2236,15 @@ function App() {
                 inventory={adminInventory}
                 activeRepositoryId={repository?.id ?? null}
                 preview={deletePreview}
+                result={deleteResult}
                 previewBusy={deletePreviewBusy}
+                deleteBusy={deleteBusy}
+                confirmationValue={deleteConfirmation}
                 message={adminMessage}
                 onRefresh={() => void loadAdminInventory()}
                 onPreviewCleanup={(repositoryId) => void previewRepositoryCleanup(repositoryId)}
+                onConfirmationChange={setDeleteConfirmation}
+                onDeleteRepository={() => void deleteRepositoryFromPreview()}
                 onSelectRepository={activateRepository}
                 onNavigate={navigateTo}
               />
@@ -2899,20 +2976,30 @@ function RepositoryAdministration({
   inventory,
   activeRepositoryId,
   preview,
+  result,
   previewBusy,
+  deleteBusy,
+  confirmationValue,
   message,
   onRefresh,
   onPreviewCleanup,
+  onConfirmationChange,
+  onDeleteRepository,
   onSelectRepository,
   onNavigate,
 }: {
   inventory: RepositoryAdminInventory | null;
   activeRepositoryId: string | null;
   preview: RepositoryDeletePreview | null;
+  result: RepositoryDeleteResult | null;
   previewBusy: boolean;
+  deleteBusy: boolean;
+  confirmationValue: string;
   message: string;
   onRefresh: () => void;
   onPreviewCleanup: (repositoryId: string) => void;
+  onConfirmationChange: (value: string) => void;
+  onDeleteRepository: () => void;
   onSelectRepository: (repository: RepositoryRead) => void;
   onNavigate: (view: View) => void;
 }) {
@@ -3052,13 +3139,35 @@ function RepositoryAdministration({
         </section>
       )}
 
-      {preview && <RepositoryCleanupPreviewPanel preview={preview} />}
+      {preview && (
+        <RepositoryCleanupPreviewPanel
+          preview={preview}
+          confirmationValue={confirmationValue}
+          deleteBusy={deleteBusy}
+          onConfirmationChange={onConfirmationChange}
+          onDeleteRepository={onDeleteRepository}
+        />
+      )}
+      {result && <RepositoryCleanupResultPanel result={result} />}
     </div>
   );
 }
 
-function RepositoryCleanupPreviewPanel({ preview }: { preview: RepositoryDeletePreview }) {
+function RepositoryCleanupPreviewPanel({
+  preview,
+  confirmationValue,
+  deleteBusy,
+  onConfirmationChange,
+  onDeleteRepository,
+}: {
+  preview: RepositoryDeletePreview;
+  confirmationValue: string;
+  deleteBusy: boolean;
+  onConfirmationChange: (value: string) => void;
+  onDeleteRepository: () => void;
+}) {
   const databaseRows = Object.entries(preview.database_counts).filter(([, value]) => value > 0);
+  const confirmationMatches = confirmationValue === preview.repository.name;
   return (
     <section className="card admin-preview-panel" aria-label="Repository cleanup preview">
       <div>
@@ -3119,6 +3228,86 @@ function RepositoryCleanupPreviewPanel({ preview }: { preview: RepositoryDeleteP
           </article>
         ))}
       </div>
+      <div className="admin-confirm-delete">
+        <label htmlFor="delete-repository-confirmation">
+          <span>Type repository name to confirm</span>
+          <input
+            id="delete-repository-confirmation"
+            type="text"
+            value={confirmationValue}
+            onChange={(event) => onConfirmationChange(event.target.value)}
+            placeholder={preview.repository.name}
+          />
+        </label>
+        <button
+          className="btn btn-ghost danger-action"
+          type="button"
+          onClick={onDeleteRepository}
+          disabled={!confirmationMatches || deleteBusy}
+        >
+          Delete repository
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function RepositoryCleanupResultPanel({ result }: { result: RepositoryDeleteResult }) {
+  return (
+    <section className="card admin-preview-panel" aria-label="Repository cleanup result">
+      <div>
+        <div className="eyebrow">Cleanup result</div>
+        <h2>{result.repository.name}</h2>
+      </div>
+      <p className="hint">
+        Completed {formatDate(result.generated_at)} with status {repositoryDeleteStatusLabel(result.status)}.
+      </p>
+      <div className="admin-result-grid">
+        <RepositoryCleanupResultGroup title="Removed" items={result.removed} />
+        <RepositoryCleanupResultGroup title="Preserved" items={result.preserved} />
+        <RepositoryCleanupResultGroup title="Skipped" items={result.skipped} />
+        <RepositoryCleanupResultGroup title="Failed" items={result.failed} />
+      </div>
+      {result.warnings.length > 0 && (
+        <div className="admin-warning-list">
+          {result.warnings.map((warning) => (
+            <article className="dashboard-warning" key={`${warning.code}-${warning.category}`}>
+              <strong>{warning.code.replace(/_/g, " ")}</strong>
+              <p>{warning.message}</p>
+              {warning.retryable && <small>Retry cleanup after the local service is reachable.</small>}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RepositoryCleanupResultGroup({
+  title,
+  items,
+}: {
+  title: string;
+  items: RepositoryCleanupResultItem[];
+}) {
+  return (
+    <section>
+      <h3>{title}</h3>
+      {items.length > 0 ? (
+        <div className="admin-plan-list">
+          {items.map((item) => (
+            <article className="admin-result-item" key={`${title}-${item.category}`}>
+              <div className="row row-between">
+                <strong>{item.label}</strong>
+                <b>{item.count}</b>
+              </div>
+              <p>{item.detail}</p>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="hint">No items.</p>
+      )}
     </section>
   );
 }
@@ -6190,6 +6379,15 @@ function adminCleanupActionLabel(action: RepositoryCleanupAction) {
 
 function adminCleanupCategoryLabel(category: RepositoryAdminStorageHint["category"]) {
   return category.replace(/_/g, " ");
+}
+
+function repositoryDeleteStatusLabel(status: RepositoryDeleteResult["status"]) {
+  const labels: Record<RepositoryDeleteResult["status"], string> = {
+    completed: "completed",
+    completed_with_warnings: "completed with warnings",
+    failed: "failed",
+  };
+  return labels[status];
 }
 
 function dashboardQuickActions() {

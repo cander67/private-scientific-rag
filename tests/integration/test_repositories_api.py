@@ -6,18 +6,21 @@ from pathlib import Path
 from typing import Any, cast
 
 from fastapi.testclient import TestClient
+from pytest import MonkeyPatch
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from private_rag.api.app import create_app
 from private_rag.api.routes.repositories import (
+    get_admin_vector_store,
     get_db_session,
     get_settings_chat_llm,
     get_settings_readiness_checker,
 )
 from private_rag.chat.llm import ChatCompletion, ChatMessage
 from private_rag.chat.models import ChatMessageRow, ChatSession
+from private_rag.core.settings import get_settings
 from private_rag.db.base import Base
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
 from private_rag.prompt_sandbox.models import SandboxComparison, SandboxRun
@@ -27,6 +30,7 @@ from private_rag.repositories.schemas import RepositorySettingsReadinessItem
 from private_rag.retrieval.models import RetrievalRun
 from private_rag.search.service import rebuild_full_text_index
 from private_rag.vector.models import EmbeddingRun
+from private_rag.vector.store import InMemoryVectorStore, VectorStoreError
 
 
 def _client_with_database() -> TestClient:
@@ -251,6 +255,11 @@ class FakeSettingsReadinessChecker:
             message="Reranking is disabled for this repository.",
             model=model,
         )
+
+
+class FailingDeleteVectorStore(InMemoryVectorStore):
+    def delete_collection(self, collection_name: str) -> None:
+        raise VectorStoreError("Qdrant is unavailable in this test runtime.")
 
 
 def test_repository_settings_readiness_endpoint_uses_mocked_boundaries() -> None:
@@ -660,6 +669,157 @@ def test_repository_delete_preview_reports_cleanup_plan_without_mutating() -> No
         after_chunks = session.query(DocumentChunk).filter_by(repository_id=repository_id).count()
     assert after_documents == before_documents
     assert after_chunks == before_chunks
+
+
+def test_repository_delete_requires_confirmation_and_cleans_one_repository(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    data_dir = tmp_path / "data"
+    monkeypatch.setenv("PRIVATE_RAG_DATA_DIR", str(data_dir))
+    get_settings.cache_clear()
+    client = _client_with_database()
+    _install_readiness_fakes(client)
+    app = cast(Any, client.app)
+    app.dependency_overrides[get_admin_vector_store] = lambda: FailingDeleteVectorStore()
+    created = client.get("/repositories/default").json()
+    repository_id = created["repository"]["id"]
+    managed_path = data_dir / "repositories" / repository_id / "sources" / "managed.txt"
+    derived_dir = data_dir / "repositories" / repository_id / "derived" / "version"
+    external_path = tmp_path / "external.txt"
+    managed_path.parent.mkdir(parents=True)
+    managed_path.write_text("managed")
+    derived_dir.mkdir(parents=True)
+    (derived_dir / "page.png").write_text("derived")
+    external_path.write_text("external")
+    with app.state.test_session_factory() as session:
+        managed_document = _add_document_with_chunks(session, repository_id, "managed.txt", 1)
+        external_document = _add_document_with_chunks(session, repository_id, "external.txt", 1)
+        other_repository = Repository(name="Other Repository", root_path=str(tmp_path / "other"))
+        session.add(other_repository)
+        session.flush()
+        other_repository.settings = repository_models.RepositorySettingsRow(
+            settings=created["settings"]
+        )
+        _add_document_with_chunks(session, other_repository.id, "other.txt", 1)
+        session.flush()
+        session.query(DocumentVersion).filter_by(id=managed_document.current_version_id).update(
+            {"storage_path": str(managed_path)}
+        )
+        session.query(DocumentVersion).filter_by(id=external_document.current_version_id).update(
+            {"storage_path": str(external_path)}
+        )
+        chat_session = ChatSession(
+            repository_id=repository_id,
+            title="Delete chat",
+            model="local",
+            retrieval_settings={},
+            prompt_id="rag-chat-default-v1",
+        )
+        session.add(chat_session)
+        session.flush()
+        session.add(
+            ChatMessageRow(
+                session_id=chat_session.id,
+                repository_id=repository_id,
+                sequence=1,
+                role="user",
+                content="delete",
+            )
+        )
+        session.add(
+            RetrievalRun(
+                repository_id=repository_id,
+                mode="hybrid",
+                query="delete",
+                filters={},
+                top_k=5,
+                candidate_pool_size=25,
+                rrf_constant=60,
+                reranker_strategy="none",
+                metadata_boosts={},
+                settings_snapshot={},
+            )
+        )
+        session.add(
+            SandboxRun(
+                repository_id=repository_id,
+                prompt_version_id=None,
+                query="delete",
+                model="local",
+                retrieval_settings={},
+                prompt_snapshot={},
+                answer="answer",
+                latency_ms=1,
+                status="complete",
+            )
+        )
+        session.add(RepositorySnapshot(repository_id=repository_id, manifest={"kind": "export"}))
+        session.commit()
+        other_repository_id = other_repository.id
+        rebuild_full_text_index(session, repository_id)
+        rebuild_full_text_index(session, other_repository_id)
+        session.add(
+            EmbeddingRun(
+                repository_id=repository_id,
+                provider="sentence_transformers",
+                model="test-deterministic",
+                vector_size=8,
+                distance="cosine",
+                collection_name="default_repository",
+                status="indexed",
+                chunk_count=2,
+                settings_snapshot={},
+            )
+        )
+        session.commit()
+
+    rejected = client.post(
+        f"/repositories/{repository_id}/admin/delete",
+        json={"confirmation_value": "not the repository name"},
+    )
+
+    assert rejected.status_code == 400
+    assert managed_path.exists()
+    assert external_path.exists()
+
+    response = client.post(
+        f"/repositories/{repository_id}/admin/delete",
+        json={"confirmation_value": created["repository"]["name"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed_with_warnings"
+    removed_categories = {item["category"] for item in payload["removed"]}
+    preserved_categories = {item["category"] for item in payload["preserved"]}
+    failed_categories = {item["category"] for item in payload["failed"]}
+    assert "database_records" in removed_categories
+    assert "app_managed_sources" in removed_categories
+    assert "full_text_index" in removed_categories
+    assert "external_sources" in preserved_categories
+    assert "model_caches" in preserved_categories
+    assert "vector_index" in failed_categories
+    assert any(warning["code"] == "vector_cleanup_incomplete" for warning in payload["warnings"])
+    assert not managed_path.exists()
+    assert not derived_dir.exists()
+    assert external_path.exists()
+
+    with app.state.test_session_factory() as session:
+        assert session.get(Repository, repository_id) is None
+        assert session.get(Repository, other_repository_id) is not None
+        assert session.query(Document).filter_by(repository_id=repository_id).count() == 0
+        assert session.query(Document).filter_by(repository_id=other_repository_id).count() == 1
+        deleted_fts = session.scalar(
+            text("SELECT COUNT(*) FROM full_text_chunks WHERE repository_id = :repository_id"),
+            {"repository_id": repository_id},
+        )
+        other_fts = session.scalar(
+            text("SELECT COUNT(*) FROM full_text_chunks WHERE repository_id = :repository_id"),
+            {"repository_id": other_repository_id},
+        )
+        assert deleted_fts == 0
+        assert other_fts == 1
 
 
 def test_repository_summary_reports_partial_and_stale_indexes() -> None:

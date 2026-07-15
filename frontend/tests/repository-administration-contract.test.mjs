@@ -15,7 +15,7 @@ test("Repository Administration is routed and visible in the management shell", 
   assert.match(source, /activeView === "admin"/);
 });
 
-test("Repository Administration loads local inventory without destructive actions", () => {
+test("Repository Administration loads local inventory before destructive actions", () => {
   assert.match(source, /type RepositoryAdminInventory =/);
   assert.match(source, /repositories\/admin\/inventory/);
   assert.match(source, /Local repository inventory/);
@@ -31,18 +31,29 @@ test("Repository Administration loads local inventory without destructive action
   assert.match(source, /adminStorageStatusLabel/);
 
   const adminComponent = source.match(/function RepositoryAdministration[\s\S]*?function RepositoryCleanupPreviewPanel/)?.[0] ?? "";
-  assert.doesNotMatch(adminComponent, /method: "DELETE"|method: "POST"|Clear all|Execute cleanup/);
+  assert.doesNotMatch(adminComponent, /method: "DELETE"|Clear all|Execute cleanup/);
 });
 
-test("Repository Administration previews cleanup plans before execution exists", () => {
+test("Repository Administration previews cleanup plans before confirmed deletion", () => {
   assert.match(source, /type RepositoryDeletePreview =/);
+  assert.match(source, /type RepositoryDeleteResult =/);
   assert.match(source, /previewRepositoryCleanup/);
+  assert.match(source, /deleteRepositoryFromPreview/);
   assert.match(source, /repositories\/\$\{repositoryId\}\/admin\/delete-preview/);
+  assert.match(source, /repositories\/\$\{deletePreview\.repository\.id\}\/admin\/delete/);
   assert.match(source, /Preview cleanup/);
   assert.match(source, /RepositoryCleanupPreviewPanel/);
+  assert.match(source, /RepositoryCleanupResultPanel/);
   assert.match(source, /database_counts/);
   assert.match(source, /warnings/);
   assert.match(source, /adminCleanupActionLabel/);
+  assert.match(source, /confirmationValue === preview\.repository\.name/);
+  assert.match(source, /Type repository name to confirm/);
+  assert.match(source, /Delete repository/);
+  assert.match(source, /Cleanup result/);
+  assert.match(source, /removed: RepositoryCleanupResultItem\[\]/);
+  assert.match(source, /preserved: RepositoryCleanupResultItem\[\]/);
+  assert.match(source, /failed: RepositoryCleanupResultItem\[\]/);
   assert.match(source, /No records, files, indexes, or model\s+[\s\S]*?caches are changed by this preview/);
   assert.match(source, /Retry available after the local service is reachable/);
 });
@@ -55,4 +66,6 @@ test("Repository Administration has stable layout hooks", () => {
   assert.match(styles, /\.admin-hints/);
   assert.match(styles, /\.admin-preview-panel/);
   assert.match(styles, /\.admin-plan-retry_required/);
+  assert.match(styles, /\.admin-confirm-delete/);
+  assert.match(styles, /\.admin-result-grid/);
 });

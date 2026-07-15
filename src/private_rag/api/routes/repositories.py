@@ -15,6 +15,8 @@ from private_rag.repositories.schemas import (
     RepositoryAdminInventory,
     RepositoryDashboardSummary,
     RepositoryDeletePreview,
+    RepositoryDeleteRequest,
+    RepositoryDeleteResult,
     RepositoryManifest,
     RepositoryRead,
     RepositorySettingsImpactRequest,
@@ -28,6 +30,7 @@ from private_rag.repositories.service import (
     SettingsReadinessChecker,
     analyze_repository_settings_impact,
     check_repository_settings_readiness,
+    delete_repository_with_cleanup,
     ensure_default_repository,
     export_manifest,
     get_repository_with_settings,
@@ -38,6 +41,7 @@ from private_rag.repositories.service import (
     update_repository_settings,
     validate_recreate_request,
 )
+from private_rag.vector.store import QdrantVectorStore, VectorStore
 
 router = APIRouter(prefix="/repositories", tags=["repositories"])
 
@@ -65,6 +69,14 @@ def get_settings_readiness_checker() -> SettingsReadinessChecker:
 SettingsReadinessCheckerDependency = Annotated[
     SettingsReadinessChecker, Depends(get_settings_readiness_checker)
 ]
+
+
+def get_admin_vector_store() -> Generator[VectorStore, None, None]:
+    settings = get_settings()
+    yield QdrantVectorStore(settings.qdrant_url)
+
+
+AdminVectorStoreDependency = Annotated[VectorStore, Depends(get_admin_vector_store)]
 
 
 @router.get("/default", response_model=RepositoryWithSettings)
@@ -99,6 +111,30 @@ def preview_repository_admin_deletion(
     if preview is None:
         raise HTTPException(status_code=404, detail="Repository not found")
     return preview
+
+
+@router.post("/{repository_id}/admin/delete", response_model=RepositoryDeleteResult)
+def delete_repository_admin(
+    repository_id: str,
+    request: RepositoryDeleteRequest,
+    session: DbSession,
+    checker: SettingsReadinessCheckerDependency,
+    vector_store: AdminVectorStoreDependency,
+) -> RepositoryDeleteResult:
+    try:
+        result = delete_repository_with_cleanup(
+            session,
+            repository_id=repository_id,
+            confirmation_value=request.confirmation_value,
+            app_settings=get_settings(),
+            checker=checker,
+            vector_store=vector_store,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return result
 
 
 @router.get("/{repository_id}/settings", response_model=RepositoryWithSettings)

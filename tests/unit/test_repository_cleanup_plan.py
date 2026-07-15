@@ -15,9 +15,13 @@ from private_rag.prompt_sandbox.models import SandboxPromptVersion, SandboxRun
 from private_rag.repositories import models as repository_models  # noqa: F401
 from private_rag.repositories.models import Repository, RepositorySettingsRow, RepositorySnapshot
 from private_rag.repositories.schemas import RepositorySettings, RepositorySettingsReadinessItem
-from private_rag.repositories.service import preview_repository_deletion
+from private_rag.repositories.service import (
+    delete_repository_with_cleanup,
+    preview_repository_deletion,
+)
 from private_rag.retrieval.models import RetrievalResult, RetrievalRun
 from private_rag.vector.models import EmbeddingRun
+from private_rag.vector.store import InMemoryVectorStore
 
 
 class FakeCleanupChecker:
@@ -216,6 +220,77 @@ def test_delete_preview_classifies_storage_and_warns_without_mutating(tmp_path: 
         assert preview.warnings[0].code == "qdrant_unavailable"
         assert session.get(Repository, repository.id) is not None
         assert session.query(Document).filter_by(repository_id=repository.id).count() == 2
+
+
+def test_confirmed_delete_removes_managed_files_and_preserves_external_sources(
+    tmp_path: Path,
+) -> None:
+    session_factory = _session_factory()
+    settings = Settings(data_dir=tmp_path / "data")
+    app_managed_path = settings.data_dir / "repositories" / "repo-1" / "sources" / "managed.txt"
+    derived_path = settings.data_dir / "repositories" / "repo-1" / "derived" / "version"
+    external_path = tmp_path / "external" / "source.txt"
+    app_managed_path.parent.mkdir(parents=True)
+    app_managed_path.write_text("managed")
+    derived_path.mkdir(parents=True)
+    (derived_path / "page.png").write_text("derived")
+    external_path.parent.mkdir(parents=True)
+    external_path.write_text("external")
+    vector_store = InMemoryVectorStore()
+    vector_store.recreate_collection("preview_collection", 8, "cosine")
+
+    with session_factory() as session:
+        repository = Repository(
+            id="repo-1", name="Preview Repository", root_path=str(settings.data_dir)
+        )
+        session.add(repository)
+        session.flush()
+        repository.settings = RepositorySettingsRow(
+            settings=RepositorySettings.from_app_settings(settings).model_dump(mode="json")
+        )
+        _add_version(session, repository.id, "managed", app_managed_path)
+        _add_version(session, repository.id, "external", external_path)
+        session.add(
+            EmbeddingRun(
+                repository_id=repository.id,
+                provider="sentence_transformers",
+                model="test",
+                vector_size=8,
+                distance="cosine",
+                collection_name="preview_collection",
+                status="indexed",
+                chunk_count=2,
+                settings_snapshot={},
+            )
+        )
+        session.commit()
+        repository_id = repository.id
+        repository_name = repository.name
+
+        result = delete_repository_with_cleanup(
+            session,
+            repository_id=repository_id,
+            confirmation_value=repository_name,
+            app_settings=settings,
+            checker=FakeCleanupChecker(qdrant_ready=True),
+            vector_store=vector_store,
+        )
+
+        assert result is not None
+        assert result.status == "completed"
+        assert session.get(Repository, repository_id) is None
+        assert session.query(Document).filter_by(repository_id=repository_id).count() == 0
+        assert not app_managed_path.exists()
+        assert not derived_path.exists()
+        assert external_path.exists()
+        assert "preview_collection" not in vector_store.collections
+        removed_categories = {item.category for item in result.removed}
+        preserved_categories = {item.category for item in result.preserved}
+        assert "database_records" in removed_categories
+        assert "app_managed_sources" in removed_categories
+        assert "vector_index" in removed_categories
+        assert "external_sources" in preserved_categories
+        assert "model_caches" in preserved_categories
 
 
 def _session_factory() -> sessionmaker[Session]:

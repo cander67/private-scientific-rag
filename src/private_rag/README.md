@@ -23,6 +23,7 @@ Current API surface:
 - `GET /repositories/default`: creates or returns the default repository with validated settings.
 - `GET /repositories/admin/inventory`: lists local repository administration summaries with scoped counts, full-text/vector index status, and storage-category hints before destructive workflows are available.
 - `GET /repositories/{repository_id}/admin/delete-preview`: previews a repository cleanup plan without deleting anything, including database counts, app-managed sources, preserved external files, full-text/vector cleanup impact, model-cache preservation, and retryable Qdrant warnings.
+- `POST /repositories/{repository_id}/admin/delete`: deletes one repository after exact-name confirmation, removing repository-scoped database records, app-managed artifacts, full-text rows, and vector collections where reachable while preserving external files and model caches.
 - `GET /repositories/{repository_id}/settings`: loads repository settings.
 - `PUT /repositories/{repository_id}/settings`: validates and saves repository settings.
 - `POST /repositories/{repository_id}/settings/impact`: previews rebuild, workflow, export/recreate, and evaluation-freshness impact for draft settings.

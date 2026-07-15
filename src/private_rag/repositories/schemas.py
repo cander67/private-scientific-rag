@@ -325,6 +325,18 @@ class RepositoryCleanupWarning(BaseModel):
     retryable: bool = False
 
 
+class RepositoryCleanupResultItem(BaseModel):
+    category: CleanupCategory
+    label: str
+    count: int = 0
+    paths: list[str] = Field(default_factory=list)
+    detail: str
+
+
+class RepositoryDeleteRequest(BaseModel):
+    confirmation_value: str = Field(min_length=1)
+
+
 class RepositoryDeletePreview(BaseModel):
     repository: RepositoryRead
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
@@ -332,6 +344,18 @@ class RepositoryDeletePreview(BaseModel):
     plan: list[RepositoryCleanupPlanItem] = Field(default_factory=list)
     warnings: list[RepositoryCleanupWarning] = Field(default_factory=list)
     destructive: bool = False
+
+
+class RepositoryDeleteResult(BaseModel):
+    repository: RepositoryRead
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    status: Literal["completed", "completed_with_warnings", "failed"]
+    database_counts: RepositoryCleanupDatabaseCounts
+    removed: list[RepositoryCleanupResultItem] = Field(default_factory=list)
+    preserved: list[RepositoryCleanupResultItem] = Field(default_factory=list)
+    skipped: list[RepositoryCleanupResultItem] = Field(default_factory=list)
+    failed: list[RepositoryCleanupResultItem] = Field(default_factory=list)
+    warnings: list[RepositoryCleanupWarning] = Field(default_factory=list)
 
 
 class RepositoryManifest(BaseModel):
