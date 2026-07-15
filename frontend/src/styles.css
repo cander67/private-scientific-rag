@@ -759,6 +759,21 @@ textarea {
   margin-top: var(--s4);
 }
 
+.export-default-note {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--s3);
+}
+
+.export-default-note small {
+  color: var(--text-faint);
+  font-size: 0.78rem;
+}
+
 .export-toggle {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -896,6 +911,14 @@ textarea {
   color: var(--text-faint);
   font-size: 0.72rem;
   padding: 2px 6px;
+}
+
+.settings-impact-actions,
+.settings-readiness-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-top: var(--s3);
 }
 
 .settings-grid {
@@ -1479,6 +1502,22 @@ textarea {
 
 .chat-index-actions {
   margin-top: var(--s4);
+}
+
+.chat-defaults-note {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  margin-top: var(--s3);
+  padding: var(--s3);
+}
+
+.chat-defaults-note small {
+  color: var(--text-faint);
+  font-size: 0.78rem;
 }
 
 .chat-thread {

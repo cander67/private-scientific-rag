@@ -69,7 +69,6 @@ def read_chat_readiness(
         session,
         repository_id=repository_id,
         llm=llm,
-        model=get_settings().default_llm,
     )
     if response is None:
         raise HTTPException(status_code=404, detail="Repository not found")

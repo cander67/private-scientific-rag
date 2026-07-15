@@ -93,7 +93,34 @@ test("Settings / Models links back to workflow-owned pages", () => {
   assert.match(source, /onNavigate\("chat"\)/);
   assert.match(source, /onNavigate\("sandbox"\)/);
   assert.match(source, /onNavigate\("export"\)/);
+  assert.match(source, /workflowLinksForImpact/);
+  assert.match(source, /workflowLinksForReadiness/);
+  assert.match(source, /Open Document Manager/);
+  assert.match(source, /Open Search Lab/);
+  assert.match(source, /Open Chat Workspace/);
+  assert.match(source, /Open Prompt Sandbox/);
+  assert.match(source, /Open Export Center/);
+  assert.match(source, /Open Recreate Repository/);
+  assert.match(styles, /\.settings-impact-actions/);
+  assert.match(styles, /\.settings-readiness-actions/);
   assert.match(styles, /\.settings-layout/);
   assert.match(styles, /\.settings-grid/);
   assert.match(styles, /\.settings-readiness-grid/);
+});
+
+test("Settings defaults propagate to chat and export without removing per-run overrides", () => {
+  assert.match(source, /<ChatWorkspace[\s\S]*?settings=\{repositorySettings\}/);
+  assert.match(source, /New chat default/);
+  assert.match(source, /settings\?\.model\.ollama_chat_model/);
+  assert.match(source, /activePrompt\?\.name/);
+  assert.match(source, /activeSession\?\.model \?\? chatDefaultModel/);
+  assert.match(source, /defaultIncludeSources=\{repositorySettings\?\.export\.include_sources \?\? true\}/);
+  assert.match(source, /defaultIncludeIndexes=\{repositorySettings\?\.export\.include_indexes \?\? false\}/);
+  assert.match(source, /Saved export defaults/);
+  assert.match(source, /sandbox remains per export/);
+  assert.match(source, /onRerankerStrategyChange=\{setRerankerStrategy\}/);
+  assert.match(source, /onRetrievalSettingsChange=\{setChatRetrievalSettings\}/);
+  assert.match(source, /sandboxComparisonRunConfigs\(selectedPrompt\.id, sandboxModel, sandboxTopK\)/);
+  assert.match(styles, /\.chat-defaults-note/);
+  assert.match(styles, /\.export-default-note/);
 });

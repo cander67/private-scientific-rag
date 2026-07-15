@@ -230,11 +230,12 @@ def chat_readiness(
     *,
     repository_id: str,
     llm: ChatLLM,
-    model: str,
 ) -> ChatReadinessResponse | None:
     repository = session.get(Repository, repository_id)
-    if repository is None:
+    if repository is None or repository.settings is None:
         return None
+    settings = RepositorySettings.model_validate(repository.settings.settings)
+    model = settings.model.ollama_chat_model
 
     parsed_chunks = _parsed_chunk_count(session, repository_id)
     full_text_count = _full_text_count(session, repository_id)

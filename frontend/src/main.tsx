@@ -1929,6 +1929,7 @@ function App() {
               />
             ) : activeView === "chat" ? (
               <ChatWorkspace
+                settings={repositorySettings}
                 sessions={chatSessions}
                 activeSession={activeChatSession}
                 input={chatInput}
@@ -1993,6 +1994,8 @@ function App() {
                 chatSessions={chatSessions}
                 sandboxPrompts={sandboxPrompts}
                 settings={repositorySettings}
+                defaultIncludeSources={repositorySettings?.export.include_sources ?? true}
+                defaultIncludeIndexes={repositorySettings?.export.include_indexes ?? false}
                 includeSources={exportIncludeSources}
                 includeSandbox={exportIncludeSandbox}
                 busy={exportBusy}
@@ -2604,6 +2607,7 @@ function SettingsModels({
           impact={visibleImpact}
           message={impactMessage}
           mode={dirty ? "pending" : "saved"}
+          onNavigate={onNavigate}
         />
         <div className="settings-actions">
           <button className="btn btn-sm" type="button" onClick={() => onNavigate("documents")}>
@@ -2870,7 +2874,7 @@ function SettingsModels({
         </p>
         <div className="settings-readiness-grid">
           {settingsReadinessItems(readiness, draft).map((item) => (
-            <ReadinessCard item={item} key={item.target} />
+            <ReadinessCard item={item} key={item.target} onNavigate={onNavigate} />
           ))}
         </div>
         <div className="export-chip-list settings-chip-list">
@@ -2918,10 +2922,12 @@ function SettingsImpactPanel({
   impact,
   message,
   mode,
+  onNavigate,
 }: {
   impact: SettingsImpactResponse | null;
   message: string;
   mode: "pending" | "saved";
+  onNavigate: (view: View) => void;
 }) {
   const impacts = impact?.impacts ?? [];
   return (
@@ -2957,6 +2963,13 @@ function SettingsImpactPanel({
                   ))}
                 </div>
               )}
+              <div className="settings-impact-actions">
+                {workflowLinksForImpact(item).map((link) => (
+                  <button className="btn btn-sm" type="button" onClick={() => onNavigate(link.view)} key={link.view}>
+                    {link.label}
+                  </button>
+                ))}
+              </div>
             </article>
           ))}
         </div>
@@ -3065,13 +3078,29 @@ function SettingCheckbox({
   );
 }
 
-function ReadinessCard({ item }: { item: SettingsReadinessItem }) {
+function ReadinessCard({
+  item,
+  onNavigate,
+}: {
+  item: SettingsReadinessItem;
+  onNavigate: (view: View) => void;
+}) {
+  const links = workflowLinksForReadiness(item);
   return (
     <div className={`settings-readiness-card settings-readiness-${item.status}`}>
       <span>{item.label}</span>
       <strong>{item.model ?? item.target}</strong>
       <em>{settingsReadinessStatusLabel(item.status)}</em>
       <small>{item.message}</small>
+      {links.length > 0 && (
+        <div className="settings-readiness-actions">
+          {links.map((link) => (
+            <button className="btn btn-sm" type="button" onClick={() => onNavigate(link.view)} key={link.view}>
+              {link.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -3300,6 +3329,8 @@ function ExportCenter({
   chatSessions,
   sandboxPrompts,
   settings,
+  defaultIncludeSources,
+  defaultIncludeIndexes,
   includeSources,
   includeSandbox,
   busy,
@@ -3317,6 +3348,8 @@ function ExportCenter({
   chatSessions: ChatSession[];
   sandboxPrompts: SandboxPromptVersion[];
   settings: RepositorySettings | null;
+  defaultIncludeSources: boolean;
+  defaultIncludeIndexes: boolean;
   includeSources: boolean;
   includeSandbox: boolean;
   busy: boolean;
@@ -3381,6 +3414,13 @@ function ExportCenter({
             </button>
           </div>
           <div className="export-option-list">
+            <div className="export-default-note">
+              <strong>Saved export defaults</strong>
+              <small>
+                Sources {defaultIncludeSources ? "included" : "excluded"} · indexes{" "}
+                {defaultIncludeIndexes ? "included" : "excluded"} · sandbox remains per export
+              </small>
+            </div>
             <label className="export-toggle" htmlFor="export-include-sources">
               <input
                 id="export-include-sources"
@@ -3866,6 +3906,7 @@ function SandboxRunCard({
 }
 
 function ChatWorkspace({
+  settings,
   sessions,
   activeSession,
   input,
@@ -3891,6 +3932,7 @@ function ChatWorkspace({
   onCloseCitation,
   onOpenCitation,
 }: {
+  settings: RepositorySettings | null;
   sessions: ChatSession[];
   activeSession: ChatSession | null;
   input: string;
@@ -3918,6 +3960,10 @@ function ChatWorkspace({
 }) {
   const threadRef = useRef<HTMLDivElement | null>(null);
   const readyForSelectedMode = chatReadyForSelectedMode(readiness, retrievalSettings);
+  const activePrompt = settings?.prompt.library.find(
+    (prompt) => prompt.id === settings.prompt.active_chat_prompt_id,
+  );
+  const chatDefaultModel = settings?.model.ollama_chat_model ?? "gemma3:4b";
 
   useEffect(() => {
     const thread = threadRef.current;
@@ -4082,8 +4128,14 @@ function ChatWorkspace({
                 {rebuildBusy === "vector" ? "Rebuilding vector" : "Rebuild vector"}
               </button>
               <span className="muted">
-                {activeSession?.model ?? "gemma3:4b"} · settings are saved on send
+                {activeSession?.model ?? chatDefaultModel} · settings are saved on send
               </span>
+            </div>
+            <div className="chat-defaults-note">
+              <strong>New chat default</strong>
+              <small>
+                {chatDefaultModel} · {activePrompt?.name ?? settings?.prompt.active_chat_prompt_id ?? "active prompt"}
+              </small>
             </div>
           </div>
         </aside>
@@ -5221,6 +5273,50 @@ function settingsReadinessStatusLabel(status: SettingsReadinessStatus) {
     skipped: "Skipped",
   };
   return labels[status];
+}
+
+function workflowLinksForImpact(item: SettingsImpact) {
+  const links: Array<{ view: View; label: string }> = [];
+  const add = (view: View, label: string) => {
+    if (!links.some((link) => link.view === view)) {
+      links.push({ view, label });
+    }
+  };
+
+  switch (item.category) {
+    case "document_reprocessing":
+      add("documents", "Open Document Manager");
+      break;
+    case "full_text_rebuild":
+    case "vector_rebuild":
+    case "retrieval_defaults":
+    case "evaluation_freshness":
+      add("search", "Open Search Lab");
+      break;
+    case "chat_defaults":
+      add("chat", "Open Chat Workspace");
+      break;
+    case "prompt_defaults":
+      add("chat", "Open Chat Workspace");
+      add("sandbox", "Open Prompt Sandbox");
+      break;
+    case "export_recreate":
+      add("export", "Open Export Center");
+      add("recreate", "Open Recreate Repository");
+      break;
+  }
+
+  return links;
+}
+
+function workflowLinksForReadiness(item: SettingsReadinessItem) {
+  if (item.status === "ready" || item.status === "skipped" || item.status === "not_checked") {
+    return [];
+  }
+  if (item.target === "chat") {
+    return [{ view: "chat" as const, label: "Open Chat Workspace" }];
+  }
+  return [{ view: "search" as const, label: "Open Search Lab" }];
 }
 
 function formatBoolean(value: boolean | undefined) {

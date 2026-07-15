@@ -245,6 +245,27 @@ def test_chat_readiness_reports_index_and_model_state() -> None:
     assert ready_response.json()["ready_for_chat"] is True
 
 
+def test_chat_readiness_uses_repository_chat_model() -> None:
+    client, llm = _client_with_chat_fakes()
+    repository_response = client.get("/repositories/default")
+    repository_id = repository_response.json()["repository"]["id"]
+    settings = repository_response.json()["settings"]
+    settings["model"]["ollama_chat_model"] = "gemma3:custom"
+    settings["embedding"]["model"] = "test-deterministic"
+    settings["vector"]["vector_size"] = 8
+    update_response = client.put(
+        f"/repositories/{repository_id}/settings",
+        json={"settings": settings},
+    )
+
+    response = client.get(f"/repositories/{repository_id}/chat/readiness")
+
+    assert update_response.status_code == 200
+    assert response.status_code == 200
+    assert response.json()["local_model"]["model"] == "gemma3:custom"
+    assert llm.calls == []
+
+
 def test_chat_readiness_distinguishes_parsed_but_unindexed_repository() -> None:
     client, _ = _client_with_chat_fakes()
     repository_id = _default_repository_id(client)
