@@ -825,10 +825,33 @@ textarea {
 }
 
 .dashboard-overview,
-.dashboard-status {
+.dashboard-status,
+.dashboard-empty {
   display: flex;
   flex-direction: column;
   gap: var(--s4);
+}
+
+.dashboard-empty {
+  max-width: 720px;
+}
+
+.dashboard-repository-picker {
+  display: grid;
+  grid-template-columns: 120px minmax(220px, 360px);
+  align-items: center;
+  gap: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: var(--s3);
+}
+
+.dashboard-repository-picker span {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .dashboard-kv dd {
@@ -2114,6 +2137,10 @@ textarea {
   .repository-picker {
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .dashboard-repository-picker {
+    grid-template-columns: 1fr;
   }
 
   .page {

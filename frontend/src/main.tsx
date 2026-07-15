@@ -853,6 +853,24 @@ function App() {
     }
   }
 
+  async function useDefaultRepository() {
+    setDashboardMessage("Creating default repository");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/default`);
+      if (!response.ok) {
+        throw new Error("default repository unavailable");
+      }
+      const payload = (await response.json()) as RepositorySettingsResponse;
+      setRepositories((current) => mergeRepositories(current, payload.repository));
+      setRepositorySettings(payload.settings);
+      activateRepository(payload.repository);
+      setMessage("Ready");
+    } catch {
+      setDashboardMessage("Could not create default repository");
+      setMessage("Backend unavailable");
+    }
+  }
+
   function activateRepository(nextRepository: RepositoryRead) {
     window.localStorage.setItem("activeRepositoryId", nextRepository.id);
     setRepository(nextRepository);
@@ -1986,12 +2004,15 @@ function App() {
             {activeView === "dashboard" ? (
               <RepositoryDashboard
                 repository={repository}
+                repositories={repositories}
                 documents={documents}
                 totalChunks={totalChunks}
                 chatSessions={chatSessions}
                 settings={repositorySettings}
                 summary={dashboardSummary}
                 message={dashboardMessage}
+                onSelectRepository={activateRepository}
+                onUseDefaultRepository={() => void useDefaultRepository()}
                 onNavigate={navigateTo}
               />
             ) : activeView === "search" ? (
@@ -2479,23 +2500,54 @@ function App() {
 
 function RepositoryDashboard({
   repository,
+  repositories,
   documents,
   totalChunks,
   chatSessions,
   settings,
   summary,
   message,
+  onSelectRepository,
+  onUseDefaultRepository,
   onNavigate,
 }: {
   repository: RepositoryResponse["repository"] | null;
+  repositories: RepositoryRead[];
   documents: DocumentSummary[];
   totalChunks: number;
   chatSessions: ChatSession[];
   settings: RepositorySettings | null;
   summary: DashboardSummary | null;
   message: string;
+  onSelectRepository: (repository: RepositoryRead) => void;
+  onUseDefaultRepository: () => void;
   onNavigate: (view: View) => void;
 }) {
+  if (!repository) {
+    return (
+      <div className="dashboard-layout">
+        <section className="card dashboard-empty">
+          <div>
+            <div className="eyebrow">Repository dashboard</div>
+            <h2>No local repository is active</h2>
+            <p>
+              Create or use the default local repository to start fresh, or restore a repository
+              from a portable export bundle.
+            </p>
+          </div>
+          <div className="dashboard-actions">
+            <button className="btn btn-primary" type="button" onClick={onUseDefaultRepository}>
+              Use default repository
+            </button>
+            <button className="btn" type="button" onClick={() => onNavigate("recreate")}>
+              Open Recreate Repository
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   const fallbackParsedDocuments = documents.filter((document) => document.current_version?.status === "parsed").length;
   const counts = summary?.counts;
   const activeConfig = summary?.active_config;
@@ -2517,6 +2569,27 @@ function RepositoryDashboard({
           </span>
         </div>
         <p className="hint">{message}</p>
+        {repositories.length > 1 && (
+          <label className="dashboard-repository-picker" htmlFor="dashboard-repository">
+            <span>Repository</span>
+            <select
+              id="dashboard-repository"
+              value={repository.id}
+              onChange={(event) => {
+                const selectedRepository = repositories.find((item) => item.id === event.target.value);
+                if (selectedRepository) {
+                  onSelectRepository(selectedRepository);
+                }
+              }}
+            >
+              {repositories.map((item) => (
+                <option value={item.id} key={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <dl className="kv dashboard-kv">
           <dt>repository id</dt>
           <dd>{repository?.id ?? "unavailable"}</dd>

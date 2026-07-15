@@ -58,6 +58,26 @@ test("Dashboard status surface renders summary counts, readiness, config, and wa
   assert.match(styles, /\.dashboard-warning-list/);
 });
 
+test("Dashboard supports repository switching and no-repository recovery", () => {
+  assert.match(source, /repositories=\{repositories\}/);
+  assert.match(source, /onSelectRepository=\{activateRepository\}/);
+  assert.match(source, /onUseDefaultRepository=\{\(\) => void useDefaultRepository\(\)\}/);
+  assert.match(source, /async function useDefaultRepository\(\)/);
+  assert.match(source, /fetch\(`\$\{API_BASE\}\/repositories\/default`\)/);
+  assert.match(source, /id="dashboard-repository"/);
+  assert.match(source, /repositories\.length > 1/);
+  assert.match(source, /onSelectRepository\(selectedRepository\)/);
+  assert.match(source, /No local repository is active/);
+  assert.match(source, /Use default repository/);
+  assert.match(source, /Open Recreate Repository/);
+  assert.match(source, /activateRepository\(recreatedRepository\)/);
+  assert.match(styles, /\.dashboard-empty/);
+  assert.match(styles, /\.dashboard-repository-picker/);
+
+  const dashboardComponent = source.match(/function RepositoryDashboard[\s\S]*?function DashboardIndexCard/)?.[0] ?? "";
+  assert.doesNotMatch(dashboardComponent, /Delete all|reset/i);
+});
+
 test("Existing workspace routes remain routed after dashboard aliasing", () => {
   assert.match(source, /#documents/);
   assert.match(source, /#source-viewer/);

@@ -13,8 +13,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from private_rag.api.app import create_app
-from private_rag.api.routes.repositories import get_db_session
+from private_rag.api.routes.repositories import (
+    get_db_session,
+    get_settings_chat_llm,
+    get_settings_readiness_checker,
+)
 from private_rag.api.routes.vector import get_embedding_provider, get_vector_store
+from private_rag.chat.llm import ChatCompletion, ChatMessage
 from private_rag.chat.models import ChatMessageRow, ChatSession
 from private_rag.core.settings import Settings
 from private_rag.db.base import Base
@@ -22,6 +27,7 @@ from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersio
 from private_rag.prompt_sandbox.models import SandboxComparison, SandboxPromptVersion, SandboxRun
 from private_rag.repositories import models as repository_models  # noqa: F401
 from private_rag.repositories.models import Repository, RepositorySettingsRow
+from private_rag.repositories.schemas import RepositorySettingsReadinessItem
 from private_rag.repositories.service import ensure_default_repository
 from private_rag.retrieval.models import RetrievalResult, RetrievalRun
 from private_rag.vector.embeddings import DeterministicEmbeddingProvider
@@ -44,12 +50,85 @@ def _client_with_database() -> tuple[TestClient, sessionmaker[Session], InMemory
 
     app = create_app()
     app.dependency_overrides[get_db_session] = override_session
+    app.dependency_overrides[get_settings_chat_llm] = lambda: FakeSettingsLLM()
+    app.dependency_overrides[get_settings_readiness_checker] = lambda: (
+        FakeSettingsReadinessChecker()
+    )
     store = InMemoryVectorStore()
     app.dependency_overrides[get_vector_store] = lambda: store
     app.dependency_overrides[get_embedding_provider] = lambda: DeterministicEmbeddingProvider(
         vector_size=8
     )
     return TestClient(app), session_factory, store
+
+
+class FakeSettingsLLM:
+    def complete(self, *, model: str, messages: list[ChatMessage]) -> ChatCompletion:
+        return ChatCompletion(content="local model ready", model=model)
+
+    def smoke(self, *, model: str) -> ChatCompletion:
+        return ChatCompletion(content="local model ready", model=model)
+
+
+class FakeSettingsReadinessChecker:
+    def check_qdrant(
+        self, *, qdrant_url: str, collection_name: str
+    ) -> RepositorySettingsReadinessItem:
+        return RepositorySettingsReadinessItem(
+            target="qdrant",
+            label="Qdrant",
+            status="ready",
+            ready=True,
+            message="Qdrant test boundary is ready.",
+            model=collection_name,
+        )
+
+    def check_chat(
+        self,
+        *,
+        llm: FakeSettingsLLM,
+        model: str,
+    ) -> RepositorySettingsReadinessItem:
+        completion = llm.smoke(model=model)
+        return RepositorySettingsReadinessItem(
+            target="chat",
+            label="Chat model",
+            status="ready",
+            ready=True,
+            message=f"{completion.model} responded.",
+            model=completion.model,
+        )
+
+    def check_embedding(
+        self,
+        *,
+        provider: str,
+        model: str,
+        expected_vector_size: int,
+    ) -> RepositorySettingsReadinessItem:
+        return RepositorySettingsReadinessItem(
+            target="embedding",
+            label="Embedding model",
+            status="ready",
+            ready=True,
+            message=f"{model} reports vector size {expected_vector_size}.",
+            model=model,
+        )
+
+    def check_reranker(
+        self,
+        *,
+        strategy: str,
+        model: str | None,
+    ) -> RepositorySettingsReadinessItem:
+        return RepositorySettingsReadinessItem(
+            target="reranker",
+            label="Reranker",
+            status="ready",
+            ready=True,
+            message="Reranker test boundary is ready.",
+            model=model,
+        )
 
 
 def test_export_bundle_zip_contains_default_payloads_and_sources(tmp_path: Path) -> None:
@@ -284,6 +363,15 @@ def test_recreate_bundle_endpoint_creates_repository_restores_history_and_rebuil
     assert payload["indexes"]["full_text_indexed_chunks"] == 1
     assert payload["indexes"]["vector_indexed_chunks"] == 1
     assert payload["indexes"]["vector_collection_name"] in store.collections
+    summary_response = client.get(f"/repositories/{recreated_id}/summary")
+    assert summary_response.status_code == 200
+    summary = summary_response.json()
+    assert summary["counts"]["documents"] == 1
+    assert summary["counts"]["chunks"] == 1
+    assert summary["counts"]["chat_sessions"] == 1
+    assert summary["counts"]["retrieval_runs"] == 1
+    assert summary["full_text"]["status"] == "ready"
+    assert summary["vector"]["status"] == "ready"
 
     with session_factory() as session:
         recreated_documents = session.scalars(
