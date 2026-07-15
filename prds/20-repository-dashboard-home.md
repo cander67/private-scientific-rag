@@ -1,8 +1,6 @@
 # PRD 20: Repository Dashboard and Home Alias
 
-Status: Implemented and ready for final review. Not closed until explicitly accepted.
-
-**Status:** Backlog.
+**Status:** Complete and closed.
 
 ## Problem Statement
 
