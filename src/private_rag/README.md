@@ -21,6 +21,12 @@ Current API surface:
 
 - `GET /health`: local app and dependency health check.
 - `GET /repositories/default`: creates or returns the default repository with validated settings.
+- `GET /repositories/admin/inventory`: lists local repository administration summaries with scoped counts, full-text/vector index status, and storage-category hints before destructive workflows are available.
+- `GET /repositories/admin/clear-all/preview`: previews aggregate local cleanup for all repositories without deleting anything, including preserved external files/model caches and retryable vector cleanup warnings.
+- `POST /repositories/admin/clear-all`: clears all local repositories after the stronger `DELETE ALL LOCAL REPOSITORIES` confirmation, then recreates the default repository for recovery.
+- `POST /repositories/admin/vector-cleanup/retry`: retries leftover Qdrant collection cleanup from a cleanup result without requiring a second repository deletion.
+- `GET /repositories/{repository_id}/admin/delete-preview`: previews a repository cleanup plan without deleting anything, including database counts, app-managed sources, preserved external files, full-text/vector cleanup impact, model-cache preservation, and retryable Qdrant warnings.
+- `POST /repositories/{repository_id}/admin/delete`: deletes one repository after exact-name confirmation, removing repository-scoped database records, app-managed artifacts, full-text rows, and vector collections where reachable while preserving external files and model caches.
 - `GET /repositories/{repository_id}/settings`: loads repository settings.
 - `PUT /repositories/{repository_id}/settings`: validates and saves repository settings.
 - `POST /repositories/{repository_id}/settings/impact`: previews rebuild, workflow, export/recreate, and evaluation-freshness impact for draft settings.
@@ -64,6 +70,7 @@ Current status:
 - PRD7 local RAG chat with citations is complete and closed: Ollama chat boundary, model registry, readiness checks, chat session persistence, prompt library settings, chat-owned retrieval controls, citation mapping, and Chat Workspace are available.
 - PRD8 Prompt Sandbox is complete and closed: repository-scoped sandbox prompt versions, copy-to/from chat prompt library, prompt deletion, persisted sandbox runs, progressive side-by-side retrieval comparisons, local-model generation, retrieved context snapshots, latency/status display, and the Prompt Sandbox workspace are available. Golden evaluation metrics and evidence-backed promotion are deferred to PRD18.
 - PRD9 export/import/recreate is complete and closed: portable ZIP export bundles, bundle validation, backend recreate execution, active history restore, full-text/vector index rebuild reporting, Export Center, Recreate Repository, and cross-platform transfer documentation are available.
+- PRD19 repository administration and local reset is implemented and ready for review: local repository inventory, cleanup previews, guarded one-repository deletion, guarded clear-all reset, default repository recovery, preservation defaults for external files/model caches, Qdrant cleanup failure reporting, retry vector cleanup, and cross-platform reset guidance are available.
 - PRD20 Repository Dashboard and Home Alias is complete and closed: stable repository summary API, home/dashboard route aliases, dashboard status surface, repository switching, no-repository recovery, workflow quick actions, recent activity, and frontend/backend contract coverage are available.
 - PRD21 Settings / Models is complete and closed: repository-scoped settings editing, validation, impact analysis, explicit readiness checks, workflow follow-up links, chat/export default propagation, and frontend contract coverage are available.
 
@@ -71,7 +78,7 @@ Repository chat prompts live in repository settings under `prompt.library`, with
 
 Settings readiness is also explicit and opt-in. The Settings / Models readiness endpoint distinguishes not checked, unavailable runtime, not installed, ready, failed, and skipped states. Default tests mock Qdrant, chat, embedding, and reranker boundaries; live Qdrant/Ollama/SentenceTransformers/cross-encoder checks stay in the opt-in live test suite.
 
-Repository Dashboard summaries are read-mostly. The summary endpoint scopes all counts and activity to the requested repository, compares parsed chunks against full-text/vector indexed chunks to report missing/partial/stale/ready states, reuses Settings / Models readiness vocabulary for Qdrant/chat/embedding/reranker checks, and returns warnings and recent activity with workflow route targets. Dashboard mutations remain in workflow-owned pages; PRD19 owns destructive repository administration/reset actions.
+Repository Dashboard summaries are read-mostly. The summary endpoint scopes all counts and activity to the requested repository, compares parsed chunks against full-text/vector indexed chunks to report missing/partial/stale/ready states, reuses Settings / Models readiness vocabulary for Qdrant/chat/embedding/reranker checks, and returns warnings and recent activity with workflow route targets. Dashboard mutations remain in workflow-owned pages; destructive repository cleanup lives in Repository Administration.
 
 The default cross-encoder is `cross-encoder/ms-marco-MiniLM-L6-v2`. It must be downloaded into the local SentenceTransformers cache before live reranking; a missing model returns setup guidance instead of silently falling back. Diversity/MMR remains a future strategy. Default CI uses deterministic providers, while real Qdrant and cross-encoder checks are explicit opt-in tests documented in `tests/README.md`.
 

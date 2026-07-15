@@ -27,6 +27,8 @@ PRD20 Repository Dashboard coverage keeps dashboard summary checks deterministic
 
 PRD21 Settings / Models coverage keeps default CI deterministic by mocking service and model boundaries. Unit and integration tests cover repository settings validation, prompt-library invariants, impact categories, settings round-trip/repository scoping, manifest/export reflection, explicit readiness responses for Qdrant/chat/embedding/reranker, chat readiness using the saved repository chat model, and non-finite embedding guards. Frontend contract tests cover the Settings / Models route, grouped editable defaults, save/cancel validation, impact warnings, readiness labels, workflow follow-up links, chat/export default propagation, and preservation of Search Lab, Chat Workspace, and Prompt Sandbox per-run overrides. Live Qdrant, Ollama, SentenceTransformers, and cross-encoder checks remain opt-in below.
 
+PRD19 Repository Administration coverage keeps destructive cleanup deterministic and isolated. Default tests use temporary data directories, test databases, app-managed sample files, external sample files, and fake vector stores to verify preview, guarded one-repository deletion, clear-all recovery, preserved external files/model caches, full-text cleanup, Qdrant-unavailable warnings, and retrying leftover vector collections without deleting a repository twice. Live Qdrant cleanup checks are not part of default CI; run them only against disposable local collections during an explicit manual review window.
+
 PRD9-focused deterministic commands:
 
 ```bash

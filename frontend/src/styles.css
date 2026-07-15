@@ -1002,6 +1002,164 @@ textarea {
   margin: 0 0 var(--s3);
 }
 
+.admin-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.admin-overview,
+.admin-table-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.admin-totals {
+  grid-template-columns: repeat(6, minmax(140px, 1fr));
+}
+
+.admin-active-badge {
+  display: inline-flex;
+  margin-top: var(--s2);
+}
+
+.admin-index-pill {
+  display: block;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text);
+  font-size: 0.78rem;
+  margin-bottom: var(--s2);
+  padding-left: var(--s2);
+  white-space: nowrap;
+}
+
+.admin-hints {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 190px;
+}
+
+.admin-hint {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  overflow-wrap: anywhere;
+}
+
+.admin-preview-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.admin-preview-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+  gap: var(--s4);
+}
+
+.admin-preview-grid h3 {
+  font-size: 0.85rem;
+  margin-bottom: var(--s3);
+}
+
+.admin-warning-list,
+.admin-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.admin-result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(240px, 1fr));
+  gap: var(--s4);
+}
+
+.admin-result-grid h3 {
+  font-size: 0.85rem;
+  margin-bottom: var(--s3);
+}
+
+.admin-plan-item {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: var(--s3);
+}
+
+.admin-result-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: var(--s3);
+}
+
+.admin-plan-item span {
+  color: var(--text-faint);
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-plan-item strong,
+.admin-plan-item b,
+.admin-result-item strong,
+.admin-result-item b {
+  overflow-wrap: anywhere;
+}
+
+.admin-plan-item p,
+.admin-result-item p {
+  color: var(--text-faint);
+  font-size: 0.82rem;
+  margin: var(--s2) 0 0;
+}
+
+.admin-plan-item ul {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  margin: var(--s2) 0 0;
+  padding-left: var(--s4);
+}
+
+.admin-plan-remove {
+  border-left-color: var(--danger);
+}
+
+.admin-plan-preserve {
+  border-left-color: var(--ok);
+}
+
+.admin-plan-retry_required {
+  border-left-color: var(--warn);
+}
+
+.admin-confirm-delete {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: end;
+  gap: var(--s3);
+  border-top: 1px solid var(--border);
+  padding-top: var(--s4);
+}
+
+.admin-confirm-delete label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.admin-confirm-delete span {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .settings-layout {
   display: flex;
   flex-direction: column;
@@ -2119,6 +2277,9 @@ textarea {
 
   .export-metrics,
   .dashboard-grid,
+  .admin-totals,
+  .admin-preview-grid,
+  .admin-result-grid,
   .dashboard-status-grid,
   .dashboard-quick-actions,
   .dashboard-activity-list {
@@ -2204,6 +2365,9 @@ textarea {
   .sandbox-run-grid,
   .export-grid,
   .dashboard-grid,
+  .admin-totals,
+  .admin-preview-grid,
+  .admin-result-grid,
   .dashboard-status-grid,
   .dashboard-quick-actions,
   .dashboard-activity-list,
@@ -2212,7 +2376,8 @@ textarea {
   .settings-prompt-list,
   .settings-impact-list,
   .recreate-grid,
-  .recreate-mapping-row {
+  .recreate-mapping-row,
+  .admin-confirm-delete {
     grid-template-columns: 1fr;
   }
 
