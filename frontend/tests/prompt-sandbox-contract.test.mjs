@@ -6,7 +6,7 @@ const source = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8
 const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
 test("Prompt Sandbox is a first-class routed view", () => {
-  assert.match(source, /type View = "documents" \| "source" \| "search" \| "sandbox" \| "chat" \| "export" \| "recreate"/);
+  assert.match(source, /type View = "documents" \| "source" \| "search" \| "sandbox" \| "chat" \| "settings" \| "export" \| "recreate"/);
   assert.match(source, /#prompt-sandbox/);
   assert.match(source, /navigateTo\("sandbox"\)/);
   assert.match(source, /activeView === "sandbox"/);

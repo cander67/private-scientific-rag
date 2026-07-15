@@ -171,7 +171,7 @@ type RecreateBundleResponse = {
   warnings: ExportBundleValidationIssue[];
 };
 
-type View = "documents" | "source" | "search" | "sandbox" | "chat" | "export" | "recreate";
+type View = "documents" | "source" | "search" | "sandbox" | "chat" | "settings" | "export" | "recreate";
 
 type DocumentVersion = {
   id: string;
@@ -1585,20 +1585,7 @@ function App() {
   }
 
   function navigateTo(view: View) {
-    window.location.hash =
-      view === "documents"
-        ? "documents"
-        : view === "source"
-          ? "source-viewer"
-          : view === "chat"
-            ? "chat-workspace"
-            : view === "sandbox"
-              ? "prompt-sandbox"
-              : view === "export"
-                ? "export-center"
-                : view === "recreate"
-                  ? "recreate-repository"
-                  : "search-lab";
+    window.location.hash = hashForView(view);
     setActiveView(view);
     setNavOpen(false);
   }
@@ -1631,6 +1618,8 @@ function App() {
           ? "Chat Workspace"
           : activeView === "sandbox"
             ? "Prompt Sandbox"
+            : activeView === "settings"
+              ? "Settings / Models"
             : activeView === "export"
               ? "Export Center"
               : activeView === "recreate"
@@ -1643,6 +1632,8 @@ function App() {
         ? `${repository?.name ?? "Default Repository"} · ${sandboxMessage}`
       : activeView === "export"
         ? `${repository?.name ?? "Default Repository"} · ${exportMessage}`
+      : activeView === "settings"
+        ? `${repository?.name ?? "Default Repository"} · repository defaults`
       : activeView === "recreate"
         ? `${repository?.name ?? "Default Repository"} · ${recreateMessage}`
       : activeView === "chat"
@@ -1703,7 +1694,13 @@ function App() {
               Chat Workspace
             </a>
             <span className="nav-label">Manage</span>
-            <a>Settings / Models</a>
+            <a
+              className={activeView === "settings" ? "active" : ""}
+              href="#settings-models"
+              onClick={() => navigateTo("settings")}
+            >
+              Settings / Models
+            </a>
             <a
               className={activeView === "recreate" ? "active" : ""}
               href="#recreate-repository"
@@ -1915,6 +1912,12 @@ function App() {
                 onIncludeSourcesChange={setExportIncludeSources}
                 onIncludeSandboxChange={setExportIncludeSandbox}
                 onExport={() => void exportRepositoryBundle()}
+              />
+            ) : activeView === "settings" ? (
+              <SettingsModels
+                repository={repository}
+                settings={repositorySettings}
+                onNavigate={navigateTo}
               />
             ) : activeView === "recreate" ? (
               <RecreateRepository
@@ -2262,6 +2265,167 @@ function App() {
         </main>
       </div>
     </>
+  );
+}
+
+function SettingsModels({
+  repository,
+  settings,
+  onNavigate,
+}: {
+  repository: RepositoryResponse["repository"] | null;
+  settings: RepositorySettings | null;
+  onNavigate: (view: View) => void;
+}) {
+  const requiredModels = requiredModelsForSettings(settings);
+  const activePrompt = settings?.prompt.library.find(
+    (prompt) => prompt.id === settings.prompt.active_chat_prompt_id,
+  );
+
+  return (
+    <div className="settings-layout">
+      <section className="card settings-overview">
+        <div className="row row-between">
+          <div>
+            <div className="eyebrow">Repository settings</div>
+            <h2>{repository?.name ?? "Default Repository"}</h2>
+          </div>
+          <span className="badge">
+            <span className="dot" />
+            Read only
+          </span>
+        </div>
+        <div className="settings-actions">
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("documents")}>
+            Document Manager
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("search")}>
+            Search Lab
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("chat")}>
+            Chat Workspace
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("sandbox")}>
+            Prompt Sandbox
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => onNavigate("export")}>
+            Export Center
+          </button>
+        </div>
+      </section>
+
+      <div className="settings-grid">
+        <SettingsSection
+          title="Chunking and parser"
+          rows={[
+            ["chunking mode", settings?.chunking.mode ?? "unavailable"],
+            ["chunk size", String(settings?.chunking.chunk_size ?? "unavailable")],
+            ["chunk overlap", String(settings?.chunking.chunk_overlap ?? "unavailable")],
+            ["structured parser", settings?.parser.structured_parser ?? "unavailable"],
+            ["fallback parser", settings?.parser.fallback_parser ?? "unavailable"],
+          ]}
+        />
+        <SettingsSection
+          title="Full-text"
+          rows={[
+            ["tokenizer", settings?.full_text.tokenizer ?? "unavailable"],
+            ["prefix index", formatBoolean(settings?.full_text.prefix_index)],
+            ["porter stemming", formatBoolean(settings?.full_text.porter_stemming)],
+          ]}
+        />
+        <SettingsSection
+          title="Vector and embedding"
+          rows={[
+            ["provider", settings?.embedding.provider ?? "unavailable"],
+            ["embedding model", settings?.embedding.model ?? "unavailable"],
+            ["collection", settings?.vector.collection_name ?? "unavailable"],
+            ["vector size", String(settings?.vector.vector_size ?? "unavailable")],
+            ["distance", settings?.vector.distance ?? "unavailable"],
+          ]}
+        />
+        <SettingsSection
+          title="Reranking"
+          rows={[
+            ["strategy", settings?.reranking.strategy ?? "unavailable"],
+            ["model", settings?.reranking.model ?? "none"],
+          ]}
+        />
+        <SettingsSection
+          title="Chat defaults"
+          rows={[
+            ["chat model", settings?.model.ollama_chat_model ?? "unavailable"],
+            ["active prompt", activePrompt?.name ?? settings?.prompt.active_chat_prompt_id ?? "unavailable"],
+            ["prompt library", `${settings?.prompt.library.length ?? 0} entries`],
+          ]}
+        />
+        <SettingsSection
+          title="Export defaults"
+          rows={[
+            ["include sources", formatBoolean(settings?.export.include_sources)],
+            ["include indexes", formatBoolean(settings?.export.include_indexes)],
+            ["format", settings?.export.format ?? "unavailable"],
+          ]}
+        />
+      </div>
+
+      <section className="card settings-models">
+        <div className="row row-between">
+          <div>
+            <div className="eyebrow">Model readiness</div>
+            <h2>Configured local models</h2>
+          </div>
+          <span className="badge badge-warn">
+            <span className="dot" />
+            Not checked
+          </span>
+        </div>
+        <div className="settings-readiness-grid">
+          <ReadinessPlaceholder label="Qdrant" value={settings?.vector.collection_name ?? "vector store"} />
+          <ReadinessPlaceholder label="Chat" value={settings?.model.ollama_chat_model ?? "chat model"} />
+          <ReadinessPlaceholder label="Embedding" value={settings?.embedding.model ?? "embedding model"} />
+          <ReadinessPlaceholder label="Reranker" value={settings?.reranking.model ?? settings?.reranking.strategy ?? "reranker"} />
+        </div>
+        <div className="export-chip-list settings-chip-list">
+          {requiredModels.length > 0 ? (
+            requiredModels.map((model) => (
+              <span className="badge" key={model}>
+                <span className="dot" />
+                {model}
+              </span>
+            ))
+          ) : (
+            <span className="muted">Settings unavailable</span>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SettingsSection({ title, rows }: { title: string; rows: Array<[string, string]> }) {
+  return (
+    <section className="card settings-section">
+      <div className="eyebrow">Defaults</div>
+      <h2>{title}</h2>
+      <dl className="kv settings-kv">
+        {rows.map(([label, value]) => (
+          <React.Fragment key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function ReadinessPlaceholder({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="settings-readiness-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <em>Not checked</em>
+    </div>
   );
 }
 
@@ -4293,6 +4457,13 @@ function settingsSummaryRows(settings: RepositorySettings | null) {
   ];
 }
 
+function formatBoolean(value: boolean | undefined) {
+  if (value === undefined) {
+    return "unavailable";
+  }
+  return value ? "enabled" : "disabled";
+}
+
 function buildExportManifestSummary({
   repository,
   documents,
@@ -4479,12 +4650,36 @@ function issueLabel(code: string) {
   return labels[code] ?? code.replace(/_/g, " ");
 }
 
+function hashForView(view: View) {
+  switch (view) {
+    case "documents":
+      return "documents";
+    case "source":
+      return "source-viewer";
+    case "chat":
+      return "chat-workspace";
+    case "sandbox":
+      return "prompt-sandbox";
+    case "settings":
+      return "settings-models";
+    case "export":
+      return "export-center";
+    case "recreate":
+      return "recreate-repository";
+    case "search":
+      return "search-lab";
+  }
+}
+
 function viewFromHash(hash: string): View {
   if (hash === "#recreate-repository") {
     return "recreate";
   }
   if (hash === "#export-center") {
     return "export";
+  }
+  if (hash === "#settings-models") {
+    return "settings";
   }
   if (hash === "#chat-workspace") {
     return "chat";
