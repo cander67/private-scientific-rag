@@ -1,19 +1,26 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Literal, Protocol
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.elements import ColumnElement
 
 from private_rag.chat.llm import ChatLLM
+from private_rag.chat.models import ChatMessageRow, ChatSession
 from private_rag.core.settings import Settings, get_settings
-from private_rag.ingestion.models import DocumentVersion
+from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
+from private_rag.prompt_sandbox.models import SandboxComparison, SandboxRun
 from private_rag.repositories.models import Repository, RepositorySettingsRow, RepositorySnapshot
 from private_rag.repositories.schemas import (
     RecreateValidationIssue,
     RecreateValidationRequest,
     RecreateValidationResponse,
+    RepositoryDashboardActiveConfig,
+    RepositoryDashboardCounts,
+    RepositoryDashboardIndexStatus,
+    RepositoryDashboardSummary,
     RepositoryManifest,
     RepositoryRead,
     RepositorySettings,
@@ -24,9 +31,13 @@ from private_rag.repositories.schemas import (
     RepositoryWithSettings,
     source_file_exists,
 )
+from private_rag.retrieval.models import RetrievalRun
+from private_rag.search.service import FTS_TABLE
 from private_rag.vector.embeddings import SentenceTransformersEmbeddingProvider
+from private_rag.vector.models import EmbeddingRun
 
 DEFAULT_REPOSITORY_NAME = "Default Repository"
+DashboardIndexStatus = Literal["ready", "missing", "partial", "stale"]
 
 
 class SettingsReadinessChecker(Protocol):
@@ -346,6 +357,115 @@ def check_repository_settings_readiness(
     )
 
 
+def repository_dashboard_summary(
+    session: Session,
+    *,
+    repository_id: str,
+    app_settings: Settings,
+    llm: ChatLLM,
+    checker: SettingsReadinessChecker,
+) -> RepositoryDashboardSummary | None:
+    repository_settings = get_repository_with_settings(session, repository_id)
+    if repository_settings is None:
+        return None
+    settings = repository_settings.settings
+    parsed_chunks = _count(
+        session,
+        DocumentChunk,
+        DocumentChunk.repository_id == repository_id,
+    )
+    full_text_count = _full_text_count(session, repository_id)
+    embedding_run = session.scalar(
+        select(EmbeddingRun).where(EmbeddingRun.repository_id == repository_id)
+    )
+    vector_count = embedding_run.chunk_count if embedding_run is not None else 0
+    full_text_status, full_text_ready = _index_readiness_status(
+        parsed_chunks=parsed_chunks,
+        indexed_chunks=full_text_count,
+    )
+    vector_status, vector_ready = _index_readiness_status(
+        parsed_chunks=parsed_chunks,
+        indexed_chunks=vector_count,
+        index_state=embedding_run.status if embedding_run is not None else None,
+    )
+    readiness = check_repository_settings_readiness(
+        session,
+        repository_id=repository_id,
+        app_settings=app_settings,
+        llm=llm,
+        checker=checker,
+    )
+    if readiness is None:
+        return None
+
+    warnings = _summary_warnings(
+        full_text_status=full_text_status,
+        vector_status=vector_status,
+        readiness=readiness,
+    )
+    return RepositoryDashboardSummary(
+        repository=repository_settings.repository,
+        counts=RepositoryDashboardCounts(
+            documents=_count(session, Document, Document.repository_id == repository_id),
+            parsed_documents=_count(
+                session,
+                DocumentVersion,
+                DocumentVersion.repository_id == repository_id,
+                DocumentVersion.status == "parsed",
+            ),
+            chunks=parsed_chunks,
+            chat_sessions=_count(
+                session,
+                ChatSession,
+                ChatSession.repository_id == repository_id,
+            ),
+            chat_messages=_count(
+                session,
+                ChatMessageRow,
+                ChatMessageRow.repository_id == repository_id,
+            ),
+            retrieval_runs=_count(
+                session,
+                RetrievalRun,
+                RetrievalRun.repository_id == repository_id,
+            ),
+            sandbox_runs=_count(session, SandboxRun, SandboxRun.repository_id == repository_id),
+            sandbox_comparisons=_count(
+                session,
+                SandboxComparison,
+                SandboxComparison.repository_id == repository_id,
+            ),
+        ),
+        full_text=RepositoryDashboardIndexStatus(
+            ready=full_text_ready,
+            status=full_text_status,
+            message=_full_text_readiness_message(parsed_chunks, full_text_count),
+            indexed_chunks=full_text_count,
+            parsed_chunks=parsed_chunks,
+        ),
+        vector=RepositoryDashboardIndexStatus(
+            ready=vector_ready,
+            status=vector_status,
+            message=_vector_readiness_message(parsed_chunks, embedding_run),
+            indexed_chunks=vector_count,
+            parsed_chunks=parsed_chunks,
+            model=embedding_run.model if embedding_run is not None else None,
+        ),
+        settings_readiness=readiness,
+        active_config=RepositoryDashboardActiveConfig(
+            chunking=settings.chunking,
+            full_text=settings.full_text,
+            vector=settings.vector,
+            embedding=settings.embedding,
+            reranking=settings.reranking,
+            chat_model=settings.model.ollama_chat_model,
+            active_chat_prompt_id=settings.prompt.active_chat_prompt_id,
+            active_chat_prompt_name=settings.prompt.active_chat_prompt.name,
+        ),
+        warnings=warnings,
+    )
+
+
 def analyze_settings_impact(
     current_settings: RepositorySettings,
     draft_settings: RepositorySettings,
@@ -557,6 +677,89 @@ def _windows_friendly_message(message: str) -> str:
         .replace("`.", ".")
         .replace("`", "")
     )
+
+
+def _count(session: Session, model: type[object], *criteria: ColumnElement[bool]) -> int:
+    value = session.scalar(select(func.count()).select_from(model).where(*criteria))
+    return int(value or 0)
+
+
+def _full_text_count(session: Session, repository_id: str) -> int:
+    try:
+        value = session.scalar(
+            text(f"SELECT COUNT(*) FROM {FTS_TABLE} WHERE repository_id = :repository_id"),
+            {"repository_id": repository_id},
+        )
+    except Exception:
+        session.rollback()
+        return 0
+    return int(value or 0)
+
+
+def _index_readiness_status(
+    *,
+    parsed_chunks: int,
+    indexed_chunks: int,
+    index_state: str | None = "indexed",
+) -> tuple[DashboardIndexStatus, bool]:
+    if parsed_chunks == 0 or indexed_chunks == 0 or index_state != "indexed":
+        return "missing", False
+    if indexed_chunks < parsed_chunks:
+        return "partial", False
+    if indexed_chunks > parsed_chunks:
+        return "stale", False
+    return "ready", True
+
+
+def _full_text_readiness_message(parsed_chunks: int, indexed_chunks: int) -> str:
+    if parsed_chunks == 0:
+        return "No parsed chunks are available to index"
+    if indexed_chunks == 0:
+        return "Full-text index has not been rebuilt"
+    if indexed_chunks < parsed_chunks:
+        return f"{indexed_chunks} of {parsed_chunks} full-text chunks indexed"
+    if indexed_chunks > parsed_chunks:
+        return (
+            f"{indexed_chunks} full-text chunks indexed for {parsed_chunks} parsed chunks; "
+            "rebuild recommended"
+        )
+    return f"{indexed_chunks} of {parsed_chunks} full-text chunks indexed"
+
+
+def _vector_readiness_message(parsed_chunks: int, embedding_run: EmbeddingRun | None) -> str:
+    if parsed_chunks == 0:
+        return "No parsed chunks are available to embed/index"
+    if embedding_run is None:
+        return "Vector index has not been rebuilt"
+    if embedding_run.status != "indexed":
+        return f"Vector index status is {embedding_run.status}"
+    if embedding_run.chunk_count == 0:
+        return "Vector index exists but contains zero chunks"
+    if embedding_run.chunk_count < parsed_chunks:
+        return f"{embedding_run.chunk_count} of {parsed_chunks} vector chunks indexed"
+    if embedding_run.chunk_count > parsed_chunks:
+        return (
+            f"{embedding_run.chunk_count} vector chunks indexed for {parsed_chunks} parsed "
+            "chunks; rebuild recommended"
+        )
+    return f"{embedding_run.chunk_count} of {parsed_chunks} vector chunks indexed"
+
+
+def _summary_warnings(
+    *,
+    full_text_status: str,
+    vector_status: str,
+    readiness: RepositorySettingsReadinessResponse,
+) -> list[str]:
+    warnings: list[str] = []
+    if full_text_status in {"missing", "partial", "stale"}:
+        warnings.append("Full-text index needs attention before search and chat are fully ready.")
+    if vector_status in {"missing", "partial", "stale"}:
+        warnings.append("Vector index needs attention before semantic retrieval is fully ready.")
+    for item in readiness.items:
+        if not item.ready:
+            warnings.append(item.message)
+    return warnings
 
 
 def _manifest_for_repository(
