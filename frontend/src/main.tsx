@@ -685,6 +685,12 @@ function App() {
     }
   }, [activeChatSession?.id]);
 
+  useEffect(() => {
+    if (repository && activeChatSessionId) {
+      void loadChatSession(repository.id, activeChatSessionId);
+    }
+  }, [repository?.id, activeChatSessionId]);
+
   const contextChunks = useMemo(() => {
     if (!inspection || !selectedChunk) {
       return [];
@@ -828,6 +834,22 @@ function App() {
       setChatMessage(payload.length > 0 ? "Ready" : "No chat sessions yet");
     } catch {
       setChatMessage("Could not load chat sessions");
+    }
+  }
+
+  async function loadChatSession(repositoryId: string, chatSessionId: string) {
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repositoryId}/chat/sessions/${chatSessionId}`);
+      if (!response.ok) {
+        throw new Error("chat session unavailable");
+      }
+      const payload = (await response.json()) as ChatSession;
+      setChatSessions((current) =>
+        current.map((session) => (session.id === payload.id ? payload : session)),
+      );
+      setChatMessage("Ready");
+    } catch {
+      setChatMessage("Could not load chat history");
     }
   }
 

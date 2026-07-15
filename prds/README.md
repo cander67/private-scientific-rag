@@ -15,6 +15,7 @@ Current status:
 - Ready for review: PRD9 export, import, and recreate repository.
 - Backlog: PRD17 search metadata quality and result labeling.
 - Backlog: PRD18 golden evaluation and evidence-backed promotion.
+- Backlog: PRD19 repository administration and local reset.
 
 The intended flow is:
 
@@ -59,3 +60,4 @@ PRD files:
 16. [Immutable embedding indexes](16-immutable-embedding-indexes.md)
 17. [Search metadata quality and result labeling](17-search-metadata-quality-result-labeling.md)
 18. [Golden evaluation and evidence-backed promotion](18-golden-evaluation-evidence-promotion.md) - backlog
+19. [Repository administration and local reset](19-repository-admin-reset.md) - backlog

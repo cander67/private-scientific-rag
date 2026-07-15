@@ -17,6 +17,9 @@ test("Chat Workspace uses persisted backend chat sessions and messages", () => {
   assert.match(source, /type ChatMessage =/);
   assert.match(source, /type ChatRetrievalSettings =/);
   assert.match(source, /chat\/sessions/);
+  assert.match(source, /loadChatSession/);
+  assert.match(source, /chat\/sessions\/\$\{chatSessionId\}/);
+  assert.match(source, /setChatSessions\(\(current\) =>[\s\S]*payload\.id \? payload : session/);
   assert.match(source, /sessions\/\$\{chatSession\.id\}\/messages/);
   assert.match(source, /loadChatSessions/);
   assert.match(source, /createChatSession/);
