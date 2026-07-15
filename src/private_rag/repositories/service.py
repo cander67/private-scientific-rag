@@ -42,6 +42,7 @@ from private_rag.repositories.schemas import (
     RepositorySettingsImpactResponse,
     RepositorySettingsReadinessItem,
     RepositorySettingsReadinessResponse,
+    RepositoryVectorCleanupRetryResult,
     RepositoryWithSettings,
     source_file_exists,
 )
@@ -746,6 +747,66 @@ def clear_all_repositories_with_cleanup(
         failed=_aggregate_result_items(failed),
         warnings=warnings,
         default_repository=default_repository,
+    )
+
+
+def retry_vector_cleanup(
+    *,
+    collection_names: list[str],
+    vector_store: VectorStore,
+) -> RepositoryVectorCleanupRetryResult:
+    removed: list[RepositoryCleanupResultItem] = []
+    failed: list[RepositoryCleanupResultItem] = []
+    warnings: list[RepositoryCleanupWarning] = []
+    seen: set[str] = set()
+    unique_collection_names: list[str] = []
+    for collection_name in collection_names:
+        if not collection_name or collection_name in seen:
+            continue
+        seen.add(collection_name)
+        unique_collection_names.append(collection_name)
+    for collection_name in unique_collection_names:
+        try:
+            vector_store.delete_collection(collection_name)
+        except VectorStoreError as exc:
+            failed.append(
+                RepositoryCleanupResultItem(
+                    category="vector_index",
+                    label="Qdrant vector collection",
+                    count=1,
+                    paths=[collection_name],
+                    detail=str(exc),
+                )
+            )
+            warnings.append(
+                RepositoryCleanupWarning(
+                    code="vector_cleanup_retry_failed",
+                    category="vector_index",
+                    message=(
+                        f"Vector collection '{collection_name}' was not removed. Start Qdrant "
+                        "and retry vector cleanup from the cleanup result."
+                    ),
+                    retryable=True,
+                )
+            )
+        else:
+            removed.append(
+                RepositoryCleanupResultItem(
+                    category="vector_index",
+                    label="Qdrant vector collection",
+                    count=1,
+                    paths=[collection_name],
+                    detail=f"Vector collection '{collection_name}' was removed.",
+                )
+            )
+    status: Literal["completed", "completed_with_warnings"] = "completed"
+    if failed or warnings:
+        status = "completed_with_warnings"
+    return RepositoryVectorCleanupRetryResult(
+        status=status,
+        removed=removed,
+        failed=failed,
+        warnings=warnings,
     )
 
 

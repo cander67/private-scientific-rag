@@ -26,6 +26,8 @@ from private_rag.repositories.schemas import (
     RepositorySettingsImpactResponse,
     RepositorySettingsReadinessResponse,
     RepositorySettingsUpdate,
+    RepositoryVectorCleanupRetryRequest,
+    RepositoryVectorCleanupRetryResult,
     RepositoryWithSettings,
 )
 from private_rag.repositories.service import (
@@ -43,6 +45,7 @@ from private_rag.repositories.service import (
     preview_repository_deletion,
     repository_admin_inventory,
     repository_dashboard_summary,
+    retry_vector_cleanup,
     update_repository_settings,
     validate_recreate_request,
 )
@@ -130,6 +133,17 @@ def clear_all_repository_admin(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/admin/vector-cleanup/retry", response_model=RepositoryVectorCleanupRetryResult)
+def retry_repository_admin_vector_cleanup(
+    request: RepositoryVectorCleanupRetryRequest,
+    vector_store: AdminVectorStoreDependency,
+) -> RepositoryVectorCleanupRetryResult:
+    return retry_vector_cleanup(
+        collection_names=request.collection_names,
+        vector_store=vector_store,
+    )
 
 
 @router.get("/{repository_id}/admin/delete-preview", response_model=RepositoryDeletePreview)

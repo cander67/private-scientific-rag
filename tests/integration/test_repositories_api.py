@@ -262,6 +262,16 @@ class FailingDeleteVectorStore(InMemoryVectorStore):
         raise VectorStoreError("Qdrant is unavailable in this test runtime.")
 
 
+class RecordingDeleteVectorStore(InMemoryVectorStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.deleted_collections: list[str] = []
+
+    def delete_collection(self, collection_name: str) -> None:
+        self.deleted_collections.append(collection_name)
+        super().delete_collection(collection_name)
+
+
 def test_repository_settings_readiness_endpoint_uses_mocked_boundaries() -> None:
     client = _client_with_database()
     app = cast(Any, client.app)
@@ -820,6 +830,48 @@ def test_repository_delete_requires_confirmation_and_cleans_one_repository(
         )
         assert deleted_fts == 0
         assert other_fts == 1
+
+
+def test_vector_cleanup_retry_endpoint_removes_leftover_collections() -> None:
+    client = _client_with_database()
+    app = cast(Any, client.app)
+    vector_store = RecordingDeleteVectorStore()
+    vector_store.recreate_collection("leftover_collection", 8, "cosine")
+    app.dependency_overrides[get_admin_vector_store] = lambda: vector_store
+
+    response = client.post(
+        "/repositories/admin/vector-cleanup/retry",
+        json={"collection_names": ["leftover_collection", "leftover_collection"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed"
+    assert payload["removed"][0]["category"] == "vector_index"
+    assert payload["removed"][0]["paths"] == ["leftover_collection"]
+    assert payload["failed"] == []
+    assert vector_store.deleted_collections == ["leftover_collection"]
+    assert "leftover_collection" not in vector_store.collections
+
+
+def test_vector_cleanup_retry_reports_qdrant_unavailable() -> None:
+    client = _client_with_database()
+    app = cast(Any, client.app)
+    app.dependency_overrides[get_admin_vector_store] = lambda: FailingDeleteVectorStore()
+
+    response = client.post(
+        "/repositories/admin/vector-cleanup/retry",
+        json={"collection_names": ["leftover_collection"]},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "completed_with_warnings"
+    assert payload["removed"] == []
+    assert payload["failed"][0]["category"] == "vector_index"
+    assert payload["failed"][0]["paths"] == ["leftover_collection"]
+    assert payload["warnings"][0]["code"] == "vector_cleanup_retry_failed"
+    assert payload["warnings"][0]["retryable"] is True
 
 
 def test_clear_all_requires_strong_confirmation_and_recovers_default_repository(

@@ -341,6 +341,18 @@ class RepositoryClearAllRequest(BaseModel):
     confirmation_value: str = Field(min_length=1)
 
 
+class RepositoryVectorCleanupRetryRequest(BaseModel):
+    collection_names: list[str] = Field(min_length=1)
+
+
+class RepositoryVectorCleanupRetryResult(BaseModel):
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    status: Literal["completed", "completed_with_warnings"]
+    removed: list[RepositoryCleanupResultItem] = Field(default_factory=list)
+    failed: list[RepositoryCleanupResultItem] = Field(default_factory=list)
+    warnings: list[RepositoryCleanupWarning] = Field(default_factory=list)
+
+
 class RepositoryDeletePreview(BaseModel):
     repository: RepositoryRead
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

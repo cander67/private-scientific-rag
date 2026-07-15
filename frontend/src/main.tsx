@@ -244,6 +244,14 @@ type RepositoryClearAllResult = {
   default_repository: RepositorySettingsResponse;
 };
 
+type RepositoryVectorCleanupRetryResult = {
+  generated_at: string;
+  status: "completed" | "completed_with_warnings";
+  removed: RepositoryCleanupResultItem[];
+  failed: RepositoryCleanupResultItem[];
+  warnings: RepositoryCleanupWarning[];
+};
+
 type RepositoryCleanupPlanItem = {
   category: RepositoryAdminStorageHint["category"];
   label: string;
@@ -827,6 +835,9 @@ function App() {
   const [clearAllResult, setClearAllResult] = useState<RepositoryClearAllResult | null>(null);
   const [clearAllConfirmation, setClearAllConfirmation] = useState("");
   const [clearAllBusy, setClearAllBusy] = useState(false);
+  const [vectorCleanupRetryResult, setVectorCleanupRetryResult] =
+    useState<RepositoryVectorCleanupRetryResult | null>(null);
+  const [vectorCleanupRetryBusy, setVectorCleanupRetryBusy] = useState(false);
   const [recreateFile, setRecreateFile] = useState<File | null>(null);
   const [recreateRepositoryName, setRecreateRepositoryName] = useState("");
   const [recreateTargetRepositoryId, setRecreateTargetRepositoryId] = useState("");
@@ -1030,6 +1041,7 @@ function App() {
     setClearAllPreview(null);
     setClearAllResult(null);
     setClearAllConfirmation("");
+    setVectorCleanupRetryResult(null);
     setChatSessions([]);
     setActiveChatSessionId(null);
     setActiveCitation(null);
@@ -1120,6 +1132,7 @@ function App() {
       const payload = (await response.json()) as RepositoryDeletePreview;
       setDeletePreview(payload);
       setDeleteResult(null);
+      setVectorCleanupRetryResult(null);
       setDeleteConfirmation("");
       setAdminMessage(`Cleanup preview loaded for ${payload.repository.name}`);
     } catch {
@@ -1149,6 +1162,7 @@ function App() {
       const payload = (await response.json()) as RepositoryDeleteResult;
       setDeleteResult(payload);
       setDeletePreview(null);
+      setVectorCleanupRetryResult(null);
       setDeleteConfirmation("");
       setRepositories((current) => current.filter((item) => item.id !== payload.repository.id));
       setAdminInventory((current) =>
@@ -1186,6 +1200,7 @@ function App() {
       const payload = (await response.json()) as RepositoryClearAllPreview;
       setClearAllPreview(payload);
       setClearAllResult(null);
+      setVectorCleanupRetryResult(null);
       setClearAllConfirmation("");
       setDeletePreview(null);
       setDeleteResult(null);
@@ -1217,6 +1232,7 @@ function App() {
       const payload = (await response.json()) as RepositoryClearAllResult;
       setClearAllPreview(null);
       setClearAllConfirmation("");
+      setVectorCleanupRetryResult(null);
       setRepositories([payload.default_repository.repository]);
       activateRepository(payload.default_repository.repository);
       setClearAllResult(payload);
@@ -1227,6 +1243,35 @@ function App() {
       setAdminMessage("Clear-all cleanup failed");
     } finally {
       setClearAllBusy(false);
+    }
+  }
+
+  async function retryVectorCleanup(collectionNames: string[]) {
+    if (collectionNames.length === 0) {
+      return;
+    }
+    setVectorCleanupRetryBusy(true);
+    setAdminMessage("Retrying Qdrant vector cleanup");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/admin/vector-cleanup/retry`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ collection_names: collectionNames }),
+      });
+      if (!response.ok) {
+        throw new Error("vector cleanup retry failed");
+      }
+      const payload = (await response.json()) as RepositoryVectorCleanupRetryResult;
+      setVectorCleanupRetryResult(payload);
+      setAdminMessage(
+        payload.failed.length > 0
+          ? "Vector cleanup retry still needs attention"
+          : "Vector cleanup retry completed",
+      );
+    } catch {
+      setAdminMessage("Vector cleanup retry failed");
+    } finally {
+      setVectorCleanupRetryBusy(false);
     }
   }
 
@@ -2324,10 +2369,12 @@ function App() {
                 result={deleteResult}
                 clearAllPreview={clearAllPreview}
                 clearAllResult={clearAllResult}
+                vectorCleanupRetryResult={vectorCleanupRetryResult}
                 previewBusy={deletePreviewBusy}
                 deleteBusy={deleteBusy}
                 confirmationValue={deleteConfirmation}
                 clearAllBusy={clearAllBusy}
+                vectorCleanupRetryBusy={vectorCleanupRetryBusy}
                 clearAllConfirmationValue={clearAllConfirmation}
                 message={adminMessage}
                 onRefresh={() => void loadAdminInventory()}
@@ -2337,6 +2384,7 @@ function App() {
                 onPreviewClearAll={() => void previewClearAllRepositories()}
                 onClearAllConfirmationChange={setClearAllConfirmation}
                 onClearAllRepositories={() => void clearAllRepositories()}
+                onRetryVectorCleanup={(collectionNames) => void retryVectorCleanup(collectionNames)}
                 onSelectRepository={activateRepository}
                 onNavigate={navigateTo}
               />
@@ -3071,10 +3119,12 @@ function RepositoryAdministration({
   result,
   clearAllPreview,
   clearAllResult,
+  vectorCleanupRetryResult,
   previewBusy,
   deleteBusy,
   confirmationValue,
   clearAllBusy,
+  vectorCleanupRetryBusy,
   clearAllConfirmationValue,
   message,
   onRefresh,
@@ -3084,6 +3134,7 @@ function RepositoryAdministration({
   onPreviewClearAll,
   onClearAllConfirmationChange,
   onClearAllRepositories,
+  onRetryVectorCleanup,
   onSelectRepository,
   onNavigate,
 }: {
@@ -3093,10 +3144,12 @@ function RepositoryAdministration({
   result: RepositoryDeleteResult | null;
   clearAllPreview: RepositoryClearAllPreview | null;
   clearAllResult: RepositoryClearAllResult | null;
+  vectorCleanupRetryResult: RepositoryVectorCleanupRetryResult | null;
   previewBusy: boolean;
   deleteBusy: boolean;
   confirmationValue: string;
   clearAllBusy: boolean;
+  vectorCleanupRetryBusy: boolean;
   clearAllConfirmationValue: string;
   message: string;
   onRefresh: () => void;
@@ -3106,6 +3159,7 @@ function RepositoryAdministration({
   onPreviewClearAll: () => void;
   onClearAllConfirmationChange: (value: string) => void;
   onClearAllRepositories: () => void;
+  onRetryVectorCleanup: (collectionNames: string[]) => void;
   onSelectRepository: (repository: RepositoryRead) => void;
   onNavigate: (view: View) => void;
 }) {
@@ -3275,7 +3329,14 @@ function RepositoryAdministration({
           onDeleteRepository={onDeleteRepository}
         />
       )}
-      {result && <RepositoryCleanupResultPanel result={result} />}
+      {result && (
+        <RepositoryCleanupResultPanel
+          result={result}
+          retryResult={vectorCleanupRetryResult}
+          retryBusy={vectorCleanupRetryBusy}
+          onRetryVectorCleanup={onRetryVectorCleanup}
+        />
+      )}
       {clearAllPreview && (
         <RepositoryClearAllPreviewPanel
           preview={clearAllPreview}
@@ -3286,7 +3347,13 @@ function RepositoryAdministration({
         />
       )}
       {clearAllResult && (
-        <RepositoryClearAllResultPanel result={clearAllResult} onNavigate={onNavigate} />
+        <RepositoryClearAllResultPanel
+          result={clearAllResult}
+          retryResult={vectorCleanupRetryResult}
+          retryBusy={vectorCleanupRetryBusy}
+          onNavigate={onNavigate}
+          onRetryVectorCleanup={onRetryVectorCleanup}
+        />
       )}
     </div>
   );
@@ -3391,7 +3458,18 @@ function RepositoryCleanupPreviewPanel({
   );
 }
 
-function RepositoryCleanupResultPanel({ result }: { result: RepositoryDeleteResult }) {
+function RepositoryCleanupResultPanel({
+  result,
+  retryResult,
+  retryBusy,
+  onRetryVectorCleanup,
+}: {
+  result: RepositoryDeleteResult;
+  retryResult: RepositoryVectorCleanupRetryResult | null;
+  retryBusy: boolean;
+  onRetryVectorCleanup: (collectionNames: string[]) => void;
+}) {
+  const retryCollectionNames = vectorCleanupRetryCollectionNames(result.failed);
   return (
     <section className="card admin-preview-panel" aria-label="Repository cleanup result">
       <div>
@@ -3417,6 +3495,14 @@ function RepositoryCleanupResultPanel({ result }: { result: RepositoryDeleteResu
             </article>
           ))}
         </div>
+      )}
+      {retryCollectionNames.length > 0 && (
+        <VectorCleanupRetryPanel
+          collectionNames={retryCollectionNames}
+          retryResult={retryResult}
+          busy={retryBusy}
+          onRetryVectorCleanup={onRetryVectorCleanup}
+        />
       )}
     </section>
   );
@@ -3524,11 +3610,18 @@ function RepositoryClearAllPreviewPanel({
 
 function RepositoryClearAllResultPanel({
   result,
+  retryResult,
+  retryBusy,
   onNavigate,
+  onRetryVectorCleanup,
 }: {
   result: RepositoryClearAllResult;
+  retryResult: RepositoryVectorCleanupRetryResult | null;
+  retryBusy: boolean;
   onNavigate: (view: View) => void;
+  onRetryVectorCleanup: (collectionNames: string[]) => void;
 }) {
+  const retryCollectionNames = vectorCleanupRetryCollectionNames(result.failed);
   return (
     <section className="card admin-preview-panel" aria-label="Clear-all cleanup result">
       <div>
@@ -3545,6 +3638,14 @@ function RepositoryClearAllResultPanel({
         <RepositoryCleanupResultGroup title="Skipped" items={result.skipped} />
         <RepositoryCleanupResultGroup title="Failed" items={result.failed} />
       </div>
+      {retryCollectionNames.length > 0 && (
+        <VectorCleanupRetryPanel
+          collectionNames={retryCollectionNames}
+          retryResult={retryResult}
+          busy={retryBusy}
+          onRetryVectorCleanup={onRetryVectorCleanup}
+        />
+      )}
       <div className="dashboard-actions">
         <button className="btn btn-primary" type="button" onClick={() => onNavigate("dashboard")}>
           Open Repository Dashboard
@@ -3553,6 +3654,49 @@ function RepositoryClearAllResultPanel({
           Open Recreate Repository
         </button>
       </div>
+    </section>
+  );
+}
+
+function VectorCleanupRetryPanel({
+  collectionNames,
+  retryResult,
+  busy,
+  onRetryVectorCleanup,
+}: {
+  collectionNames: string[];
+  retryResult: RepositoryVectorCleanupRetryResult | null;
+  busy: boolean;
+  onRetryVectorCleanup: (collectionNames: string[]) => void;
+}) {
+  return (
+    <section className="admin-preview-panel" aria-label="Vector cleanup retry guidance">
+      <div>
+        <h3>Retry Qdrant cleanup</h3>
+        <p className="hint">
+          Start the configured Qdrant service, then retry the leftover vector collection cleanup.
+          Repository records are already removed, so this does not require deleting the repository again.
+        </p>
+      </div>
+      <ul>
+        {collectionNames.map((collectionName) => (
+          <li key={collectionName}>{collectionName}</li>
+        ))}
+      </ul>
+      <button
+        className="btn btn-sm"
+        type="button"
+        onClick={() => onRetryVectorCleanup(collectionNames)}
+        disabled={busy}
+      >
+        Retry vector cleanup
+      </button>
+      {retryResult && (
+        <div className="admin-result-grid">
+          <RepositoryCleanupResultGroup title="Retry removed" items={retryResult.removed} />
+          <RepositoryCleanupResultGroup title="Retry failed" items={retryResult.failed} />
+        </div>
+      )}
     </section>
   );
 }
@@ -3583,6 +3727,17 @@ function RepositoryCleanupResultGroup({
         <p className="hint">No items.</p>
       )}
     </section>
+  );
+}
+
+function vectorCleanupRetryCollectionNames(items: RepositoryCleanupResultItem[]) {
+  return Array.from(
+    new Set(
+      items
+        .filter((item) => item.category === "vector_index")
+        .flatMap((item) => item.paths)
+        .filter(Boolean),
+    ),
   );
 }
 

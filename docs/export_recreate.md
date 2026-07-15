@@ -188,26 +188,48 @@ Manual cross-platform transfer remains a review checklist item unless each targe
 
 ## Clean Environment Reset
 
-There is no app-level "delete all repositories and reset local state" workflow yet. For now, reset a local development environment manually while the backend, frontend, workers, and Qdrant are stopped.
+Use Repository Administration before manual deletion. The app can preview one-repository deletion or clear-all cleanup, require explicit confirmation, remove repository-scoped database records and app-managed artifacts, preserve external source files and model caches, and recreate the default repository after clear-all.
 
-Typical reset:
+Before destructive cleanup, export anything you may need to keep:
+
+1. Open Export Center for the repository.
+2. Create a portable ZIP with source files included when redistribution is allowed.
+3. Store the ZIP outside `data/`, `exports/`, and other app-managed cleanup targets.
+
+In-app reset path:
+
+1. Open Repository Administration.
+2. Use **Preview cleanup** for one repository or **Preview clear all** for local transfer testing.
+3. Review database records, app-managed files, full-text/vector indexes, external files, export metadata, chat/retrieval history, sandbox history, and model-cache preservation.
+4. Type the required confirmation value and run the cleanup.
+5. If Qdrant was unavailable, start Qdrant and use **Retry vector cleanup** from the cleanup result. This removes the leftover collection without deleting the repository again.
+
+Preservation defaults:
+
+- External source files referenced from outside app-managed storage are preserved.
+- Ollama, SentenceTransformers, and reranker model caches are preserved by default.
+- Export ZIPs should be treated as backups; keep them outside cleanup targets if you need them after reset.
+
+Manual fallback is only for a broken local development environment where the app cannot start. Stop the backend, frontend, workers, and Qdrant first.
+
+macOS/Linux or Git Bash fallback:
 
 ```bash
-rm -rf data exports .qdrant
 docker compose down
+rm -rf data exports .qdrant
 docker volume prune
 uv run alembic upgrade head
 ```
 
-PowerShell equivalent:
+Windows PowerShell fallback:
 
 ```powershell
-Remove-Item -Recurse -Force .\data, .\exports, .\.qdrant -ErrorAction SilentlyContinue
 docker compose down
+Remove-Item -Recurse -Force .\data, .\exports, .\.qdrant -ErrorAction SilentlyContinue
 docker volume prune
 uv run alembic upgrade head
 ```
 
-Only remove `models/` if you intentionally want to delete local model caches managed inside the workspace. Ollama and SentenceTransformers commonly store model caches outside this repository, so resetting repo data does not remove those models.
+Only remove `models/` if you intentionally want to delete model files managed inside the workspace. Ollama and SentenceTransformers commonly store model caches outside this repository, so resetting repo data does not remove those downloads.
 
-A first-class repository administration/reset workflow should be a follow-up PRD. It should cover listing repositories, deleting selected repositories, clearing all local repositories, removing derived indexes, and making destructive actions explicit.
+Safe cleanup tests use temporary data directories, test databases, and fake vector stores. Do not point cleanup tests at a real research workspace or shared Qdrant instance unless you intentionally created disposable collections for that run.

@@ -58,6 +58,20 @@ test("Repository Administration previews cleanup plans before confirmed deletion
   assert.match(source, /Retry available after the local service is reachable/);
 });
 
+test("Repository Administration retries failed vector cleanup without another delete", () => {
+  assert.match(source, /type RepositoryVectorCleanupRetryResult =/);
+  assert.match(source, /retryVectorCleanup/);
+  assert.match(source, /repositories\/admin\/vector-cleanup\/retry/);
+  assert.match(source, /collection_names: collectionNames/);
+  assert.match(source, /VectorCleanupRetryPanel/);
+  assert.match(source, /Retry Qdrant cleanup/);
+  assert.match(source, /Retry vector cleanup/);
+  assert.match(source, /does not require deleting the repository again/);
+  assert.match(source, /vectorCleanupRetryCollectionNames/);
+  assert.match(source, /Retry removed/);
+  assert.match(source, /Retry failed/);
+});
+
 test("Repository Administration supports guarded clear-all preview and recovery", () => {
   assert.match(source, /type RepositoryClearAllPreview =/);
   assert.match(source, /type RepositoryClearAllResult =/);
