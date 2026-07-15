@@ -223,6 +223,21 @@ class RepositoryDashboardActiveConfig(BaseModel):
     active_chat_prompt_name: str
 
 
+class RepositoryDashboardActivityItem(BaseModel):
+    kind: Literal["document", "retrieval", "chat", "sandbox", "export", "recreate"]
+    label: str
+    detail: str
+    occurred_at: datetime
+    route: Literal[
+        "documents",
+        "search",
+        "chat",
+        "sandbox",
+        "export",
+        "recreate",
+    ]
+
+
 class RepositoryDashboardSummary(BaseModel):
     repository: RepositoryRead
     counts: RepositoryDashboardCounts
@@ -230,6 +245,7 @@ class RepositoryDashboardSummary(BaseModel):
     vector: RepositoryDashboardIndexStatus
     settings_readiness: RepositorySettingsReadinessResponse
     active_config: RepositoryDashboardActiveConfig
+    recent_activity: list[RepositoryDashboardActivityItem] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
 

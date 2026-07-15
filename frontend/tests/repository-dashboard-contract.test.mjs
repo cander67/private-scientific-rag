@@ -58,6 +58,27 @@ test("Dashboard status surface renders summary counts, readiness, config, and wa
   assert.match(styles, /\.dashboard-warning-list/);
 });
 
+test("Dashboard quick actions and recent activity route to workflow owners", () => {
+  assert.match(source, /dashboardQuickActions/);
+  assert.match(source, /Document Manager/);
+  assert.match(source, /Search Lab/);
+  assert.match(source, /Chat Workspace/);
+  assert.match(source, /Prompt Sandbox/);
+  assert.match(source, /Export Center/);
+  assert.match(source, /Recreate Repository/);
+  assert.match(source, /Settings \/ Models/);
+  assert.match(source, /recent_activity: DashboardActivityItem\[\]/);
+  assert.match(source, /Latest repository events/);
+  assert.match(source, /dashboardActivityKindLabel/);
+  assert.match(source, /onNavigate\(item\.route\)/);
+  assert.match(source, /Upload documents, search, chat, run sandbox checks, export, or recreate/);
+  const quickActionsHelper = source.match(/function dashboardQuickActions[\s\S]*?function dashboardActivityKindLabel/)?.[0] ?? "";
+  assert.doesNotMatch(quickActionsHelper, /method: "POST"|fetch\(/);
+  assert.match(styles, /\.dashboard-quick-actions/);
+  assert.match(styles, /\.dashboard-activity-list/);
+  assert.match(styles, /\.dashboard-activity/);
+});
+
 test("Dashboard supports repository switching and no-repository recovery", () => {
   assert.match(source, /repositories=\{repositories\}/);
   assert.match(source, /onSelectRepository=\{activateRepository\}/);

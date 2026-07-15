@@ -150,7 +150,16 @@ type DashboardSummary = {
     active_chat_prompt_id: string;
     active_chat_prompt_name: string;
   };
+  recent_activity: DashboardActivityItem[];
   warnings: string[];
+};
+
+type DashboardActivityItem = {
+  kind: "document" | "retrieval" | "chat" | "sandbox" | "export" | "recreate";
+  label: string;
+  detail: string;
+  occurred_at: string;
+  route: View;
 };
 
 type ExportManifestSummary = {
@@ -2554,6 +2563,7 @@ function RepositoryDashboard({
   const activePrompt = settings?.prompt.library.find((prompt) => prompt.id === settings.prompt.active_chat_prompt_id);
   const configRows = dashboardConfigRows(summary, settings);
   const warnings = summary?.warnings ?? [];
+  const recentActivity = summary?.recent_activity ?? [];
 
   return (
     <div className="dashboard-layout">
@@ -2642,6 +2652,20 @@ function RepositoryDashboard({
         <DashboardIndexCard label="Vector" item={summary?.vector ?? null} onNavigate={onNavigate} />
       </div>
 
+      <section className="card dashboard-status" aria-label="Dashboard quick actions">
+        <div>
+          <div className="eyebrow">Quick actions</div>
+          <h2>Open workflow</h2>
+        </div>
+        <div className="dashboard-quick-actions">
+          {dashboardQuickActions().map((action) => (
+            <button className="btn btn-sm" type="button" onClick={() => onNavigate(action.view)} key={action.view}>
+              {action.label}
+            </button>
+          ))}
+        </div>
+      </section>
+
       <section className="card dashboard-status" aria-label="Model and service readiness">
         <div>
           <div className="eyebrow">Runtime readiness</div>
@@ -2667,6 +2691,33 @@ function RepositoryDashboard({
             </React.Fragment>
           ))}
         </dl>
+      </section>
+
+      <section className="card dashboard-status" aria-label="Recent activity">
+        <div>
+          <div className="eyebrow">Recent activity</div>
+          <h2>{recentActivity.length > 0 ? "Latest repository events" : "No recent activity"}</h2>
+        </div>
+        {recentActivity.length > 0 ? (
+          <div className="dashboard-activity-list">
+            {recentActivity.map((item) => (
+              <button
+                className="dashboard-activity"
+                type="button"
+                onClick={() => onNavigate(item.route)}
+                key={`${item.kind}-${item.occurred_at}-${item.label}`}
+              >
+                <span>{dashboardActivityKindLabel(item.kind)}</span>
+                <strong>{item.label}</strong>
+                <small>
+                  {item.detail} · {formatDate(item.occurred_at)}
+                </small>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="hint">Upload documents, search, chat, run sandbox checks, export, or recreate to populate activity.</p>
+        )}
       </section>
 
       <section className="card dashboard-status" aria-label="Dashboard warnings">
@@ -5731,6 +5782,30 @@ function dashboardIndexStatusLabel(status: DashboardIndexStatus) {
     stale: "Stale",
   };
   return labels[status];
+}
+
+function dashboardQuickActions() {
+  return [
+    { view: "documents" as const, label: "Document Manager" },
+    { view: "search" as const, label: "Search Lab" },
+    { view: "chat" as const, label: "Chat Workspace" },
+    { view: "sandbox" as const, label: "Prompt Sandbox" },
+    { view: "export" as const, label: "Export Center" },
+    { view: "recreate" as const, label: "Recreate Repository" },
+    { view: "settings" as const, label: "Settings / Models" },
+  ];
+}
+
+function dashboardActivityKindLabel(kind: DashboardActivityItem["kind"]) {
+  const labels: Record<DashboardActivityItem["kind"], string> = {
+    document: "Document",
+    retrieval: "Retrieval",
+    chat: "Chat",
+    sandbox: "Sandbox",
+    export: "Export",
+    recreate: "Recreate",
+  };
+  return labels[kind];
 }
 
 function settingsReadinessStatusLabel(status: SettingsReadinessStatus) {

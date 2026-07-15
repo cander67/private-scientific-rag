@@ -904,6 +904,16 @@ textarea {
   gap: var(--s2);
 }
 
+.dashboard-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(120px, 1fr));
+  gap: var(--s2);
+}
+
+.dashboard-quick-actions .btn {
+  justify-content: center;
+}
+
 .dashboard-index-card {
   display: flex;
   flex-direction: column;
@@ -940,6 +950,45 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: var(--s3);
+}
+
+.dashboard-activity-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: var(--s3);
+}
+
+.dashboard-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  padding: var(--s3);
+  text-align: left;
+}
+
+.dashboard-activity:hover {
+  border-color: var(--border-strong);
+}
+
+.dashboard-activity span,
+.dashboard-activity small {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+}
+
+.dashboard-activity span {
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.dashboard-activity strong {
+  overflow-wrap: anywhere;
 }
 
 .dashboard-warning {
@@ -2070,7 +2119,9 @@ textarea {
 
   .export-metrics,
   .dashboard-grid,
-  .dashboard-status-grid {
+  .dashboard-status-grid,
+  .dashboard-quick-actions,
+  .dashboard-activity-list {
     grid-template-columns: repeat(2, minmax(140px, 1fr));
   }
 
@@ -2154,6 +2205,8 @@ textarea {
   .export-grid,
   .dashboard-grid,
   .dashboard-status-grid,
+  .dashboard-quick-actions,
+  .dashboard-activity-list,
   .settings-grid,
   .settings-readiness-grid,
   .settings-prompt-list,

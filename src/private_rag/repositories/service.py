@@ -18,6 +18,7 @@ from private_rag.repositories.schemas import (
     RecreateValidationRequest,
     RecreateValidationResponse,
     RepositoryDashboardActiveConfig,
+    RepositoryDashboardActivityItem,
     RepositoryDashboardCounts,
     RepositoryDashboardIndexStatus,
     RepositoryDashboardSummary,
@@ -462,6 +463,7 @@ def repository_dashboard_summary(
             active_chat_prompt_id=settings.prompt.active_chat_prompt_id,
             active_chat_prompt_name=settings.prompt.active_chat_prompt.name,
         ),
+        recent_activity=_recent_activity(session, repository_id=repository_id),
         warnings=warnings,
     )
 
@@ -760,6 +762,115 @@ def _summary_warnings(
         if not item.ready:
             warnings.append(item.message)
     return warnings
+
+
+def _recent_activity(
+    session: Session,
+    *,
+    repository_id: str,
+    limit: int = 8,
+) -> list[RepositoryDashboardActivityItem]:
+    repository = session.get(Repository, repository_id)
+    items: list[RepositoryDashboardActivityItem] = []
+    if repository is not None:
+        items.append(
+            RepositoryDashboardActivityItem(
+                kind="recreate",
+                label=repository.name,
+                detail="Repository created or restored",
+                occurred_at=repository.created_at,
+                route="recreate",
+            )
+        )
+
+    documents = session.scalars(
+        select(Document)
+        .where(Document.repository_id == repository_id)
+        .order_by(Document.updated_at.desc(), Document.created_at.desc(), Document.id.desc())
+        .limit(limit)
+    ).all()
+    items.extend(
+        RepositoryDashboardActivityItem(
+            kind="document",
+            label=document.display_name,
+            detail="Document uploaded or updated",
+            occurred_at=document.updated_at,
+            route="documents",
+        )
+        for document in documents
+    )
+
+    chat_sessions = session.scalars(
+        select(ChatSession)
+        .where(ChatSession.repository_id == repository_id)
+        .order_by(
+            ChatSession.updated_at.desc(), ChatSession.created_at.desc(), ChatSession.id.desc()
+        )
+        .limit(limit)
+    ).all()
+    items.extend(
+        RepositoryDashboardActivityItem(
+            kind="chat",
+            label=chat_session.title,
+            detail=f"{chat_session.model} chat session",
+            occurred_at=chat_session.updated_at,
+            route="chat",
+        )
+        for chat_session in chat_sessions
+    )
+
+    retrieval_runs = session.scalars(
+        select(RetrievalRun)
+        .where(RetrievalRun.repository_id == repository_id)
+        .order_by(RetrievalRun.created_at.desc(), RetrievalRun.id.desc())
+        .limit(limit)
+    ).all()
+    items.extend(
+        RepositoryDashboardActivityItem(
+            kind="retrieval",
+            label=run.query,
+            detail=f"{run.mode} retrieval run",
+            occurred_at=run.created_at,
+            route="search",
+        )
+        for run in retrieval_runs
+    )
+
+    sandbox_runs = session.scalars(
+        select(SandboxRun)
+        .where(SandboxRun.repository_id == repository_id)
+        .order_by(SandboxRun.created_at.desc(), SandboxRun.id.desc())
+        .limit(limit)
+    ).all()
+    items.extend(
+        RepositoryDashboardActivityItem(
+            kind="sandbox",
+            label=run.label or run.query,
+            detail=f"{run.status} sandbox run",
+            occurred_at=run.created_at,
+            route="sandbox",
+        )
+        for run in sandbox_runs
+    )
+
+    snapshots = session.scalars(
+        select(RepositorySnapshot)
+        .where(RepositorySnapshot.repository_id == repository_id)
+        .order_by(RepositorySnapshot.created_at.desc(), RepositorySnapshot.id.desc())
+        .limit(limit)
+    ).all()
+    items.extend(
+        RepositoryDashboardActivityItem(
+            kind="export",
+            label="Repository manifest",
+            detail="Export or settings snapshot recorded",
+            occurred_at=snapshot.created_at,
+            route="export",
+        )
+        for snapshot in snapshots
+    )
+
+    return sorted(items, key=lambda item: item.occurred_at, reverse=True)[:limit]
 
 
 def _manifest_for_repository(

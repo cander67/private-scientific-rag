@@ -436,6 +436,18 @@ def test_repository_summary_counts_are_repository_scoped() -> None:
                 expected_run_count=1,
             )
         )
+        session.add(
+            RepositorySnapshot(
+                repository_id=repository_id,
+                manifest={"repository": {"id": repository_id}, "kind": "export"},
+            )
+        )
+        session.add(
+            RepositorySnapshot(
+                repository_id=other_repository.id,
+                manifest={"repository": {"id": other_repository.id}, "kind": "export"},
+            )
+        )
         session.commit()
 
     response = client.get(f"/repositories/{repository_id}/summary")
@@ -453,6 +465,20 @@ def test_repository_summary_counts_are_repository_scoped() -> None:
     assert payload["full_text"]["status"] == "ready"
     assert payload["vector"]["status"] == "ready"
     assert payload["vector"]["model"] == "test-deterministic"
+    activity = payload["recent_activity"]
+    activity_kinds = {item["kind"] for item in activity}
+    activity_labels = {item["label"] for item in activity}
+    assert {"document", "chat", "retrieval", "sandbox", "export", "recreate"} <= activity_kinds
+    assert "dashboard.txt" in activity_labels
+    assert "Dashboard chat" in activity_labels
+    assert "dashboard" in activity_labels
+    assert "Repository manifest" in activity_labels
+    assert "other.txt" not in activity_labels
+    assert "Other chat" not in activity_labels
+    assert [item["occurred_at"] for item in activity] == sorted(
+        (item["occurred_at"] for item in activity),
+        reverse=True,
+    )
 
 
 def test_repository_summary_reports_partial_and_stale_indexes() -> None:
