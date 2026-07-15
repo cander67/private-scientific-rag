@@ -1,8 +1,8 @@
 # Workbench mockups
 
-Static HTML/CSS mockups for the private scientific RAG workbench. They validate layout,
-terminology, and information hierarchy **before** backend implementation begins
-(see `../.plans/private_scientific_rag_revised_plan.md` §12.3).
+Static HTML/CSS mockups for the private scientific RAG workbench. These are historical review
+artifacts and optional references now that the React app carries the implemented product UI.
+They are not part of the default CI pipeline.
 
 No build step and no backend. Open any file in a browser, or serve the folder.
 
@@ -38,7 +38,7 @@ Set-Location ..
 Toggle light/dark from the control in the top-right of any page. Resize below ~900px to see the
 sidebar collapse into a hamburger menu.
 
-## Tests &amp; screenshots (Playwright, optional)
+## Tests &amp; screenshots (Playwright, optional/manual)
 
 ```bash
 cd mockups
@@ -59,6 +59,6 @@ npm run screenshots      # writes screenshots/<desktop|mobile>/<page>-<light|dar
 Set-Location ..
 ```
 
-The smoke test and the screenshot matrix (desktop + mobile × light + dark) are the review
-artifacts. `screenshots/`, `node_modules/`, `test-results/`, and `playwright-report/` are
-gitignored.
+The smoke test and the screenshot matrix (desktop + mobile x light + dark) can still be run for
+manual design reference. `screenshots/`, `node_modules/`, `test-results/`, and
+`playwright-report/` are gitignored.

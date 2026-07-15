@@ -21,7 +21,7 @@ Current API surface:
 
 - `GET /health`: local app and dependency health check.
 - `GET /repositories/default`: creates or returns the default repository with validated settings.
-- `GET /repositories/admin/inventory`: lists local repository administration summaries with scoped counts, full-text/vector index status, and storage-category hints before destructive workflows are available.
+- `GET /repositories/admin/inventory`: lists local repository administration summaries with scoped counts, full-text/vector index status, and storage-category hints before destructive workflows run.
 - `GET /repositories/admin/clear-all/preview`: previews aggregate local cleanup for all repositories without deleting anything, including preserved external files/model caches and retryable vector cleanup warnings.
 - `POST /repositories/admin/clear-all`: clears all local repositories after the stronger `DELETE ALL LOCAL REPOSITORIES` confirmation, then recreates the default repository for recovery.
 - `POST /repositories/admin/vector-cleanup/retry`: retries leftover Qdrant collection cleanup from a cleanup result without requiring a second repository deletion.
@@ -70,7 +70,7 @@ Current status:
 - PRD7 local RAG chat with citations is complete and closed: Ollama chat boundary, model registry, readiness checks, chat session persistence, prompt library settings, chat-owned retrieval controls, citation mapping, and Chat Workspace are available.
 - PRD8 Prompt Sandbox is complete and closed: repository-scoped sandbox prompt versions, copy-to/from chat prompt library, prompt deletion, persisted sandbox runs, progressive side-by-side retrieval comparisons, local-model generation, retrieved context snapshots, latency/status display, and the Prompt Sandbox workspace are available. Golden evaluation metrics and evidence-backed promotion are deferred to PRD18.
 - PRD9 export/import/recreate is complete and closed: portable ZIP export bundles, bundle validation, backend recreate execution, active history restore, full-text/vector index rebuild reporting, Export Center, Recreate Repository, and cross-platform transfer documentation are available.
-- PRD19 repository administration and local reset is implemented and ready for review: local repository inventory, cleanup previews, guarded one-repository deletion, guarded clear-all reset, default repository recovery, preservation defaults for external files/model caches, Qdrant cleanup failure reporting, retry vector cleanup, and cross-platform reset guidance are available.
+- PRD19 repository administration and local reset is complete and closed: local repository inventory, cleanup previews, guarded one-repository deletion, guarded clear-all reset, default repository recovery, preservation defaults for external files/model caches, Qdrant cleanup failure reporting, retry vector cleanup, and cross-platform reset guidance are available.
 - PRD20 Repository Dashboard and Home Alias is complete and closed: stable repository summary API, home/dashboard route aliases, dashboard status surface, repository switching, no-repository recovery, workflow quick actions, recent activity, and frontend/backend contract coverage are available.
 - PRD21 Settings / Models is complete and closed: repository-scoped settings editing, validation, impact analysis, explicit readiness checks, workflow follow-up links, chat/export default propagation, and frontend contract coverage are available.
 

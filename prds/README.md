@@ -22,17 +22,13 @@ Current status:
 - Backlog: PRD16 immutable embedding indexes.
 - Backlog: PRD17 search metadata quality and result labeling.
 - Backlog: PRD18 golden evaluation and evidence-backed promotion.
-- Ready for review: PRD19 repository administration and local reset.
+- Complete: PRD19 repository administration and local reset.
 - Complete: PRD20 repository dashboard and home alias.
 - Complete: PRD21 settings and model manager.
 
-Current review candidate: PRD19 repository administration and local reset.
+No next PRD is selected yet. Use the current app and remaining backlog to decide the next priority.
 
-The intended flow is:
-
-1. Approve all static HTML mockups.
-2. Initialize and publish the public GitHub repository with a clean first commit.
-3. Open implementation PRs against these PRDs in order, adjusting order only when a later PRD is needed to unblock an earlier one.
+The remaining backlog should be prioritized from hands-on use of the current app, adjusting order when a later PRD is needed to unblock an earlier one.
 
 Shared decisions:
 
@@ -71,6 +67,6 @@ PRD files:
 16. [Immutable embedding indexes](16-immutable-embedding-indexes.md) - backlog
 17. [Search metadata quality and result labeling](17-search-metadata-quality-result-labeling.md) - backlog
 18. [Golden evaluation and evidence-backed promotion](18-golden-evaluation-evidence-promotion.md) - backlog
-19. [Repository administration and local reset](19-repository-admin-reset.md) - ready for review
+19. [Repository administration and local reset](19-repository-admin-reset.md) - complete
 20. [Repository dashboard and home alias](20-repository-dashboard-home.md) - complete
 21. [Settings and model manager](21-settings-models-manager.md) - complete
