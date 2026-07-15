@@ -1,6 +1,6 @@
 # PRD 9: Export, Import, and Recreate Repository
 
-**Status:** Ready next.
+**Status:** Implemented, ready for review.
 
 ## Goal
 
@@ -24,6 +24,14 @@ Export complete research bundles and recreate repositories from settings, manife
 - Recreate Repository UI.
 - Cross-platform transfer docs.
 
+## Implementation Decisions
+
+- Recreate should prefer creating a new repository from an exported bundle, while also supporting restore into an existing empty repository.
+- Exported chat and retrieval history should be restored as active records so the recreated repository can build on prior work.
+- Bundles that exclude source files should support mapping external local files by deterministic SHA-256 hash and path, and recreate should report any missing or mismatched files clearly.
+- PRD8 sandbox runs and comparisons should not be included by default; they can be included through an explicit export option.
+- The first implementation should use progress-friendly synchronous export/recreate flows instead of persisted long-running jobs.
+
 ## Acceptance Criteria
 
 - Export ZIP includes manifest, settings, repository snapshot, prompts, retrieval runs, chunks, citations, and selected sources.
@@ -42,6 +50,7 @@ Export complete research bundles and recreate repositories from settings, manife
 ## Documentation References
 
 - `docs/public_repo_checklist.md` for public-safe exported examples.
+- `docs/export_recreate.md` for bundle contents, recreate workflow, warning meanings, and cross-platform transfer checklist.
 - Python `zipfile` documentation: https://docs.python.org/3/library/zipfile.html
 - Qdrant documentation: https://qdrant.tech/documentation/overview/
 - SQLite FTS5 documentation: https://www.sqlite.org/fts5.html

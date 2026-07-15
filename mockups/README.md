@@ -26,6 +26,15 @@ cd mockups
 npm run serve      # http://127.0.0.1:4173
 ```
 
+PowerShell:
+
+```powershell
+# either open mockups/index.html directly, or:
+Set-Location mockups
+npm run serve      # http://127.0.0.1:4173
+Set-Location ..
+```
+
 Toggle light/dark from the control in the top-right of any page. Resize below ~900px to see the
 sidebar collapse into a hamburger menu.
 
@@ -37,6 +46,17 @@ npm install
 npx playwright install --with-deps
 npm test                 # smoke: every page loads, no console errors, theme toggle works
 npm run screenshots      # writes screenshots/<desktop|mobile>/<page>-<light|dark>.png
+```
+
+PowerShell:
+
+```powershell
+Set-Location mockups
+npm install
+npx playwright install
+npm test                 # smoke: every page loads, no console errors, theme toggle works
+npm run screenshots      # writes screenshots/<desktop|mobile>/<page>-<light|dark>.png
+Set-Location ..
 ```
 
 The smoke test and the screenshot matrix (desktop + mobile × light + dark) are the review

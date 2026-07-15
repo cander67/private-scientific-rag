@@ -219,6 +219,23 @@ p {
   gap: var(--s3);
 }
 
+.repository-picker {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 240px);
+  gap: var(--s2);
+  align-items: center;
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.repository-picker select {
+  font-size: 0.86rem;
+  font-weight: 600;
+  text-transform: none;
+}
+
 .row-between {
   justify-content: space-between;
 }
@@ -682,6 +699,262 @@ textarea {
 
 .badge-failed {
   color: var(--danger);
+}
+
+.export-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.export-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.7fr);
+  gap: var(--s4);
+  align-items: start;
+}
+
+.export-overview,
+.export-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.export-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: var(--s3);
+}
+
+.export-metric {
+  min-height: 74px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--s3);
+}
+
+.export-metric span {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.export-metric strong {
+  font-family: var(--mono);
+  font-size: 1.25rem;
+  overflow-wrap: anywhere;
+}
+
+.export-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  margin-top: var(--s4);
+}
+
+.export-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--s3);
+  align-items: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  cursor: pointer;
+  padding: var(--s3);
+}
+
+.export-toggle input {
+  margin-top: 4px;
+}
+
+.export-toggle span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.export-toggle small {
+  color: var(--text-faint);
+}
+
+.export-download {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s3);
+  margin-top: var(--s4);
+}
+
+.export-kv {
+  margin: var(--s4) 0;
+}
+
+.export-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+.recreate-layout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
+}
+
+.recreate-overview,
+.recreate-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.recreate-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
+  gap: var(--s4);
+  align-items: start;
+}
+
+.recreate-form {
+  margin: var(--s4) 0;
+}
+
+.recreate-actions {
+  margin-top: var(--s4);
+}
+
+.recreate-steps {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: var(--s2);
+}
+
+.recreate-step {
+  min-height: 58px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--s3);
+}
+
+.recreate-step span {
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.recreate-step strong {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  text-transform: capitalize;
+}
+
+.recreate-step-complete,
+.recreate-step-completed {
+  border-color: transparent;
+  background: var(--ok-soft);
+}
+
+.recreate-step-complete strong,
+.recreate-step-completed strong {
+  color: var(--ok);
+}
+
+.recreate-step-running {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.recreate-step-blocked,
+.recreate-step-failed {
+  border-color: transparent;
+  background: var(--danger-soft);
+}
+
+.recreate-step-blocked strong,
+.recreate-step-failed strong {
+  color: var(--danger);
+}
+
+.recreate-step-warning {
+  border-color: transparent;
+  background: var(--warn-soft);
+}
+
+.recreate-step-warning strong {
+  color: var(--warn);
+}
+
+.recreate-mapping-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  margin: var(--s4) 0;
+}
+
+.recreate-mapping-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr) auto;
+  gap: var(--s3);
+  align-items: end;
+}
+
+.recreate-issue-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s4);
+}
+
+.recreate-issue-group h3 {
+  font-size: 0.9rem;
+  margin-bottom: var(--s3);
+}
+
+.recreate-issue {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--s3);
+}
+
+.recreate-issue + .recreate-issue {
+  margin-top: var(--s2);
+}
+
+.recreate-issue strong {
+  font-size: 0.86rem;
+}
+
+.recreate-issue span,
+.recreate-issue small {
+  color: var(--text-faint);
+  font-size: 0.78rem;
+}
+
+.recreate-issue-error {
+  border-color: transparent;
+  background: var(--danger-soft);
+}
+
+.recreate-issue-warning {
+  border-color: transparent;
+  background: var(--warn-soft);
 }
 
 @keyframes sandbox-spin {
@@ -1384,6 +1657,15 @@ textarea {
     grid-template-columns: repeat(2, minmax(240px, 1fr));
   }
 
+  .export-metrics {
+    grid-template-columns: repeat(2, minmax(140px, 1fr));
+  }
+
+  .recreate-steps,
+  .recreate-issue-grid {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+
   .sandbox-controls {
     grid-template-columns: 1fr;
   }
@@ -1432,6 +1714,11 @@ textarea {
     padding: var(--s4);
   }
 
+  .repository-picker {
+    grid-template-columns: 1fr;
+    width: 100%;
+  }
+
   .page {
     padding: var(--s4);
   }
@@ -1439,7 +1726,19 @@ textarea {
   .grid-side,
   .viewer,
   .chat-layout,
-  .sandbox-run-grid {
+  .sandbox-run-grid,
+  .export-grid,
+  .recreate-grid,
+  .recreate-mapping-row {
+    grid-template-columns: 1fr;
+  }
+
+  .export-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .recreate-steps,
+  .recreate-issue-grid {
     grid-template-columns: 1fr;
   }
 

@@ -8,7 +8,7 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 through PRD8 are complete and closed. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, local Ollama-backed retrieval-augmented chat with citations, and a Prompt Sandbox for prompt/retrieval/model comparisons. PRD9 export/import/recreate is the next implementation target.
+PRD1 through PRD8 are complete and closed. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, local Ollama-backed retrieval-augmented chat with citations, and a Prompt Sandbox for prompt/retrieval/model comparisons. PRD9 export/import/recreate is implemented and ready for review.
 
 Later PRDs include OCR execution (PRD13), structured table extraction (PRD14), bulk patent downloads/raw patent-data feeds (PRD12), and clearer chunk-level versus document-level search labels (PRD17). Support for additional embedding models and immutable document storage are also planned.
 
@@ -22,8 +22,9 @@ The current scaffold provides:
 - Unified retrieval search API for full-text, vector, and hybrid modes, with candidate-pool/RRF/reranker settings capture, Reciprocal Rank Fusion score breakdowns, selectable cross-encoder/metadata-boost reranking, and max-five recent retrieval history persistence.
 - Local RAG chat API for repository-scoped chat sessions, chat-owned retrieval settings, Ollama model smoke checks, readiness checks, structured citation mapping, and persisted chat messages.
 - Prompt Sandbox API for repository-scoped sandbox prompt versions, copy-to/from chat prompt library, prompt deletion, persisted sandbox runs, progressive side-by-side retrieval comparisons, context snapshots, citations, latency, and status.
+- Portable repository ZIP export/recreate bundle API with validation, a versioned manifest, settings, prompt library, document/chunk metadata, chat and retrieval history, citations, selected source files, external source mapping, rebuilt full-text/vector indexes, and opt-in sandbox data.
 - Deterministic comparison evaluation for full-text, vector, hybrid, and reranked hybrid retrieval, plus opt-in live Qdrant and cross-encoder checks.
-- React/Vite frontend document manager, source inspector, Search Lab, Chat Workspace, and Prompt Sandbox for full-text, vector, hybrid, reranked retrieval inspection, local cited chat, and prompt/retrieval/model comparison, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
+- React/Vite frontend document manager, source inspector, Search Lab, Chat Workspace, Prompt Sandbox, Export Center, and Recreate Repository views for full-text, vector, hybrid, reranked retrieval inspection, local cited chat, prompt/retrieval/model comparison, portable ZIP export, and bundle validation/recreate, including PDF thumbnail inspection for `needs_ocr` documents with no chunks.
 - SQLAlchemy/Alembic migration wiring for repository settings, document ingestion, vector embedding runs, and retrieval history/results.
 - Qdrant Docker Compose service.
 - Pytest, Ruff, Mypy, and CI configuration.
@@ -48,15 +49,33 @@ Install backend dependencies:
 uv sync --all-extras --dev
 ```
 
+PowerShell:
+
+```powershell
+uv sync --all-extras --dev
+```
+
 Apply database migrations:
 
 ```bash
 uv run alembic upgrade head
 ```
 
+PowerShell:
+
+```powershell
+uv run alembic upgrade head
+```
+
 Start Qdrant:
 
 ```bash
+docker compose up -d qdrant
+```
+
+PowerShell:
+
+```powershell
 docker compose up -d qdrant
 ```
 
@@ -72,6 +91,12 @@ Run the backend:
 uv run uvicorn private_rag.api.app:app --reload
 ```
 
+PowerShell:
+
+```powershell
+uv run uvicorn private_rag.api.app:app --reload
+```
+
 Defaults to `http://127.0.0.1:8000`
 Docs available at `http://127.0.0.1:8000/docs`
 
@@ -83,11 +108,31 @@ npm install
 npm run dev
 ```
 
+PowerShell:
+
+```powershell
+Set-Location frontend
+npm install
+npm run dev
+Set-Location ..
+```
+
 Defaults to `http://127.0.0.1:5173`
 
 ## Checks
 
+Backend:
+
 ```bash
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src tests
+uv run pytest
+```
+
+PowerShell:
+
+```powershell
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy src tests
@@ -102,6 +147,15 @@ npm run build
 npm test
 ```
 
+PowerShell:
+
+```powershell
+Set-Location frontend
+npm run build
+npm test
+Set-Location ..
+```
+
 ## Local Data
 
 Runtime data belongs outside Git:
@@ -112,7 +166,15 @@ Runtime data belongs outside Git:
 - `.qdrant/`
 - private document corpora
 
-The `documents/` folder is a local/manual workspace. Do not commit private, licensed, downloaded, generated, or restricted research documents. Use `scripts/prepare_golden_corpus.sh` to recreate the golden-corpus folder layout and optional public candidates. CI tests use `tests/fixtures/`, not `documents/`.
+The `documents/` folder is a local/manual workspace. Do not commit private, licensed, downloaded, generated, or restricted research documents. On macOS/Linux or Git Bash, use `scripts/prepare_golden_corpus.sh` to recreate the golden-corpus folder layout and optional public candidates. On Windows PowerShell, create the local folders with:
+
+```powershell
+$folders = "checks", "markdown", "notes", "ocr", "patents_uploaded", "pdf", "source_bundles", "text"
+$folders | ForEach-Object { New-Item -ItemType Directory -Force -Path "documents/golden_corpus/$_" | Out-Null }
+New-Item -ItemType File -Force -Path "documents/golden_corpus/source_bundles/.gitkeep", "documents/golden_corpus/text/.gitkeep" | Out-Null
+```
+
+CI tests use `tests/fixtures/`, not `documents/`.
 
 The `example_code/` folder is local inspiration code and should not be committed.
 
@@ -124,6 +186,7 @@ The `example_code/` folder is local inspiration code and should not be committed
 - [Test documentation](tests/README.md)
 - [Backend documentation](src/private_rag/README.md)
 - [Frontend documentation](frontend/README.md)
+- [Export/recreate transfer guide](docs/export_recreate.md)
 - [Public repo checklist](docs/public_repo_checklist.md)
 
 ## License

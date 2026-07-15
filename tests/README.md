@@ -21,6 +21,27 @@ PRD7 chat coverage keeps CI deterministic by mocking the LLM at the chat boundar
 
 PRD8 Prompt Sandbox coverage keeps CI deterministic by mocking the LLM at the sandbox boundary. Default tests cover sandbox prompt version validation, repository-scoped create/list/read/copy/delete behavior, side-by-side comparison persistence, progressive per-run comparison execution, prompt snapshot preservation, retrieved context snapshots, generated answers, citations, latency, and frontend contract coverage for the Prompt Sandbox view. Golden query datasets, aggregate retrieval metrics, and evidence-backed promotion to chat defaults are deferred to PRD18.
 
+PRD9 export/import/recreate coverage includes the portable bundle contract, bundle validation, backend recreate execution, Export Center, and Recreate Repository UI contracts. Default tests cover deterministic source bundle paths and SHA-256 hashing, manifest schema validation, ZIP structure, default source inclusion, chat/retrieval/chunk/citation payload export, opt-in sandbox payload export, malformed/unsupported bundle rejection, missing payload detection, source hash mismatches, external source mapping failures, renamed-file warnings, missing model reports, parser fingerprints, exported count summaries, recreate into a new repository, recreate into an explicit empty repository, source-excluded recreate through external mappings, active chat/retrieval history remapping, deterministic full-text/vector rebuild reporting, validation display, blocked recreate, successful recreate progress, and final report display.
+
+PRD9-focused deterministic commands:
+
+```bash
+uv run pytest tests/unit/test_export_bundle.py tests/integration/test_export_bundle_api.py
+cd frontend
+npm test
+```
+
+PowerShell:
+
+```powershell
+uv run pytest tests/unit/test_export_bundle.py tests/integration/test_export_bundle_api.py
+Set-Location frontend
+npm test
+Set-Location ..
+```
+
+The cross-platform manual transfer checklist and warning glossary live in `docs/export_recreate.md`. Optional live checks for Qdrant, cross-encoder reranking, Ollama, and local RAG chat are listed below.
+
 ## Live tests
 
 Default CI and `uv run pytest` exclude live tests. Run live checks only when the required local service or model is already available.
@@ -39,6 +60,15 @@ docker compose up -d qdrant
 RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_vector_live.py
 ```
 
+PowerShell:
+
+```powershell
+docker compose up -d qdrant
+$env:RUN_LIVE_TESTS = "1"
+uv run pytest -m live tests/integration/test_vector_live.py
+Remove-Item Env:\RUN_LIVE_TESTS
+```
+
 ### Cross-encoder live smoke
 
 Prerequisites:
@@ -52,10 +82,24 @@ Download/cache the default model:
 uv run python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')"
 ```
 
+PowerShell:
+
+```powershell
+uv run python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')"
+```
+
 Run:
 
 ```bash
 RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_cross_encoder_live.py
+```
+
+PowerShell:
+
+```powershell
+$env:RUN_LIVE_TESTS = "1"
+uv run pytest -m live tests/integration/test_cross_encoder_live.py
+Remove-Item Env:\RUN_LIVE_TESTS
 ```
 
 ### Ollama chat live smoke
@@ -71,10 +115,24 @@ Download/cache the default chat model:
 ollama pull gemma3:4b
 ```
 
+PowerShell:
+
+```powershell
+ollama pull gemma3:4b
+```
+
 Run the lightweight Ollama boundary check:
 
 ```bash
 RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_ollama_live.py
+```
+
+PowerShell:
+
+```powershell
+$env:RUN_LIVE_TESTS = "1"
+uv run pytest -m live tests/integration/test_ollama_live.py
+Remove-Item Env:\RUN_LIVE_TESTS
 ```
 
 ### Local RAG chat live smoke
@@ -89,6 +147,14 @@ Run:
 RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration/test_chat_rag_live.py
 ```
 
+PowerShell:
+
+```powershell
+$env:RUN_LIVE_TESTS = "1"
+uv run pytest -m live tests/integration/test_chat_rag_live.py
+Remove-Item Env:\RUN_LIVE_TESTS
+```
+
 ### Prompt Sandbox live note
 
 Prompt Sandbox product runs use the selected local chat model through the same local LLM boundary as Chat Workspace. PRD8 default CI uses mocked generation for determinism. A separate opt-in sandbox live smoke is deferred until PRD18 adds maintainer evaluation and promotion workflows.
@@ -101,10 +167,24 @@ Run all default tests:
 uv run pytest
 ```
 
+PowerShell:
+
+```powershell
+uv run pytest
+```
+
 Run all default tests plus all opted-in live tests in one coverage pass:
 
 ```bash
 RUN_LIVE_TESTS=1 uv run pytest -m "not live or live"
+```
+
+PowerShell:
+
+```powershell
+$env:RUN_LIVE_TESTS = "1"
+uv run pytest -m "not live or live"
+Remove-Item Env:\RUN_LIVE_TESTS
 ```
 
 Run backend tests by tier, including live tests when ready:
@@ -115,9 +195,28 @@ uv run pytest tests/integration
 RUN_LIVE_TESTS=1 uv run pytest -m live tests/integration
 ```
 
+PowerShell:
+
+```powershell
+uv run pytest tests/unit
+uv run pytest tests/integration
+$env:RUN_LIVE_TESTS = "1"
+uv run pytest -m live tests/integration
+Remove-Item Env:\RUN_LIVE_TESTS
+```
+
 Run the full backend quality gate:
 
 ```bash
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src tests
+uv run pytest
+```
+
+PowerShell:
+
+```powershell
 uv run ruff format --check .
 uv run ruff check .
 uv run mypy src tests
@@ -133,9 +232,27 @@ uv run mypy src tests
 RUN_LIVE_TESTS=1 uv run pytest -m "not live or live"
 ```
 
+PowerShell:
+
+```powershell
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src tests
+$env:RUN_LIVE_TESTS = "1"
+uv run pytest -m "not live or live"
+Remove-Item Env:\RUN_LIVE_TESTS
+```
+
 Run a specific group:
 
 ```bash
+uv run pytest tests/unit
+uv run pytest tests/integration
+```
+
+PowerShell:
+
+```powershell
 uv run pytest tests/unit
 uv run pytest tests/integration
 ```

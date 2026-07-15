@@ -12,9 +12,10 @@ Current status:
 - Complete: PRD6 hybrid search and reranking.
 - Complete: PRD7 local RAG chat with citations.
 - Complete: PRD8 prompt sandbox.
-- Ready Next: PRD9 export, import, and recreate repository.
+- Ready for review: PRD9 export, import, and recreate repository.
 - Backlog: PRD17 search metadata quality and result labeling.
 - Backlog: PRD18 golden evaluation and evidence-backed promotion.
+- Backlog: PRD19 repository administration and local reset.
 
 The intended flow is:
 
@@ -49,7 +50,7 @@ PRD files:
 6. [Hybrid search and reranking](06-hybrid-search-reranking.md) - complete
 7. [Local RAG chat with citations](07-local-rag-chat-citations.md) - complete
 8. [Prompt sandbox](08-prompt-sandbox-evaluation.md) - complete
-9. [Export, import, and recreate repository](09-export-import-recreate.md) - ready next
+9. [Export, import, and recreate repository](09-export-import-recreate.md) - ready for review
 10. [Structured scientific and multimodal parsing](10-structured-scientific-multimodal-parsing.md)
 11. [Chemistry and patent extensions](11-chemistry-patent-extensions.md)
 12. [Bulk patent data integration](12-bulk-patent-data-integration.md)
@@ -59,3 +60,4 @@ PRD files:
 16. [Immutable embedding indexes](16-immutable-embedding-indexes.md)
 17. [Search metadata quality and result labeling](17-search-metadata-quality-result-labeling.md)
 18. [Golden evaluation and evidence-backed promotion](18-golden-evaluation-evidence-promotion.md) - backlog
+19. [Repository administration and local reset](19-repository-admin-reset.md) - backlog

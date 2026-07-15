@@ -55,6 +55,20 @@ def get_repository_with_settings(
     return _with_settings(repository)
 
 
+def list_repositories(session: Session) -> list[RepositoryRead]:
+    repositories = session.scalars(select(Repository).order_by(Repository.created_at)).all()
+    return [
+        RepositoryRead(
+            id=repository.id,
+            name=repository.name,
+            root_path=repository.root_path,
+            created_at=repository.created_at,
+            updated_at=repository.updated_at,
+        )
+        for repository in repositories
+    ]
+
+
 def update_repository_settings(
     session: Session,
     repository_id: str,

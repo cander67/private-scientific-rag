@@ -16,10 +16,25 @@ Run migrations locally with:
 uv run alembic upgrade head
 ```
 
+PowerShell:
+
+```powershell
+uv run alembic upgrade head
+```
+
 When adding or changing SQLAlchemy models, add the matching Alembic migration in the same change and verify it with `uv run alembic upgrade head`.
 
 To verify the complete migration chain against a new SQLite database without touching local application data:
 
 ```bash
 PRIVATE_RAG_DATABASE_URL=sqlite:////tmp/private-rag-migration-check.db uv run alembic upgrade head
+```
+
+PowerShell:
+
+```powershell
+$env:PRIVATE_RAG_DATABASE_URL = "sqlite:///./private-rag-migration-check.db"
+uv run alembic upgrade head
+Remove-Item Env:\PRIVATE_RAG_DATABASE_URL
+Remove-Item .\private-rag-migration-check.db -ErrorAction SilentlyContinue
 ```

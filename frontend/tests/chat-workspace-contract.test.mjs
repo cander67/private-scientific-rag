@@ -5,7 +5,7 @@ import test from "node:test";
 const source = await readFile(new URL("../src/main.tsx", import.meta.url), "utf8");
 
 test("Chat Workspace is a first-class routed view", () => {
-  assert.match(source, /type View = "documents" \| "source" \| "search" \| "sandbox" \| "chat"/);
+  assert.match(source, /type View = "documents" \| "source" \| "search" \| "sandbox" \| "chat" \| "export" \| "recreate"/);
   assert.match(source, /#chat-workspace/);
   assert.match(source, /navigateTo\("chat"\)/);
   assert.match(source, /activeView === "chat"/);
@@ -17,6 +17,9 @@ test("Chat Workspace uses persisted backend chat sessions and messages", () => {
   assert.match(source, /type ChatMessage =/);
   assert.match(source, /type ChatRetrievalSettings =/);
   assert.match(source, /chat\/sessions/);
+  assert.match(source, /loadChatSession/);
+  assert.match(source, /chat\/sessions\/\$\{chatSessionId\}/);
+  assert.match(source, /setChatSessions\(\(current\) =>[\s\S]*payload\.id \? payload : session/);
   assert.match(source, /sessions\/\$\{chatSession\.id\}\/messages/);
   assert.match(source, /loadChatSessions/);
   assert.match(source, /createChatSession/);

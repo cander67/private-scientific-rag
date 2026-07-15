@@ -11,6 +11,7 @@ from private_rag.repositories.schemas import (
     RecreateValidationRequest,
     RecreateValidationResponse,
     RepositoryManifest,
+    RepositoryRead,
     RepositorySettingsUpdate,
     RepositoryWithSettings,
 )
@@ -18,6 +19,7 @@ from private_rag.repositories.service import (
     ensure_default_repository,
     export_manifest,
     get_repository_with_settings,
+    list_repositories,
     update_repository_settings,
     validate_recreate_request,
 )
@@ -36,6 +38,12 @@ DbSession = Annotated[Session, Depends(get_db_session)]
 @router.get("/default", response_model=RepositoryWithSettings)
 def read_default_repository(session: DbSession) -> RepositoryWithSettings:
     return ensure_default_repository(session)
+
+
+@router.get("", response_model=list[RepositoryRead])
+def read_repositories(session: DbSession) -> list[RepositoryRead]:
+    ensure_default_repository(session)
+    return list_repositories(session)
 
 
 @router.get("/{repository_id}/settings", response_model=RepositoryWithSettings)
