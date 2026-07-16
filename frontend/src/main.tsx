@@ -683,9 +683,34 @@ type ChatQuestionResponse = {
   assistant_message: ChatMessage;
 };
 
+type ChatModelInfo = {
+  name: string;
+  label: string;
+  role: "recommended_default" | "balanced_local" | "larger_local" | "reasoning_experimental";
+  required: boolean;
+  notes: string | null;
+  setup_command: string | null;
+  local_resource_notes: string | null;
+  context_window_notes: string | null;
+  readiness_required: boolean;
+};
+
+type ChatModelRegistry = {
+  default_model: string;
+  models: ChatModelInfo[];
+};
+
 type ChatReadinessItem = {
   ready: boolean;
-  status: "ready" | "missing" | "partial" | "stale";
+  status:
+    | "not_checked"
+    | "unavailable_runtime"
+    | "not_installed"
+    | "ready"
+    | "failed"
+    | "missing"
+    | "partial"
+    | "stale";
   message: string;
   indexed_chunks: number | null;
   model: string | null;
@@ -815,6 +840,7 @@ function App() {
   const [sandboxBusy, setSandboxBusy] = useState(false);
   const [sandboxMessage, setSandboxMessage] = useState("Save a prompt, then run a comparison.");
   const [repositorySettings, setRepositorySettings] = useState<RepositorySettings | null>(null);
+  const [chatModelRegistry, setChatModelRegistry] = useState<ChatModelRegistry | null>(null);
   const [exportIncludeSources, setExportIncludeSources] = useState(true);
   const [exportIncludeSandbox, setExportIncludeSandbox] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
@@ -870,6 +896,7 @@ function App() {
     if (repository) {
       void loadDocuments(repository.id);
       void loadRepositorySettings(repository.id);
+      void loadChatModelRegistry(repository.id);
       void loadDashboardSummary(repository.id);
       void loadChatSessions(repository.id);
       void loadChatReadiness(repository.id);
@@ -1033,6 +1060,7 @@ function App() {
     setSearchDocumentId("");
     setSearchResults([]);
     setLastRebuild(null);
+    setChatModelRegistry(null);
     setDashboardSummary(null);
     setDashboardMessage("Loading repository summary");
     setDeletePreview(null);
@@ -1082,6 +1110,20 @@ function App() {
     } catch {
       setRepositorySettings(null);
       setExportMessage("Could not load export defaults");
+    }
+  }
+
+  async function loadChatModelRegistry(repositoryId: string) {
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repositoryId}/chat/models`);
+      if (!response.ok) {
+        throw new Error("chat model registry unavailable");
+      }
+      const payload = (await response.json()) as ChatModelRegistry;
+      setChatModelRegistry(payload);
+      setSandboxModel((current) => current || payload.default_model);
+    } catch {
+      setChatModelRegistry(null);
     }
   }
 
@@ -2471,6 +2513,7 @@ function App() {
             ) : activeView === "sandbox" ? (
               <PromptSandbox
                 prompts={sandboxPrompts}
+                chatModelRegistry={chatModelRegistry}
                 selectedPromptId={selectedSandboxPromptId}
                 promptName={sandboxPromptName}
                 promptBody={sandboxPromptBody}
@@ -2524,6 +2567,7 @@ function App() {
               <SettingsModels
                 repository={repository}
                 settings={repositorySettings}
+                chatModelRegistry={chatModelRegistry}
                 onNavigate={navigateTo}
                 onSave={saveRepositorySettings}
                 onAnalyzeImpact={previewRepositorySettingsImpact}
@@ -3820,6 +3864,7 @@ function DashboardMetric({
 function SettingsModels({
   repository,
   settings,
+  chatModelRegistry,
   onNavigate,
   onSave,
   onAnalyzeImpact,
@@ -3827,6 +3872,7 @@ function SettingsModels({
 }: {
   repository: RepositoryResponse["repository"] | null;
   settings: RepositorySettings | null;
+  chatModelRegistry: ChatModelRegistry | null;
   onNavigate: (view: View) => void;
   onSave: (settings: RepositorySettings) => Promise<RepositorySettings>;
   onAnalyzeImpact: (settings: RepositorySettings) => Promise<SettingsImpactResponse>;
@@ -3862,6 +3908,9 @@ function SettingsModels({
     [validationIssues],
   );
   const requiredModels = requiredModelsForSettings(draft);
+  const selectedChatModelInfo = chatModelRegistry?.models.find(
+    (model) => model.name === draft?.model.ollama_chat_model,
+  );
   const dirty = Boolean(settings && draft && JSON.stringify(settings) !== JSON.stringify(draft));
   const visibleImpact = dirty ? pendingImpact : lastSavedImpact;
 
@@ -4221,6 +4270,39 @@ function SettingsModels({
             error={validationByField.get("model.ollama_chat_model")}
             onChange={(value) => updateDraft((next) => { next.model.ollama_chat_model = value; })}
           />
+          {chatModelRegistry && (
+            <SettingSelect
+              id="settings-known-chat-model"
+              label="Known Ollama model"
+              value={selectedChatModelInfo?.name ?? "__custom__"}
+              options={["__custom__", ...chatModelRegistry.models.map((model) => model.name)]}
+              labels={{
+                __custom__: "Custom local Ollama model",
+                ...Object.fromEntries(
+                  chatModelRegistry.models.map((model) => [
+                    model.name,
+                    `${model.label} · ${chatModelRoleLabel(model.role)}`,
+                  ]),
+                ),
+              }}
+              onChange={(value) => {
+                if (value !== "__custom__") {
+                  updateDraft((next) => { next.model.ollama_chat_model = value; });
+                }
+              }}
+            />
+          )}
+          <div className="settings-model-guidance">
+            <strong>{selectedChatModelInfo?.label ?? "Custom local Ollama model"}</strong>
+            <small>
+              {selectedChatModelInfo?.notes ??
+                "Any local Ollama model can be used here when it supports the normal /api/chat contract."}
+            </small>
+            <small>
+              {selectedChatModelInfo?.setup_command ??
+                `Run ollama pull ${draft.model.ollama_chat_model || "<model>"} before checking readiness.`}
+            </small>
+          </div>
           <SettingSelect
             id="settings-active-prompt"
             label="Active chat prompt"
@@ -4559,6 +4641,7 @@ function ReadinessCard({
 
 function PromptSandbox({
   prompts,
+  chatModelRegistry,
   selectedPromptId,
   promptName,
   promptBody,
@@ -4581,6 +4664,7 @@ function PromptSandbox({
   onOpenContext,
 }: {
   prompts: SandboxPromptVersion[];
+  chatModelRegistry: ChatModelRegistry | null;
   selectedPromptId: string | null;
   promptName: string;
   promptBody: string;
@@ -4709,9 +4793,17 @@ function PromptSandbox({
               </label>
               <input
                 id="sandbox-model"
+                list="sandbox-model-options"
                 value={model}
                 onChange={(event) => onModelChange(event.target.value)}
               />
+              <datalist id="sandbox-model-options">
+                {chatModelRegistry?.models.map((entry) => (
+                  <option value={entry.name} key={entry.name}>
+                    {entry.label}
+                  </option>
+                ))}
+              </datalist>
             </div>
             <div>
               <label className="field" htmlFor="sandbox-top-k">
@@ -6603,6 +6695,19 @@ function requiredModelsForSettings(settings: RepositorySettings | null) {
       ].filter((model): model is string => Boolean(model)),
     ),
   );
+}
+
+function chatModelRoleLabel(role: ChatModelInfo["role"]) {
+  switch (role) {
+    case "recommended_default":
+      return "recommended default";
+    case "balanced_local":
+      return "balanced local";
+    case "larger_local":
+      return "larger local";
+    case "reasoning_experimental":
+      return "reasoning experimental";
+  }
 }
 
 function settingsSummaryRows(settings: RepositorySettings | null) {

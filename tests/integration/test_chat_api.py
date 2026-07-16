@@ -24,12 +24,16 @@ from private_rag.vector.store import InMemoryVectorStore
 class _FakeLLM:
     def __init__(self) -> None:
         self.calls: list[list[ChatMessage]] = []
+        self.complete_models: list[str] = []
+        self.smoke_models: list[str] = []
 
     def complete(self, *, model: str, messages: list[ChatMessage]) -> ChatCompletion:
+        self.complete_models.append(model)
         self.calls.append(messages)
         return ChatCompletion(content="LiFePO4 is discussed in the repository [1].", model=model)
 
     def smoke(self, *, model: str) -> ChatCompletion:
+        self.smoke_models.append(model)
         return ChatCompletion(content="local model ready [1]", model=model)
 
 
@@ -96,7 +100,12 @@ def test_chat_model_registry_and_smoke_use_llm_boundary() -> None:
 
     assert registry_response.status_code == 200
     assert registry_response.json()["default_model"] == "gemma3:4b"
-    assert "gemma3:4b" in {model["name"] for model in registry_response.json()["models"]}
+    registry_models = registry_response.json()["models"]
+    assert "gemma3:4b" in {model["name"] for model in registry_models}
+    default_model = next(model for model in registry_models if model["name"] == "gemma3:4b")
+    assert default_model["role"] == "recommended_default"
+    assert default_model["setup_command"] == "ollama pull gemma3:4b"
+    assert default_model["readiness_required"] is True
     assert smoke_response.status_code == 200
     assert smoke_response.json()["response"] == "local model ready [1]"
 
@@ -263,7 +272,41 @@ def test_chat_readiness_uses_repository_chat_model() -> None:
     assert update_response.status_code == 200
     assert response.status_code == 200
     assert response.json()["local_model"]["model"] == "gemma3:custom"
-    assert llm.calls == []
+    assert llm.complete_models == []
+    assert llm.smoke_models == ["gemma3:custom"]
+
+
+def test_chat_session_custom_model_reaches_llm_boundary() -> None:
+    client, llm = _client_with_chat_fakes()
+    repository_id = _default_repository_id(client)
+    client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "chat-custom-model.txt",
+                b"Abstract\nLiFePO4 cathodes retain capacity during cycling.\n",
+                "text/plain",
+            )
+        },
+    )
+    client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    client.post(f"/repositories/{repository_id}/vector/rebuild")
+    session_response = client.post(
+        f"/repositories/{repository_id}/chat/sessions",
+        json={"title": "Custom local model", "model": "qwen-local:custom"},
+    )
+
+    chat_session_id = session_response.json()["id"]
+    response = client.post(
+        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}/messages",
+        json={"content": "What does the repository say about LiFePO4?"},
+    )
+
+    assert session_response.status_code == 200
+    assert session_response.json()["model"] == "qwen-local:custom"
+    assert response.status_code == 200
+    assert response.json()["session"]["model"] == "qwen-local:custom"
+    assert llm.complete_models == ["qwen-local:custom"]
 
 
 def test_chat_readiness_distinguishes_parsed_but_unindexed_repository() -> None:

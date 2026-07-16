@@ -1297,6 +1297,26 @@ textarea {
   font-weight: 650;
 }
 
+.settings-model-guidance {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--s3);
+}
+
+.settings-model-guidance strong {
+  font-size: 0.9rem;
+}
+
+.settings-model-guidance small {
+  color: var(--text-faint);
+  line-height: 1.35;
+}
+
 .settings-checkbox {
   min-height: 38px;
   flex-direction: row;

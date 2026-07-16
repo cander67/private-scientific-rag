@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from private_rag.chat.llm import ChatCompletion, ChatMessage, OllamaUnavailableError
 from private_rag.core.settings import Settings
 from private_rag.repositories.schemas import (
     RecreateValidationRequest,
@@ -15,6 +16,19 @@ from private_rag.repositories.service import (
     analyze_settings_impact,
     validate_recreate_request,
 )
+
+
+class _MissingChatModelLLM:
+    def complete(
+        self, *, model: str, messages: list[ChatMessage]
+    ) -> ChatCompletion:  # pragma: no cover
+        raise NotImplementedError
+
+    def smoke(self, *, model: str) -> ChatCompletion:
+        raise OllamaUnavailableError(
+            f"Ollama model '{model}' is not installed. Run `ollama pull {model}`.",
+            readiness_status="not_installed",
+        )
 
 
 def test_default_repository_settings_use_app_model_defaults() -> None:
@@ -156,6 +170,17 @@ def test_readiness_checker_skips_disabled_reranker() -> None:
     assert result.status == "skipped"
     assert result.ready is True
     assert "disabled" in result.message
+
+
+def test_readiness_checker_reports_missing_chat_model_with_pull_guidance() -> None:
+    checker = LocalSettingsReadinessChecker()
+
+    result = checker.check_chat(llm=_MissingChatModelLLM(), model="custom-local:latest")
+
+    assert result.target == "chat"
+    assert result.status == "not_installed"
+    assert result.ready is False
+    assert "ollama pull custom-local:latest" in result.message
 
 
 def test_recreate_validation_reports_missing_files_and_models(tmp_path: Path) -> None:

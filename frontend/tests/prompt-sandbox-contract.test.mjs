@@ -25,6 +25,9 @@ test("Prompt Sandbox creates and runs persisted comparisons", () => {
   assert.match(source, /runSandboxComparison/);
   assert.match(source, /runSandboxComparisonRun/);
   assert.match(source, /sandboxComparisonRunConfigs/);
+  assert.match(source, /chatModelRegistry/);
+  assert.match(source, /datalist id="sandbox-model-options"/);
+  assert.match(source, /entry\.label/);
   assert.match(source, /Full-text/);
   assert.match(source, /Vector/);
   assert.match(source, /Hybrid/);

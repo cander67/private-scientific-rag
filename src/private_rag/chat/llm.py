@@ -1,18 +1,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
 
 import httpx
+
+ChatModelRole = Literal[
+    "recommended_default",
+    "balanced_local",
+    "larger_local",
+    "reasoning_experimental",
+]
 
 
 @dataclass(frozen=True)
 class ChatModelInfo:
     name: str
     label: str
-    role: str
+    role: ChatModelRole
     required: bool = False
     notes: str | None = None
+    setup_command: str | None = None
+    local_resource_notes: str | None = None
+    context_window_notes: str | None = None
+    readiness_required: bool = True
 
 
 @dataclass(frozen=True)
@@ -35,31 +46,76 @@ class ChatLLM(Protocol):
         """Return a minimal completion for local setup diagnostics."""
 
 
-MODEL_REGISTRY = [
+MODEL_REGISTRY: list[ChatModelInfo] = [
     ChatModelInfo(
         name="gemma3:4b",
         label="Gemma 3 4B",
-        role="default-small-mac",
+        role="recommended_default",
         required=True,
-        notes="Initial PRD7 local chat baseline.",
+        notes="Default local chat baseline for small developer machines.",
+        setup_command="ollama pull gemma3:4b",
+        local_resource_notes="Small enough for routine local RAG smoke tests.",
+        context_window_notes="Use the normal repository-context prompt; keep top-k modest on memory-constrained machines.",
     ),
     ChatModelInfo(
-        name="gemma4:12b",
-        label="Gemma 4 12B",
-        role="later-windows-baseline",
-        notes="Larger follow-up baseline; not required for CI or default development.",
+        name="llama3.2:3b",
+        label="Llama 3.2 3B",
+        role="balanced_local",
+        notes="Alternative small local chat model for repository-grounded answers.",
+        setup_command="ollama pull llama3.2:3b",
+        local_resource_notes="Good fit for quick readiness checks and lightweight local chat.",
+        context_window_notes="Supports the generic Ollama chat contract; validate answer quality per corpus.",
     ),
     ChatModelInfo(
-        name="qwen3.5:9b",
-        label="Qwen 3.5 9B",
-        role="later-windows-baseline",
-        notes="Larger follow-up baseline; not required for CI or default development.",
+        name="qwen2.5:7b",
+        label="Qwen 2.5 7B",
+        role="balanced_local",
+        notes="Recommended general-purpose local chat option when more memory is available.",
+        setup_command="ollama pull qwen2.5:7b",
+        local_resource_notes="Expect higher memory use and latency than the default 4B model.",
+        context_window_notes="Keep retrieved context within the model's local runtime limits.",
+    ),
+    ChatModelInfo(
+        name="mistral:7b",
+        label="Mistral 7B",
+        role="balanced_local",
+        notes="General-purpose local model supported through the generic Ollama chat provider.",
+        setup_command="ollama pull mistral:7b",
+        local_resource_notes="Useful comparison point for local scientific chat quality.",
+        context_window_notes="Uses the same text-chat prompt path as other ordinary Ollama models.",
+    ),
+    ChatModelInfo(
+        name="llama3.1:8b",
+        label="Llama 3.1 8B",
+        role="larger_local",
+        notes="Larger local option for machines with more memory.",
+        setup_command="ollama pull llama3.1:8b",
+        local_resource_notes="Not required for default development or CI.",
+        context_window_notes="Prefer explicit readiness checks before using in long RAG sessions.",
+    ),
+    ChatModelInfo(
+        name="deepseek-r1:8b",
+        label="DeepSeek R1 8B",
+        role="reasoning_experimental",
+        notes="Reasoning-oriented local model; answer style may need review before promotion.",
+        setup_command="ollama pull deepseek-r1:8b",
+        local_resource_notes="Optional experimental model; not a default recommendation.",
+        context_window_notes="May emit reasoning-style responses; use focused follow-up work if output formatting needs stricter control.",
     ),
 ]
 
 
 class OllamaUnavailableError(RuntimeError):
     """Raised when the local Ollama runtime or configured model is unavailable."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        readiness_status: str = "unavailable_runtime",
+    ) -> None:
+        super().__init__(message)
+        self.readiness_status = readiness_status
 
 
 class OllamaChatLLM:
@@ -71,7 +127,10 @@ class OllamaChatLLM:
         payload = self._post_chat(model=model, messages=messages)
         message = payload.get("message")
         if not isinstance(message, dict) or not isinstance(message.get("content"), str):
-            raise OllamaUnavailableError("Ollama returned an unexpected chat response.")
+            raise OllamaUnavailableError(
+                "Ollama returned an unexpected chat response.",
+                readiness_status="failed",
+            )
         return ChatCompletion(content=message["content"], model=str(payload.get("model") or model))
 
     def smoke(self, *, model: str) -> ChatCompletion:
@@ -99,12 +158,32 @@ class OllamaChatLLM:
                 timeout=self.timeout,
             )
             response.raise_for_status()
-        except httpx.HTTPError as exc:
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise OllamaUnavailableError(
+                    f"Ollama model '{model}' is not installed. Run `ollama pull {model}`.",
+                    readiness_status="not_installed",
+                ) from exc
             raise OllamaUnavailableError(
-                f"Ollama is not reachable or model '{model}' is unavailable. "
-                f"Start Ollama and run `ollama pull {model}`."
+                f"Ollama chat request failed for model '{model}'. "
+                "Check the local Ollama logs and rerun the smoke test.",
+                readiness_status="failed",
             ) from exc
-        payload = response.json()
+        except httpx.RequestError as exc:
+            raise OllamaUnavailableError(
+                f"Ollama is not reachable at {self.base_url}. Start Ollama, then run `ollama pull {model}` if needed.",
+                readiness_status="unavailable_runtime",
+            ) from exc
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise OllamaUnavailableError(
+                "Ollama returned a response that was not valid JSON.",
+                readiness_status="failed",
+            ) from exc
         if not isinstance(payload, dict):
-            raise OllamaUnavailableError("Ollama returned an unexpected response body.")
+            raise OllamaUnavailableError(
+                "Ollama returned an unexpected response body.",
+                readiness_status="failed",
+            )
         return payload
