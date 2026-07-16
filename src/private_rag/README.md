@@ -9,7 +9,7 @@ Module boundaries:
 - `db/`: SQLAlchemy base, engine, and session wiring.
 - `repositories/`: repository SQLAlchemy models, Pydantic settings/manifest/dashboard schemas, summary/status APIs, and reproducibility service logic.
 - `search/`: SQLite FTS5 schema management, sparse index rebuilds, query normalization, field weighting, result shaping, and exact-match recall evaluation.
-- `vector/`: embedding provider boundary, Qdrant vector-store boundary, latest embedding-run metadata, vector index rebuild/search orchestration, and semantic recall evaluation.
+- `vector/`: embedding provider boundary, embedding model registry, Qdrant vector-store boundary, latest embedding-run metadata, vector index rebuild/search orchestration, semantic recall evaluation, and embedding model comparison output.
 - `retrieval/`: unified retrieval request/response schemas, retrieval run/result persistence, and orchestration across full-text, vector, hybrid, and reranked search modes.
 - `chat/`: local Ollama chat boundary, model registry, chat session/message persistence, RAG prompt assembly, readiness checks, and citation mapping.
 - `exports/`: portable repository ZIP bundle schemas and export assembly.
@@ -46,7 +46,7 @@ Current API surface:
 - `DELETE /repositories/{repository_id}/documents`: deletes all documents and derived chunks for one repository.
 - `POST /repositories/{repository_id}/full-text/rebuild`: rebuilds the SQLite FTS5 sparse index for one repository.
 - `POST /repositories/{repository_id}/full-text/search`: searches indexed chunks and returns BM25 score, snippet, matched fields, metadata filters, document/chunk metadata, and citation-ready provenance.
-- `POST /repositories/{repository_id}/vector/rebuild`: replaces the latest Qdrant vector index for one repository using the configured embedding model.
+- `POST /repositories/{repository_id}/vector/rebuild`: validates and replaces the latest Qdrant vector index for one repository using the configured embedding provider/model.
 - `POST /repositories/{repository_id}/vector/search`: searches the latest vector index and returns dense score, embedding run/model/index settings, metadata filters, document/chunk metadata, and citation-ready provenance.
 - `POST /repositories/{repository_id}/retrieval/search`: searches through the unified retrieval contract. Full-text, vector, and hybrid modes are available, with a default candidate pool of `top_k * 5`, adjustable RRF constant defaulting to `60`, selectable reranker strategy, cross-encoder score contribution, High/Medium/Low metadata boost settings, normalized score breakdowns, and max-five recent retrieval run/result persistence.
 - `GET /repositories/{repository_id}/chat/models`: lists local chat model registry entries and the default model.
@@ -66,6 +66,7 @@ Current status:
 - PRD3 local document ingestion and source inspection are complete.
 - PRD4 full-text search is complete: sparse index rebuild, full-text query API, metadata filters, exact-match evaluation, and frontend Search Lab are available.
 - PRD5 vector search with Qdrant is complete: latest-index rebuild, vector query API, metadata filters, embedding run metadata, deterministic CI tests, semantic recall evaluation, and frontend Search Lab vector mode are available.
+- PRD15 additional embedding models are ready for review: the embedding registry supports MiniLM, mpnet, EmbeddingGemma, and Qwen embedding models; vector rebuild/search report provider/model metadata; generic Ollama embeddings validate dimensions before rebuild; and deterministic evaluation can compare supported embedding models while reporting unavailable live models as skipped.
 - PRD6 hybrid search and reranking is complete: unified retrieval search, retrieval run/result persistence, five-history retention, hybrid orchestration, Reciprocal Rank Fusion, selectable reranking, comparison evaluation, and Search Lab controls are available.
 - PRD7 local RAG chat with citations is complete and closed: Ollama chat boundary, model registry, readiness checks, chat session persistence, prompt library settings, chat-owned retrieval controls, citation mapping, and Chat Workspace are available.
 - PRD8 Prompt Sandbox is complete and closed: repository-scoped sandbox prompt versions, copy-to/from chat prompt library, prompt deletion, persisted sandbox runs, progressive side-by-side retrieval comparisons, local-model generation, retrieved context snapshots, latency/status display, and the Prompt Sandbox workspace are available. Golden evaluation metrics and evidence-backed promotion are deferred to PRD18.
@@ -77,6 +78,8 @@ Current status:
 Repository chat prompts live in repository settings under `prompt.library`, with `prompt.active_chat_prompt_id` selecting the active prompt. The default prompt requires repository-grounded answers, inline citations, and explicit uncertainty when context is insufficient. Chat retrieval settings are stored on each chat session and may be overridden per question; they do not inherit frontend Search Lab state and do not trigger automatic index rebuilds. Readiness is explicit: full-text and vector status compare parsed chunks against indexed chunks, report missing/partial/stale/ready states, and require the selected retrieval mode plus a responding local model before chat is marked ready.
 
 Settings readiness is also explicit and opt-in. The Settings / Models readiness endpoint distinguishes not checked, unavailable runtime, not installed, ready, failed, and skipped states. Default tests mock Qdrant, chat, embedding, and reranker boundaries; live Qdrant/Ollama/SentenceTransformers/cross-encoder checks stay in the opt-in live test suite.
+
+Embedding model details live in `docs/embedding_models.md`. PRD15 keeps one latest vector index per repository: changing embedding settings requires a rebuild and replaces the previous latest vector collection after validation. PRD16 owns future immutable multi-index comparison and index selection history.
 
 Repository Dashboard summaries are read-mostly. The summary endpoint scopes all counts and activity to the requested repository, compares parsed chunks against full-text/vector indexed chunks to report missing/partial/stale/ready states, reuses Settings / Models readiness vocabulary for Qdrant/chat/embedding/reranker checks, and returns warnings and recent activity with workflow route targets. Dashboard mutations remain in workflow-owned pages; destructive repository cleanup lives in Repository Administration.
 

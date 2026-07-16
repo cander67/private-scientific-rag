@@ -29,6 +29,8 @@ PRD21 Settings / Models coverage keeps default CI deterministic by mocking servi
 
 PRD19 Repository Administration coverage keeps destructive cleanup deterministic and isolated. Default tests use temporary data directories, test databases, app-managed sample files, external sample files, and fake vector stores to verify preview, guarded one-repository deletion, clear-all recovery, preserved external files/model caches, full-text cleanup, Qdrant-unavailable warnings, and retrying leftover vector collections without deleting a repository twice. Live Qdrant cleanup checks are not part of default CI; run them only against disposable local collections during an explicit manual review window.
 
+PRD15 embedding model coverage keeps default CI deterministic by using fake embeddings, mocked Ollama responses, and the in-memory vector store. Unit and integration tests cover the model registry, provider/model/distance validation, repository-scoped provider selection, mocked Ollama embedding responses, rebuild/search metadata, model-comparison evaluation output, and skipped unavailable models. Live model comparison remains opt-in because it requires local SentenceTransformers cache entries, Qdrant, Ollama, and pulled Ollama embedding models.
+
 PRD9-focused deterministic commands:
 
 ```bash
@@ -74,6 +76,10 @@ $env:RUN_LIVE_TESTS = "1"
 uv run pytest -m live tests/integration/test_vector_live.py
 Remove-Item Env:\RUN_LIVE_TESTS
 ```
+
+### Additional embedding model setup
+
+PRD15 model-comparison evaluation can exercise MiniLM, mpnet, `embeddinggemma:300m`, and `qwen3-embedding:8b` when each is available locally. See `docs/embedding_models.md` for provider tradeoffs, dimensions, and setup commands. Default CI does not download these models or require Ollama; unavailable live models should be reported as skipped with setup guidance.
 
 ### Cross-encoder live smoke
 
