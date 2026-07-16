@@ -29,7 +29,8 @@ def get_vector_store() -> Generator[VectorStore, None, None]:
 
 
 def get_embedding_provider() -> Generator[EmbeddingProviderSource, None, None]:
-    yield LocalEmbeddingProviderFactory()
+    settings = get_settings()
+    yield LocalEmbeddingProviderFactory(ollama_base_url=settings.ollama_base_url)
 
 
 VectorStoreDependency = Annotated[VectorStore, Depends(get_vector_store)]
