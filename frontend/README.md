@@ -16,7 +16,7 @@ Export Center lets users review repository counts, model/settings requirements, 
 
 Recreate Repository lets users select an export ZIP, validate it before restore, review blocking errors/warnings/informational checks, provide external source mappings, restore into a new or existing empty repository, and inspect the final source/index report.
 
-Settings / Models is being extended for PRD23. The page now loads the repository model catalog, renders known embedding providers/models as selectors, derives dimensions for known embeddings, disables incompatible distances, offers catalog-backed chat and reranker choices, explains Qdrant collection state/rebuild impact with links to Search Lab and Repository Administration, and keeps custom local model entry available with explicit probe/compatibility guidance.
+Settings / Models includes PRD23 model catalog guardrails. The page loads the repository model catalog, renders known embedding providers/models as selectors, derives dimensions for known embeddings, disables incompatible distances, offers catalog-backed chat and reranker choices, explains Qdrant collection state/rebuild impact with links to Search Lab and Repository Administration, and keeps custom local model entry available with explicit probe/compatibility guidance.
 
 PRD17 is in the backlog to clarify Search Lab result labels by separating chunk-level facts, document-level hints, parser hints, and active filters.
 

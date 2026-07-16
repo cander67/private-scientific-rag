@@ -26,10 +26,10 @@ Current status:
 - Complete: PRD20 repository dashboard and home alias.
 - Complete: PRD21 settings and model manager.
 - Complete: PRD22 Ollama chat model expansion.
-- Selected next: PRD23 settings model catalog and collection guardrails.
+- Ready for review: PRD23 settings model catalog and collection guardrails.
 - Backlog: PRD24 local storage provenance and housekeeping.
 
-Next PRD selected: PRD23 settings model catalog and collection guardrails.
+PRD23 is ready for review. The next PRD should be selected after review acceptance and hands-on use of the current app.
 
 The remaining backlog should be prioritized from hands-on use of the current app, adjusting order when a later PRD is needed to unblock an earlier one.
 

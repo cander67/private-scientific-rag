@@ -1,6 +1,6 @@
 # PRD 23: Settings Model Catalog and Collection Guardrails
 
-**Status:** Backlog.
+**Status:** Ready for review.
 
 ## Problem Statement
 
