@@ -9,7 +9,16 @@ from private_rag.chat.llm import ChatModelInfo
 from private_rag.retrieval.schemas import RerankerStrategy, RetrievalMode
 
 ChatRole = Literal["user", "assistant"]
-ChatReadinessStatus = Literal["ready", "missing", "partial", "stale"]
+ChatReadinessStatus = Literal[
+    "not_checked",
+    "unavailable_runtime",
+    "not_installed",
+    "ready",
+    "failed",
+    "missing",
+    "partial",
+    "stale",
+]
 
 
 class ChatRetrievalSettings(BaseModel):

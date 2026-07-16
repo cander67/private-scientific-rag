@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from typing import cast
+
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from private_rag.chat.citations import map_citations
-from private_rag.chat.llm import MODEL_REGISTRY, ChatLLM, ChatMessage
+from private_rag.chat.llm import MODEL_REGISTRY, ChatLLM, ChatMessage, OllamaUnavailableError
 from private_rag.chat.models import ChatMessageRow, ChatSession
 from private_rag.chat.schemas import (
     ChatCitation,
@@ -254,16 +256,28 @@ def chat_readiness(
     )
     try:
         completion = llm.smoke(model=model)
+        ready = bool(completion.content.strip())
         local_model = ChatReadinessItem(
-            ready=bool(completion.content.strip()),
-            status="ready" if completion.content.strip() else "missing",
-            message=f"{completion.model} responded",
+            ready=ready,
+            status="ready" if ready else "failed",
+            message=(
+                f"{completion.model} responded"
+                if ready
+                else f"{model} responded without usable text; check the local model output."
+            ),
             model=completion.model,
+        )
+    except OllamaUnavailableError as exc:
+        local_model = ChatReadinessItem(
+            ready=False,
+            status=cast(ChatReadinessStatus, exc.readiness_status),
+            message=str(exc),
+            model=model,
         )
     except RuntimeError as exc:
         local_model = ChatReadinessItem(
             ready=False,
-            status="missing",
+            status="failed",
             message=str(exc),
             model=model,
         )

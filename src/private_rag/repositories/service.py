@@ -9,7 +9,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
-from private_rag.chat.llm import ChatLLM
+from private_rag.chat.llm import ChatLLM, OllamaUnavailableError
 from private_rag.chat.models import ChatMessageRow, ChatSession
 from private_rag.core.settings import Settings, get_settings
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
@@ -125,11 +125,28 @@ class LocalSettingsReadinessChecker:
     ) -> RepositorySettingsReadinessItem:
         try:
             completion = llm.smoke(model=model)
+        except OllamaUnavailableError as exc:
+            status: Literal["unavailable_runtime", "not_installed", "failed"]
+            status = (
+                "not_installed"
+                if exc.readiness_status == "not_installed"
+                else "failed"
+                if exc.readiness_status == "failed"
+                else "unavailable_runtime"
+            )
+            return RepositorySettingsReadinessItem(
+                target="chat",
+                label="Chat model",
+                status=status,
+                ready=False,
+                message=_windows_friendly_message(str(exc)),
+                model=model,
+            )
         except RuntimeError as exc:
             return RepositorySettingsReadinessItem(
                 target="chat",
                 label="Chat model",
-                status="unavailable_runtime",
+                status="failed",
                 ready=False,
                 message=_windows_friendly_message(str(exc)),
                 model=model,
