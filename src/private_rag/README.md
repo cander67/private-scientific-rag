@@ -11,7 +11,7 @@ Module boundaries:
 - `search/`: SQLite FTS5 schema management, sparse index rebuilds, query normalization, field weighting, result shaping, and exact-match recall evaluation.
 - `vector/`: embedding provider boundary, embedding model registry, Qdrant vector-store boundary, latest embedding-run metadata, vector index rebuild/search orchestration, semantic recall evaluation, and embedding model comparison output.
 - `retrieval/`: unified retrieval request/response schemas, retrieval run/result persistence, and orchestration across full-text, vector, hybrid, and reranked search modes.
-- `chat/`: local Ollama chat boundary, model registry, chat session/message persistence, RAG prompt assembly, readiness checks, and citation mapping.
+- `chat/`: local Ollama chat boundary, model registry metadata, chat session/message persistence, RAG prompt assembly, readiness checks, and citation mapping.
 - `exports/`: portable repository ZIP bundle schemas and export assembly.
 - `services/`: local service checks and future domain services.
 - `ingestion/`: document upload models, PDF parser fallback chain, parser/chunker service, source file storage, and provenance schemas.
@@ -49,7 +49,7 @@ Current API surface:
 - `POST /repositories/{repository_id}/vector/rebuild`: validates and replaces the latest Qdrant vector index for one repository using the configured embedding provider/model.
 - `POST /repositories/{repository_id}/vector/search`: searches the latest vector index and returns dense score, embedding run/model/index settings, metadata filters, document/chunk metadata, and citation-ready provenance.
 - `POST /repositories/{repository_id}/retrieval/search`: searches through the unified retrieval contract. Full-text, vector, and hybrid modes are available, with a default candidate pool of `top_k * 5`, adjustable RRF constant defaulting to `60`, selectable reranker strategy, cross-encoder score contribution, High/Medium/Low metadata boost settings, normalized score breakdowns, and max-five recent retrieval run/result persistence.
-- `GET /repositories/{repository_id}/chat/models`: lists local chat model registry entries and the default model.
+- `GET /repositories/{repository_id}/chat/models`: lists local chat model registry entries, setup guidance, model roles, and the default model.
 - `POST /repositories/{repository_id}/chat/models/smoke`: checks that the configured local Ollama model can respond.
 - `GET /repositories/{repository_id}/chat/readiness`: reports full-text index, vector index, and local model readiness for chat.
 - `GET /repositories/{repository_id}/chat/sessions`: lists repository chat sessions.
@@ -74,10 +74,11 @@ Current status:
 - PRD19 repository administration and local reset is complete and closed: local repository inventory, cleanup previews, guarded one-repository deletion, guarded clear-all reset, default repository recovery, preservation defaults for external files/model caches, Qdrant cleanup failure reporting, retry vector cleanup, and cross-platform reset guidance are available.
 - PRD20 Repository Dashboard and Home Alias is complete and closed: stable repository summary API, home/dashboard route aliases, dashboard status surface, repository switching, no-repository recovery, workflow quick actions, recent activity, and frontend/backend contract coverage are available.
 - PRD21 Settings / Models is complete and closed: repository-scoped settings editing, validation, impact analysis, explicit readiness checks, workflow follow-up links, chat/export default propagation, and frontend contract coverage are available.
+- PRD22 Ollama chat model expansion is ready for review: the chat registry includes recommended/default, balanced local, larger local, and experimental model metadata; repository and sandbox chat model names continue through the generic Ollama `/api/chat` provider; readiness distinguishes unavailable runtime, missing model, ready, and failed smoke responses; Settings / Models renders backend registry guidance while preserving custom model names; and `docs/ollama_chat_models.md` documents registry-only additions versus focused model-specific work.
 
 Repository chat prompts live in repository settings under `prompt.library`, with `prompt.active_chat_prompt_id` selecting the active prompt. The default prompt requires repository-grounded answers, inline citations, and explicit uncertainty when context is insufficient. Chat retrieval settings are stored on each chat session and may be overridden per question; they do not inherit frontend Search Lab state and do not trigger automatic index rebuilds. Readiness is explicit: full-text and vector status compare parsed chunks against indexed chunks, report missing/partial/stale/ready states, and require the selected retrieval mode plus a responding local model before chat is marked ready.
 
-Settings readiness is also explicit and opt-in. The Settings / Models readiness endpoint distinguishes not checked, unavailable runtime, not installed, ready, failed, and skipped states. Default tests mock Qdrant, chat, embedding, and reranker boundaries; live Qdrant/Ollama/SentenceTransformers/cross-encoder checks stay in the opt-in live test suite.
+Settings readiness is also explicit and opt-in. The Settings / Models readiness endpoint distinguishes not checked, unavailable runtime, not installed, ready, failed, and skipped states. Chat readiness uses the same local-model smoke boundary and reports missing Ollama tags with `ollama pull <model>` guidance. Default tests mock Qdrant, chat, embedding, and reranker boundaries; live Qdrant/Ollama/SentenceTransformers/cross-encoder checks stay in the opt-in live test suite.
 
 Embedding model details live in `docs/embedding_models.md`. PRD15 keeps one latest vector index per repository: changing embedding settings requires a rebuild and replaces the previous latest vector collection after validation. PRD16 owns future immutable multi-index comparison and index selection history.
 

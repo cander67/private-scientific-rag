@@ -27,6 +27,8 @@ PRD20 Repository Dashboard coverage keeps dashboard summary checks deterministic
 
 PRD21 Settings / Models coverage keeps default CI deterministic by mocking service and model boundaries. Unit and integration tests cover repository settings validation, prompt-library invariants, impact categories, settings round-trip/repository scoping, manifest/export reflection, explicit readiness responses for Qdrant/chat/embedding/reranker, chat readiness using the saved repository chat model, and non-finite embedding guards. Frontend contract tests cover the Settings / Models route, grouped editable defaults, save/cancel validation, impact warnings, readiness labels, workflow follow-up links, chat/export default propagation, and preservation of Search Lab, Chat Workspace, and Prompt Sandbox per-run overrides. Live Qdrant, Ollama, SentenceTransformers, and cross-encoder checks remain opt-in below.
 
+PRD22 Ollama chat model expansion keeps default CI deterministic by mocking the chat LLM boundary. Unit and integration tests cover chat registry metadata, repository default and custom model propagation, missing-model readiness guidance, Settings / Models backend-fed registry controls, Prompt Sandbox per-run model suggestions, and persisted model metadata on chat/sandbox outputs. Live Ollama checks remain opt-in because they require a running local runtime and pulled model tags.
+
 PRD19 Repository Administration coverage keeps destructive cleanup deterministic and isolated. Default tests use temporary data directories, test databases, app-managed sample files, external sample files, and fake vector stores to verify preview, guarded one-repository deletion, clear-all recovery, preserved external files/model caches, full-text cleanup, Qdrant-unavailable warnings, and retrying leftover vector collections without deleting a repository twice. Live Qdrant cleanup checks are not part of default CI; run them only against disposable local collections during an explicit manual review window.
 
 PRD15 embedding model coverage keeps default CI deterministic by using fake embeddings, mocked Ollama responses, and the in-memory vector store. Unit and integration tests cover the model registry, provider/model/distance validation, repository-scoped provider selection, mocked Ollama embedding responses, rebuild/search metadata, model-comparison evaluation output, and skipped unavailable models. Live model comparison remains opt-in because it requires local SentenceTransformers cache entries, Qdrant, Ollama, and pulled Ollama embedding models.
@@ -119,9 +121,9 @@ Remove-Item Env:\RUN_LIVE_TESTS
 Prerequisites:
 
 - Ollama is running at the configured `ollama_base_url` (`http://localhost:11434` by default).
-- The default chat model is installed. The PRD7 default is `gemma3:4b`.
+- The default or custom chat model is installed. The default is `gemma3:4b`; registry and custom tags use the same generic `/api/chat` provider.
 
-Download/cache the default chat model:
+Download/cache the default chat model, or substitute another configured model:
 
 ```bash
 ollama pull gemma3:4b
