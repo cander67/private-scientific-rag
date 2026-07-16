@@ -54,6 +54,22 @@ test("Settings / Models exposes required models and readiness placeholders", () 
   assert.match(styles, /\.settings-readiness-not_installed/);
 });
 
+test("Settings / Models uses the PRD23 model catalog for embedding guardrails", () => {
+  assert.match(source, /type RepositoryModelCatalog/);
+  assert.match(source, /settings\/model-catalog/);
+  assert.match(source, /modelCatalog=\{modelCatalog\}/);
+  assert.match(source, /settings-known-embedding-model/);
+  assert.match(source, /Known embedding model/);
+  assert.match(source, /Custom embedding model/);
+  assert.match(source, /applyKnownEmbeddingModel/);
+  assert.match(source, /next\.vector\.vector_size = metadata\.vector_size/);
+  assert.match(source, /disabled=\{Boolean\(selectedEmbeddingModel\)\}/);
+  assert.match(source, /disabledOptions=\{disabledDistanceOptions\}/);
+  assert.match(source, /supported_distances\.includes/);
+  assert.match(source, /requires .* dimensions/);
+  assert.match(source, /Custom Ollama embeddings require cosine distance and a live dimension probe/);
+});
+
 test("Settings / Models supports edit, save, cancel, and field validation", () => {
   assert.match(source, /function saveRepositorySettings/);
   assert.match(source, /method: "PUT"/);
