@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -13,6 +14,23 @@ from private_rag.api.routes.vector import get_embedding_provider, get_vector_sto
 from private_rag.db.base import Base
 from private_rag.vector.embeddings import DeterministicEmbeddingProvider
 from private_rag.vector.store import InMemoryVectorStore
+
+
+class RecordingEmbeddingFactory:
+    def __init__(self) -> None:
+        self.created: list[tuple[str, str]] = []
+
+    def create(self, *, provider: str, model: str) -> DeterministicEmbeddingProvider:
+        self.created.append((provider, model))
+        vector_size_by_model = {
+            "sentence-transformers/all-MiniLM-L6-v2": 384,
+            "sentence-transformers/all-mpnet-base-v2": 768,
+            "embeddinggemma:300m": 768,
+            "qwen3-embedding:8b": 4096,
+            "custom-ollama-mismatch:latest": 9,
+        }
+        vector_size = vector_size_by_model.get(model, 8)
+        return DeterministicEmbeddingProvider(model_name=model, vector_size=vector_size)
 
 
 def _client_with_vector_fakes() -> TestClient:
@@ -37,12 +55,57 @@ def _client_with_vector_fakes() -> TestClient:
     return TestClient(app)
 
 
+def _client_with_embedding_factory(
+    factory: RecordingEmbeddingFactory,
+) -> TestClient:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, class_=Session)
+    store = InMemoryVectorStore()
+
+    def override_session() -> Generator[Session, None, None]:
+        with session_factory() as session:
+            yield session
+
+    app = create_app()
+    app.dependency_overrides[get_db_session] = override_session
+    app.dependency_overrides[get_vector_store] = lambda: store
+    app.dependency_overrides[get_embedding_provider] = lambda: factory
+    return TestClient(app)
+
+
 def _default_repository_id(client: TestClient) -> str:
     response = client.get("/repositories/default")
     payload = response.json()
     settings = payload["settings"]
     settings["embedding"]["model"] = "test-deterministic"
     settings["vector"]["vector_size"] = 8
+    update_response = client.put(
+        f"/repositories/{payload['repository']['id']}/settings",
+        json={"settings": settings},
+    )
+    assert update_response.status_code == 200
+    return str(payload["repository"]["id"])
+
+
+def _select_embedding_model(
+    client: TestClient,
+    *,
+    provider: str,
+    model: str,
+    vector_size: int,
+) -> str:
+    response = client.get("/repositories/default")
+    payload = response.json()
+    settings = payload["settings"]
+    settings["embedding"]["provider"] = provider
+    settings["embedding"]["model"] = model
+    settings["vector"]["vector_size"] = vector_size
+    settings["vector"]["distance"] = "cosine"
     update_response = client.put(
         f"/repositories/{payload['repository']['id']}/settings",
         json={"settings": settings},
@@ -150,6 +213,151 @@ def test_vector_search_requires_rebuilt_index() -> None:
 
     assert response.status_code == 409
     assert "Vector index has not been rebuilt" in response.json()["detail"]
+
+
+def test_vector_rebuild_uses_repository_embedding_settings() -> None:
+    factory = RecordingEmbeddingFactory()
+    client = _client_with_embedding_factory(factory)
+    repository_response = client.get("/repositories/default")
+    payload = repository_response.json()
+    repository_id = str(payload["repository"]["id"])
+    settings = payload["settings"]
+    settings["embedding"]["model"] = "sentence-transformers/all-mpnet-base-v2"
+    settings["vector"]["vector_size"] = 768
+    update_response = client.put(
+        f"/repositories/{repository_id}/settings",
+        json={"settings": settings},
+    )
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("mpnet.txt", b"Battery materials and polymer binders.", "text/plain")},
+    )
+
+    rebuild_response = client.post(f"/repositories/{repository_id}/vector/rebuild")
+
+    assert update_response.status_code == 200
+    assert upload_response.status_code == 200
+    assert rebuild_response.status_code == 200
+    assert rebuild_response.json()["model"] == "sentence-transformers/all-mpnet-base-v2"
+    assert rebuild_response.json()["vector_size"] == 768
+    assert factory.created == [("sentence_transformers", "sentence-transformers/all-mpnet-base-v2")]
+
+
+def test_vector_search_uses_embedding_model_recorded_for_latest_index() -> None:
+    factory = RecordingEmbeddingFactory()
+    client = _client_with_embedding_factory(factory)
+    repository_id = _default_repository_id(client)
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("baseline.txt", b"LiFePO4 cathode capacity retention.", "text/plain")},
+    )
+    rebuild_response = client.post(f"/repositories/{repository_id}/vector/rebuild")
+    settings_response = client.get("/repositories/default")
+    settings = settings_response.json()["settings"]
+    settings["embedding"]["model"] = "sentence-transformers/all-mpnet-base-v2"
+    settings["vector"]["vector_size"] = 768
+    update_response = client.put(
+        f"/repositories/{repository_id}/settings",
+        json={"settings": settings},
+    )
+
+    search_response = client.post(
+        f"/repositories/{repository_id}/vector/search",
+        json={"query": "capacity retention"},
+    )
+
+    assert upload_response.status_code == 200
+    assert rebuild_response.status_code == 200
+    assert update_response.status_code == 200
+    assert search_response.status_code == 200
+    assert search_response.json()["model"] == "test-deterministic"
+    assert factory.created == [
+        ("sentence_transformers", "test-deterministic"),
+        ("sentence_transformers", "test-deterministic"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "vector_size"),
+    [
+        ("sentence_transformers", "sentence-transformers/all-MiniLM-L6-v2", 384),
+        ("sentence_transformers", "sentence-transformers/all-mpnet-base-v2", 768),
+        ("ollama", "embeddinggemma:300m", 768),
+        ("ollama", "qwen3-embedding:8b", 4096),
+    ],
+)
+def test_supported_embedding_models_rebuild_search_and_report_metadata(
+    provider: str,
+    model: str,
+    vector_size: int,
+) -> None:
+    factory = RecordingEmbeddingFactory()
+    client = _client_with_embedding_factory(factory)
+    repository_id = _select_embedding_model(
+        client,
+        provider=provider,
+        model=model,
+        vector_size=vector_size,
+    )
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": ("supported-model.txt", b"LiFePO4 cathode capacity retention.", "text/plain")
+        },
+    )
+
+    rebuild_response = client.post(f"/repositories/{repository_id}/vector/rebuild")
+    search_response = client.post(
+        f"/repositories/{repository_id}/vector/search",
+        json={"query": "capacity retention"},
+    )
+
+    assert upload_response.status_code == 200
+    assert rebuild_response.status_code == 200
+    rebuild_payload = rebuild_response.json()
+    assert rebuild_payload["provider"] == provider
+    assert rebuild_payload["model"] == model
+    assert rebuild_payload["vector_size"] == vector_size
+
+    assert search_response.status_code == 200
+    search_payload = search_response.json()
+    assert search_payload["provider"] == provider
+    assert search_payload["model"] == model
+    assert search_payload["vector_size"] == vector_size
+    result = search_payload["results"][0]
+    assert result["embedding_provider"] == provider
+    assert result["embedding_model"] == model
+    assert result["vector_size"] == vector_size
+    assert result["embedding_run_id"] == rebuild_payload["embedding_run_id"]
+    assert factory.created == [(provider, model), (provider, model)]
+
+
+def test_vector_rebuild_validates_before_recreating_collection_for_probe_mismatch() -> None:
+    factory = RecordingEmbeddingFactory()
+    client = _client_with_embedding_factory(factory)
+    repository_id = _select_embedding_model(
+        client,
+        provider="ollama",
+        model="custom-ollama-mismatch:latest",
+        vector_size=8,
+    )
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("mismatch.txt", b"dimension probe mismatch.", "text/plain")},
+    )
+
+    rebuild_response = client.post(f"/repositories/{repository_id}/vector/rebuild")
+    search_response = client.post(
+        f"/repositories/{repository_id}/vector/search",
+        json={"query": "dimension"},
+    )
+
+    assert upload_response.status_code == 200
+    assert rebuild_response.status_code == 503
+    assert "vector size does not match" in rebuild_response.json()["detail"]
+    assert search_response.status_code == 409
+    assert "Vector index has not been rebuilt" in search_response.json()["detail"]
+    assert factory.created == [("ollama", "custom-ollama-mismatch:latest")]
 
 
 def test_vector_search_returns_404_for_missing_repository() -> None:

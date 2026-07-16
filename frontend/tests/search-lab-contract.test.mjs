@@ -25,13 +25,26 @@ test("Search Lab renders retrieval score breakdown details", () => {
   assert.match(source, /source_ranks/);
   assert.match(source, /score_breakdown/);
   assert.match(source, /embedding_model/);
+  assert.match(source, /embedding_provider/);
   assert.match(source, /embedding_run_id/);
+  assert.match(source, /vector_size/);
+  assert.match(source, /shortModelName\(result\.embedding_model\)/);
+  assert.match(source, /result\.embedding_provider/);
+  assert.match(source, /result\.vector_size\}d/);
   assert.match(source, /dangerouslySetInnerHTML/);
   assert.match(source, /matched_fields/);
   assert.match(source, /has_table/);
   assert.match(source, /patent_section/);
   assert.match(source, /Citation:/);
   assert.match(source, /searchProvenanceLabel/);
+});
+
+test("Search Lab preserves backend setup guidance in rebuild and search failures", () => {
+  assert.match(source, /apiErrorMessage/);
+  assert.match(source, /errorMessage/);
+  assert.match(source, /rebuild failed: \$\{errorMessage\(error\)\}/);
+  assert.match(source, /search failed: \$\{errorMessage\(error\)\}/);
+  assert.match(source, /payload\.detail/);
 });
 
 test("Search Lab can route a result into Source Viewer", () => {

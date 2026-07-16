@@ -25,7 +25,7 @@ from private_rag.repositories.schemas import PromptLibraryEntry, RepositorySetti
 from private_rag.retrieval.rerankers import RerankerProvider
 from private_rag.retrieval.schemas import RetrievalSearchRequest, RetrievalSearchResult
 from private_rag.retrieval.service import search_retrieval
-from private_rag.vector.embeddings import EmbeddingProvider
+from private_rag.vector.embeddings import EmbeddingProviderSource
 from private_rag.vector.store import VectorStore
 
 
@@ -146,7 +146,7 @@ def create_sandbox_run(
     repository_id: str,
     request: SandboxRunCreate,
     store: VectorStore,
-    embedder: EmbeddingProvider,
+    embedder: EmbeddingProviderSource,
     reranker: RerankerProvider,
     llm: ChatLLM,
     comparison_id: str | None = None,
@@ -222,7 +222,7 @@ def create_sandbox_comparison(
     repository_id: str,
     request: SandboxComparisonCreate,
     store: VectorStore,
-    embedder: EmbeddingProvider,
+    embedder: EmbeddingProviderSource,
     reranker: RerankerProvider,
     llm: ChatLLM,
 ) -> SandboxComparisonRead | None:
@@ -275,7 +275,7 @@ def create_sandbox_comparison_run(
     comparison_id: str,
     request: SandboxComparisonRunExecute,
     store: VectorStore,
-    embedder: EmbeddingProvider,
+    embedder: EmbeddingProviderSource,
     reranker: RerankerProvider,
     llm: ChatLLM,
 ) -> SandboxRunRead | None:

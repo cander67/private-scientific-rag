@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from private_rag.api.routes.repositories import DbSession
 from private_rag.core.settings import get_settings
-from private_rag.vector.embeddings import EmbeddingProvider, SentenceTransformersEmbeddingProvider
+from private_rag.vector.embeddings import EmbeddingProviderSource, LocalEmbeddingProviderFactory
 from private_rag.vector.schemas import (
     VectorRebuildResponse,
     VectorSearchRequest,
@@ -28,13 +28,13 @@ def get_vector_store() -> Generator[VectorStore, None, None]:
     yield QdrantVectorStore(settings.qdrant_url)
 
 
-def get_embedding_provider() -> Generator[EmbeddingProvider, None, None]:
+def get_embedding_provider() -> Generator[EmbeddingProviderSource, None, None]:
     settings = get_settings()
-    yield SentenceTransformersEmbeddingProvider(settings.default_embedding_model)
+    yield LocalEmbeddingProviderFactory(ollama_base_url=settings.ollama_base_url)
 
 
 VectorStoreDependency = Annotated[VectorStore, Depends(get_vector_store)]
-EmbeddingProviderDependency = Annotated[EmbeddingProvider, Depends(get_embedding_provider)]
+EmbeddingProviderDependency = Annotated[EmbeddingProviderSource, Depends(get_embedding_provider)]
 
 
 @router.post("/rebuild", response_model=VectorRebuildResponse)
@@ -46,7 +46,7 @@ def rebuild_repository_vector_index(
 ) -> VectorRebuildResponse:
     try:
         rebuilt = rebuild_vector_index(session, repository_id, store, embedder)
-    except (RuntimeError, VectorStoreError) as exc:
+    except (RuntimeError, ValueError, VectorStoreError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if rebuilt is None:
         raise HTTPException(status_code=404, detail="Repository not found")
@@ -73,7 +73,7 @@ def search_repository_vector_index(
         )
     except VectorIndexMissingError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (RuntimeError, VectorStoreError) as exc:
+    except (RuntimeError, ValueError, VectorStoreError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if response is None:
         raise HTTPException(status_code=404, detail="Repository not found")

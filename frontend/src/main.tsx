@@ -1911,7 +1911,12 @@ function App() {
           method: "POST",
         });
         if (!sparseResponse.ok || !vectorResponse.ok) {
-          throw new Error("hybrid rebuild failed");
+          throw new Error(
+            await apiErrorMessage(
+              !sparseResponse.ok ? sparseResponse : vectorResponse,
+              "hybrid rebuild failed",
+            ),
+          );
         }
         const sparsePayload = (await sparseResponse.json()) as FullTextRebuildResponse;
         const vectorPayload = (await vectorResponse.json()) as VectorRebuildResponse;
@@ -1927,15 +1932,15 @@ function App() {
           method: "POST",
         });
         if (!response.ok) {
-          throw new Error("rebuild failed");
+          throw new Error(await apiErrorMessage(response, "rebuild failed"));
         }
         const payload = (await response.json()) as SearchRebuildResponse;
         setLastRebuild(payload);
         setSearchMessage(`Indexed ${payload.indexed_chunks} chunks`);
       }
       await loadDashboardSummary(repository.id);
-    } catch {
-      setSearchMessage(`${searchModeLabel(searchMode)} rebuild failed`);
+    } catch (error) {
+      setSearchMessage(`${searchModeLabel(searchMode)} rebuild failed: ${errorMessage(error)}`);
     } finally {
       setSearchBusy(false);
     }
@@ -1976,14 +1981,16 @@ function App() {
         }),
       });
       if (!response.ok) {
-        throw new Error("search failed");
+        throw new Error(await apiErrorMessage(response, "search failed"));
       }
       const payload = (await response.json()) as RetrievalSearchResponse;
       setSearchResults(payload.results.map((result) => ({ ...result, mode: searchMode })));
       void loadDashboardSummary(repository.id);
       setSearchMessage(`${payload.results.length} results · run ${payload.run_id.slice(0, 8)}`);
-    } catch {
-      setSearchMessage(`${searchModeLabel(searchMode)} search failed. Rebuild the index and try again.`);
+    } catch (error) {
+      setSearchMessage(
+        `${searchModeLabel(searchMode)} search failed: ${errorMessage(error)}. Rebuild the index and try again.`,
+      );
       setSearchResults([]);
     } finally {
       setSearchBusy(false);
@@ -6443,6 +6450,22 @@ function apiSearchMode(mode: SearchMode) {
 
 function isVectorRebuild(rebuild: SearchRebuildResponse): rebuild is VectorRebuildResponse {
   return "embedding_run_id" in rebuild;
+}
+
+async function apiErrorMessage(response: Response, fallback: string) {
+  try {
+    const payload = (await response.json()) as { detail?: unknown };
+    if (typeof payload.detail === "string" && payload.detail.trim()) {
+      return payload.detail;
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "unknown error";
 }
 
 function shortModelName(model: string) {

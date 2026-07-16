@@ -24,7 +24,7 @@ from private_rag.retrieval.rerankers import RerankerProvider
 from private_rag.retrieval.schemas import RetrievalSearchRequest, RetrievalSearchResult
 from private_rag.retrieval.service import search_retrieval
 from private_rag.search.service import FTS_TABLE
-from private_rag.vector.embeddings import EmbeddingProvider
+from private_rag.vector.embeddings import EmbeddingProviderSource
 from private_rag.vector.models import EmbeddingRun
 from private_rag.vector.store import VectorStore
 
@@ -123,7 +123,7 @@ def ask_chat_question(
     chat_session_id: str,
     question: str,
     store: VectorStore,
-    embedder: EmbeddingProvider,
+    embedder: EmbeddingProviderSource,
     reranker: RerankerProvider,
     llm: ChatLLM,
     retrieval_settings: ChatRetrievalSettings | None = None,

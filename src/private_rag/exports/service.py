@@ -41,7 +41,7 @@ from private_rag.repositories.schemas import RepositorySettings
 from private_rag.repositories.service import get_repository_with_settings
 from private_rag.retrieval.models import RetrievalResult, RetrievalRun
 from private_rag.search.service import rebuild_full_text_index
-from private_rag.vector.embeddings import EmbeddingProvider
+from private_rag.vector.embeddings import EmbeddingProviderSource
 from private_rag.vector.service import rebuild_vector_index
 from private_rag.vector.store import VectorStore
 
@@ -253,7 +253,7 @@ def recreate_export_bundle_data(
     session: Session,
     data: bytes,
     store: VectorStore,
-    embedder: EmbeddingProvider,
+    embedder: EmbeddingProviderSource,
     options: RecreateBundleOptions | None = None,
     settings: Settings | None = None,
 ) -> RecreateBundleResponse:
