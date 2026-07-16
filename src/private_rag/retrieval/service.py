@@ -18,7 +18,7 @@ from private_rag.retrieval.schemas import (
 )
 from private_rag.search.schemas import FullTextSearchResult
 from private_rag.search.service import search_full_text
-from private_rag.vector.embeddings import EmbeddingProvider
+from private_rag.vector.embeddings import EmbeddingProviderSource
 from private_rag.vector.schemas import VectorSearchResult
 from private_rag.vector.service import search_vector_index
 from private_rag.vector.store import VectorStore
@@ -31,7 +31,7 @@ def search_retrieval(
     repository_id: str,
     request: RetrievalSearchRequest,
     store: VectorStore,
-    embedder: EmbeddingProvider,
+    embedder: EmbeddingProviderSource,
     reranker: RerankerProvider,
 ) -> RetrievalSearchResponse | None:
     repository = session.get(Repository, repository_id)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 
 class EmbeddingProvider(Protocol):
@@ -13,6 +13,52 @@ class EmbeddingProvider(Protocol):
     def vector_size(self) -> int: ...
 
     def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+
+class EmbeddingProviderFactory(Protocol):
+    def create(self, *, provider: str, model: str) -> EmbeddingProvider: ...
+
+
+EmbeddingProviderSource = EmbeddingProvider | EmbeddingProviderFactory
+
+
+class LocalEmbeddingProviderFactory:
+    def __init__(self, *, sentence_transformers_device: str | None = None) -> None:
+        self._sentence_transformers_device = sentence_transformers_device
+
+    def create(self, *, provider: str, model: str) -> EmbeddingProvider:
+        if provider == "sentence_transformers":
+            return SentenceTransformersEmbeddingProvider(
+                model,
+                device=self._sentence_transformers_device,
+            )
+        if provider == "ollama":
+            raise NotImplementedError(
+                "Ollama embedding provider support is not available yet. "
+                f"Use a SentenceTransformers embedding model, or wait for the generic "
+                f"Ollama provider and run `ollama pull {model}` before rebuilding."
+            )
+        raise ValueError(f"Unsupported embedding provider: {provider}.")
+
+
+def resolve_embedding_provider(
+    source: EmbeddingProviderSource,
+    *,
+    provider: str,
+    model: str,
+) -> EmbeddingProvider:
+    create = getattr(source, "create", None)
+    if callable(create):
+        factory = cast(EmbeddingProviderFactory, source)
+        return factory.create(provider=provider, model=model)
+
+    embedder = cast(EmbeddingProvider, source)
+    if embedder.model_name != model:
+        raise RuntimeError(
+            "Embedding provider does not match the requested model: "
+            f"{embedder.model_name} != {model}."
+        )
+    return embedder
 
 
 class SentenceTransformersEmbeddingProvider:

@@ -15,6 +15,16 @@ from private_rag.vector.embeddings import DeterministicEmbeddingProvider
 from private_rag.vector.store import InMemoryVectorStore
 
 
+class RecordingEmbeddingFactory:
+    def __init__(self) -> None:
+        self.created: list[tuple[str, str]] = []
+
+    def create(self, *, provider: str, model: str) -> DeterministicEmbeddingProvider:
+        self.created.append((provider, model))
+        vector_size = 768 if model == "sentence-transformers/all-mpnet-base-v2" else 8
+        return DeterministicEmbeddingProvider(model_name=model, vector_size=vector_size)
+
+
 def _client_with_vector_fakes() -> TestClient:
     engine = create_engine(
         "sqlite://",
@@ -34,6 +44,29 @@ def _client_with_vector_fakes() -> TestClient:
     app.dependency_overrides[get_db_session] = override_session
     app.dependency_overrides[get_vector_store] = lambda: store
     app.dependency_overrides[get_embedding_provider] = lambda: embedder
+    return TestClient(app)
+
+
+def _client_with_embedding_factory(
+    factory: RecordingEmbeddingFactory,
+) -> TestClient:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, class_=Session)
+    store = InMemoryVectorStore()
+
+    def override_session() -> Generator[Session, None, None]:
+        with session_factory() as session:
+            yield session
+
+    app = create_app()
+    app.dependency_overrides[get_db_session] = override_session
+    app.dependency_overrides[get_vector_store] = lambda: store
+    app.dependency_overrides[get_embedding_provider] = lambda: factory
     return TestClient(app)
 
 
@@ -150,6 +183,68 @@ def test_vector_search_requires_rebuilt_index() -> None:
 
     assert response.status_code == 409
     assert "Vector index has not been rebuilt" in response.json()["detail"]
+
+
+def test_vector_rebuild_uses_repository_embedding_settings() -> None:
+    factory = RecordingEmbeddingFactory()
+    client = _client_with_embedding_factory(factory)
+    repository_response = client.get("/repositories/default")
+    payload = repository_response.json()
+    repository_id = str(payload["repository"]["id"])
+    settings = payload["settings"]
+    settings["embedding"]["model"] = "sentence-transformers/all-mpnet-base-v2"
+    settings["vector"]["vector_size"] = 768
+    update_response = client.put(
+        f"/repositories/{repository_id}/settings",
+        json={"settings": settings},
+    )
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("mpnet.txt", b"Battery materials and polymer binders.", "text/plain")},
+    )
+
+    rebuild_response = client.post(f"/repositories/{repository_id}/vector/rebuild")
+
+    assert update_response.status_code == 200
+    assert upload_response.status_code == 200
+    assert rebuild_response.status_code == 200
+    assert rebuild_response.json()["model"] == "sentence-transformers/all-mpnet-base-v2"
+    assert rebuild_response.json()["vector_size"] == 768
+    assert factory.created == [("sentence_transformers", "sentence-transformers/all-mpnet-base-v2")]
+
+
+def test_vector_search_uses_embedding_model_recorded_for_latest_index() -> None:
+    factory = RecordingEmbeddingFactory()
+    client = _client_with_embedding_factory(factory)
+    repository_id = _default_repository_id(client)
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("baseline.txt", b"LiFePO4 cathode capacity retention.", "text/plain")},
+    )
+    rebuild_response = client.post(f"/repositories/{repository_id}/vector/rebuild")
+    settings_response = client.get("/repositories/default")
+    settings = settings_response.json()["settings"]
+    settings["embedding"]["model"] = "sentence-transformers/all-mpnet-base-v2"
+    settings["vector"]["vector_size"] = 768
+    update_response = client.put(
+        f"/repositories/{repository_id}/settings",
+        json={"settings": settings},
+    )
+
+    search_response = client.post(
+        f"/repositories/{repository_id}/vector/search",
+        json={"query": "capacity retention"},
+    )
+
+    assert upload_response.status_code == 200
+    assert rebuild_response.status_code == 200
+    assert update_response.status_code == 200
+    assert search_response.status_code == 200
+    assert search_response.json()["model"] == "test-deterministic"
+    assert factory.created == [
+        ("sentence_transformers", "test-deterministic"),
+        ("sentence_transformers", "test-deterministic"),
+    ]
 
 
 def test_vector_search_returns_404_for_missing_repository() -> None:

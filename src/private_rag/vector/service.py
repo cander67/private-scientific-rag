@@ -9,7 +9,7 @@ from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersio
 from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
 from private_rag.search.service import _fields_for_chunk, _split_tags
-from private_rag.vector.embeddings import EmbeddingProvider
+from private_rag.vector.embeddings import EmbeddingProviderSource, resolve_embedding_provider
 from private_rag.vector.model_registry import validate_embedding_model_settings
 from private_rag.vector.models import EmbeddingRun
 from private_rag.vector.schemas import (
@@ -29,14 +29,19 @@ def rebuild_vector_index(
     session: Session,
     repository_id: str,
     store: VectorStore,
-    embedder: EmbeddingProvider,
+    embedder: EmbeddingProviderSource,
 ) -> VectorRebuildResponse | None:
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
         return None
     settings = RepositorySettings.model_validate(repository.settings.settings)
     collection_name = collection_name_for_repository(repository_id)
-    vector_size = embedder.vector_size
+    resolved_embedder = resolve_embedding_provider(
+        embedder,
+        provider=settings.embedding.provider,
+        model=settings.embedding.model,
+    )
+    vector_size = resolved_embedder.vector_size
     validate_embedding_model_settings(
         provider=settings.embedding.provider,
         model=settings.embedding.model,
@@ -59,7 +64,7 @@ def rebuild_vector_index(
     ).all()
 
     store.recreate_collection(collection_name, vector_size, settings.vector.distance)
-    vectors = embedder.embed([chunk.text for chunk, _, _ in chunks]) if chunks else []
+    vectors = resolved_embedder.embed([chunk.text for chunk, _, _ in chunks]) if chunks else []
     points = [
         VectorPoint(
             id=chunk.id,
@@ -77,7 +82,7 @@ def rebuild_vector_index(
     if embedding_run is None:
         embedding_run = EmbeddingRun(repository_id=repository_id)
     embedding_run.provider = settings.embedding.provider
-    embedding_run.model = embedder.model_name
+    embedding_run.model = resolved_embedder.model_name
     embedding_run.vector_size = vector_size
     embedding_run.distance = settings.vector.distance
     embedding_run.collection_name = collection_name
@@ -93,7 +98,7 @@ def rebuild_vector_index(
         repository_id=repository_id,
         embedding_run_id=embedding_run.id,
         provider=settings.embedding.provider,
-        model=embedder.model_name,
+        model=resolved_embedder.model_name,
         collection_name=collection_name,
         indexed_chunks=len(points),
         vector_size=vector_size,
@@ -108,7 +113,7 @@ def search_vector_index(
     limit: int,
     filters: VectorSearchFilters,
     store: VectorStore,
-    embedder: EmbeddingProvider,
+    embedder: EmbeddingProviderSource,
 ) -> VectorSearchResponse | None:
     repository = session.get(Repository, repository_id)
     if repository is None:
@@ -119,7 +124,18 @@ def search_vector_index(
     if embedding_run is None or embedding_run.status != "indexed":
         raise VectorIndexMissingError("Vector index has not been rebuilt for this repository.")
 
-    query_vector = embedder.embed([query])[0]
+    resolved_embedder = resolve_embedding_provider(
+        embedder,
+        provider=embedding_run.provider,
+        model=embedding_run.model,
+    )
+    if resolved_embedder.vector_size != embedding_run.vector_size:
+        raise RuntimeError(
+            "Embedding provider vector size does not match the latest vector index: "
+            f"{resolved_embedder.vector_size} != {embedding_run.vector_size}. "
+            "Rebuild the vector index after changing embedding settings."
+        )
+    query_vector = resolved_embedder.embed([query])[0]
     hits = store.search(
         embedding_run.collection_name,
         query_vector,

@@ -57,7 +57,8 @@ def _client_with_database() -> tuple[TestClient, sessionmaker[Session], InMemory
     store = InMemoryVectorStore()
     app.dependency_overrides[get_vector_store] = lambda: store
     app.dependency_overrides[get_embedding_provider] = lambda: DeterministicEmbeddingProvider(
-        vector_size=8
+        model_name="test-deterministic",
+        vector_size=8,
     )
     return TestClient(app), session_factory, store
 
@@ -498,8 +499,10 @@ def _seed_repository(
         repository = session.get(Repository, repository_id)
         assert repository is not None and repository.settings is not None
         settings_payload = repository_with_settings.settings.model_dump(mode="json")
+        settings_payload["embedding"]["model"] = "test-deterministic"
         settings_payload["vector"]["vector_size"] = 8
         repository.settings.settings = settings_payload
+        repository_with_settings.settings.embedding.model = "test-deterministic"
         repository_with_settings.settings.vector.vector_size = 8
 
         document = Document(repository_id=repository_id, display_name="paper.txt")

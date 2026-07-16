@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from private_rag.api.routes.repositories import DbSession
 from private_rag.core.settings import get_settings
-from private_rag.vector.embeddings import EmbeddingProvider, SentenceTransformersEmbeddingProvider
+from private_rag.vector.embeddings import EmbeddingProviderSource, LocalEmbeddingProviderFactory
 from private_rag.vector.schemas import (
     VectorRebuildResponse,
     VectorSearchRequest,
@@ -28,13 +28,12 @@ def get_vector_store() -> Generator[VectorStore, None, None]:
     yield QdrantVectorStore(settings.qdrant_url)
 
 
-def get_embedding_provider() -> Generator[EmbeddingProvider, None, None]:
-    settings = get_settings()
-    yield SentenceTransformersEmbeddingProvider(settings.default_embedding_model)
+def get_embedding_provider() -> Generator[EmbeddingProviderSource, None, None]:
+    yield LocalEmbeddingProviderFactory()
 
 
 VectorStoreDependency = Annotated[VectorStore, Depends(get_vector_store)]
-EmbeddingProviderDependency = Annotated[EmbeddingProvider, Depends(get_embedding_provider)]
+EmbeddingProviderDependency = Annotated[EmbeddingProviderSource, Depends(get_embedding_provider)]
 
 
 @router.post("/rebuild", response_model=VectorRebuildResponse)
