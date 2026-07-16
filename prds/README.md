@@ -18,7 +18,7 @@ Current status:
 - Backlog: PRD12 bulk patent data integration.
 - Backlog: PRD13 OCR and page-image text recovery.
 - Backlog: PRD14 structured table extraction.
-- Selected next: PRD15 additional embedding models.
+- Ready for review: PRD15 additional embedding models.
 - Backlog: PRD16 immutable embedding indexes.
 - Backlog: PRD17 search metadata quality and result labeling.
 - Backlog: PRD18 golden evaluation and evidence-backed promotion.
@@ -27,7 +27,7 @@ Current status:
 - Complete: PRD21 settings and model manager.
 - Backlog: PRD22 Ollama chat model expansion.
 
-Next PRD selected: PRD15 additional embedding models.
+Next PRD selected: none while PRD15 awaits review.
 
 The remaining backlog should be prioritized from hands-on use of the current app, adjusting order when a later PRD is needed to unblock an earlier one.
 
@@ -66,7 +66,7 @@ PRD files:
 12. [Bulk patent data integration](12-bulk-patent-data-integration.md) - backlog
 13. [OCR and page-image text recovery](13-ocr-page-image-text-recovery.md) - backlog
 14. [Structured table extraction](14-structured-table-extraction.md) - backlog
-15. [Additional embedding models](15-additional-embedding-models.md) - selected next
+15. [Additional embedding models](15-additional-embedding-models.md) - ready for review
 16. [Immutable embedding indexes](16-immutable-embedding-indexes.md) - backlog
 17. [Search metadata quality and result labeling](17-search-metadata-quality-result-labeling.md) - backlog
 18. [Golden evaluation and evidence-backed promotion](18-golden-evaluation-evidence-promotion.md) - backlog
