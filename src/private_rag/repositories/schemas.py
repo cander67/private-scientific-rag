@@ -7,6 +7,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from private_rag.core.settings import Settings
+from private_rag.vector.model_registry import (
+    EmbeddingModelCompatibilityError,
+    lookup_embedding_model,
+    lookup_embedding_model_by_name,
+    validate_embedding_model_settings,
+)
 
 
 class ChunkingSettings(BaseModel):
@@ -119,8 +125,27 @@ class RepositorySettings(BaseModel):
             raise ValueError("chunk_overlap must be smaller than chunk_size")
         if self.reranking.strategy == "cross_encoder" and not self.reranking.model:
             raise ValueError("reranking.model is required when strategy is cross_encoder")
-        if self.vector.distance == "dot" and self.embedding.provider == "ollama":
-            raise ValueError("Ollama embeddings currently require cosine distance")
+        metadata = lookup_embedding_model(self.embedding.provider, self.embedding.model)
+        if metadata is not None:
+            try:
+                validate_embedding_model_settings(
+                    provider=self.embedding.provider,
+                    model=self.embedding.model,
+                    vector_size=self.vector.vector_size,
+                    distance=self.vector.distance,
+                )
+            except EmbeddingModelCompatibilityError as exc:
+                raise ValueError(str(exc)) from exc
+        elif lookup_embedding_model_by_name(self.embedding.model) is not None:
+            known_model = lookup_embedding_model_by_name(self.embedding.model)
+            if known_model is None:
+                raise ValueError(f"Unsupported embedding model: {self.embedding.model}.")
+            raise ValueError(
+                f"Embedding model '{self.embedding.model}' belongs to provider "
+                f"'{known_model.provider}', not '{self.embedding.provider}'."
+            )
+        elif self.embedding.provider == "ollama" and self.vector.distance != "cosine":
+            raise ValueError("Custom Ollama embedding models currently require cosine distance")
         return self
 
 

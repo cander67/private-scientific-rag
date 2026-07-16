@@ -10,6 +10,7 @@ from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
 from private_rag.search.service import _fields_for_chunk, _split_tags
 from private_rag.vector.embeddings import EmbeddingProvider
+from private_rag.vector.model_registry import validate_embedding_model_settings
 from private_rag.vector.models import EmbeddingRun
 from private_rag.vector.schemas import (
     VectorRebuildResponse,
@@ -36,6 +37,13 @@ def rebuild_vector_index(
     settings = RepositorySettings.model_validate(repository.settings.settings)
     collection_name = collection_name_for_repository(repository_id)
     vector_size = embedder.vector_size
+    validate_embedding_model_settings(
+        provider=settings.embedding.provider,
+        model=settings.embedding.model,
+        vector_size=settings.vector.vector_size,
+        distance=settings.vector.distance,
+        probed_vector_size=vector_size,
+    )
     if settings.vector.vector_size != vector_size:
         raise RuntimeError(
             "Embedding model vector size does not match repository vector settings: "

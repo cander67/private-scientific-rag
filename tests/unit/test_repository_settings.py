@@ -53,9 +53,43 @@ def test_repository_settings_reject_ollama_dot_distance() -> None:
     app_settings = Settings()
     payload = RepositorySettings.from_app_settings(app_settings).model_dump(mode="json")
     payload["embedding"]["provider"] = "ollama"
+    payload["embedding"]["model"] = "embeddinggemma:300m"
+    payload["vector"]["vector_size"] = 768
     payload["vector"]["distance"] = "dot"
 
-    with pytest.raises(ValidationError, match="Ollama embeddings currently require cosine"):
+    with pytest.raises(ValidationError, match="does not support distance"):
+        RepositorySettings.model_validate(payload)
+
+
+def test_repository_settings_accept_custom_ollama_model_pending_live_probe() -> None:
+    app_settings = Settings()
+    payload = RepositorySettings.from_app_settings(app_settings).model_dump(mode="json")
+    payload["embedding"]["provider"] = "ollama"
+    payload["embedding"]["model"] = "nomic-embed-text:custom"
+    payload["vector"]["vector_size"] = 768
+
+    settings = RepositorySettings.model_validate(payload)
+
+    assert settings.embedding.model == "nomic-embed-text:custom"
+
+
+def test_repository_settings_accept_custom_sentence_transformers_model() -> None:
+    app_settings = Settings()
+    payload = RepositorySettings.from_app_settings(app_settings).model_dump(mode="json")
+    payload["embedding"]["model"] = "sentence-transformers/not-approved"
+
+    settings = RepositorySettings.model_validate(payload)
+
+    assert settings.embedding.model == "sentence-transformers/not-approved"
+
+
+def test_repository_settings_reject_known_embedding_vector_size_mismatch() -> None:
+    app_settings = Settings()
+    payload = RepositorySettings.from_app_settings(app_settings).model_dump(mode="json")
+    payload["embedding"]["model"] = "sentence-transformers/all-mpnet-base-v2"
+    payload["vector"]["vector_size"] = 384
+
+    with pytest.raises(ValidationError, match="expects vector size 768"):
         RepositorySettings.model_validate(payload)
 
 
