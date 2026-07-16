@@ -22,8 +22,8 @@ test("Settings / Models shows repository-scoped grouped defaults", () => {
   assert.match(source, /Vector and embedding/);
   assert.match(source, /Reranking/);
   assert.match(source, /Chat defaults/);
-  assert.match(source, /chatModelRegistry/);
-  assert.match(source, /Known Ollama model/);
+  assert.match(source, /modelCatalog/);
+  assert.match(source, /Chat model/);
   assert.match(source, /Custom local Ollama model/);
   assert.match(source, /settings-known-chat-model/);
   assert.match(source, /settings-model-guidance/);
@@ -68,6 +68,21 @@ test("Settings / Models uses the PRD23 model catalog for embedding guardrails", 
   assert.match(source, /supported_distances\.includes/);
   assert.match(source, /requires .* dimensions/);
   assert.match(source, /Custom Ollama embeddings require cosine distance and a live dimension probe/);
+});
+
+test("Settings / Models uses the PRD23 model catalog for chat and reranker choices", () => {
+  assert.match(source, /const chatCatalog/);
+  assert.match(source, /modelCatalog\?\.chat_models/);
+  assert.match(source, /selectChatModel/);
+  assert.match(source, /modelSourceLabel/);
+  assert.match(source, /detected locally/);
+  assert.match(source, /Runtime model detection has not been run/);
+  assert.match(source, /settings-reranking-model-choice/);
+  assert.match(source, /No reranking/);
+  assert.match(source, /Custom cross-encoder/);
+  assert.match(source, /selectRerankerModel/);
+  assert.match(source, /rerankerCatalog/);
+  assert.match(source, /Custom reranker model/);
 });
 
 test("Settings / Models supports edit, save, cancel, and field validation", () => {

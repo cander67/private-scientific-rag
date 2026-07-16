@@ -3990,9 +3990,20 @@ function SettingsModels({
     : draft?.embedding.provider === "ollama"
       ? ["dot", "euclid"]
       : [];
-  const selectedChatModelInfo = chatModelRegistry?.models.find(
+  const chatCatalog =
+    modelCatalog?.chat_models ??
+    chatModelRegistry?.models.map((model) => ({ ...model, source: "known" as ModelCatalogSource })) ??
+    [];
+  const selectedChatModelInfo = chatCatalog.find(
     (model) => model.name === draft?.model.ollama_chat_model,
   );
+  const rerankerCatalog = modelCatalog?.reranker_models ?? [];
+  const selectedRerankerOption =
+    draft?.reranking.strategy === "none"
+      ? "__none__"
+      : rerankerCatalog.find(
+          (entry) => entry.strategy === draft?.reranking.strategy && entry.model === draft.reranking.model,
+        )?.model ?? "__custom__";
   const dirty = Boolean(settings && draft && JSON.stringify(settings) !== JSON.stringify(draft));
   const visibleImpact = dirty ? pendingImpact : lastSavedImpact;
 
@@ -4171,6 +4182,32 @@ function SettingsModels({
       if (metadata) {
         applyKnownEmbeddingModel(next, metadata);
       }
+    });
+  }
+
+  function selectChatModel(modelName: string) {
+    if (modelName === "__custom__") {
+      return;
+    }
+    updateDraft((next) => {
+      next.model.ollama_chat_model = modelName;
+    });
+  }
+
+  function selectRerankerModel(value: string) {
+    updateDraft((next) => {
+      if (value === "__none__") {
+        next.reranking.strategy = "none";
+        next.reranking.model = null;
+        return;
+      }
+      next.reranking.strategy = "cross_encoder";
+      if (value === "__custom__") {
+        next.reranking.model = next.reranking.model ?? "";
+        return;
+      }
+      const catalogEntry = rerankerCatalog.find((entry) => entry.model === value);
+      next.reranking.model = catalogEntry?.model ?? value;
     });
   }
 
@@ -4390,57 +4427,78 @@ function SettingsModels({
           <div className="eyebrow">Defaults</div>
           <h2>Reranking</h2>
           <SettingSelect
-            id="settings-reranking-strategy"
-            label="Strategy"
-            value={draft.reranking.strategy}
-            options={["cross_encoder", "none"]}
-            onChange={(value) => updateDraft((next) => {
-              next.reranking.strategy = value;
-              if (value === "none") {
-                next.reranking.model = null;
-              }
-            })}
+            id="settings-reranking-model-choice"
+            label="Reranker"
+            value={selectedRerankerOption}
+            options={[
+              "__none__",
+              "__custom__",
+              ...rerankerCatalog.filter((entry) => entry.enabled && entry.model).map((entry) => entry.model!),
+            ]}
+            labels={{
+              __none__: "No reranking",
+              __custom__: "Custom cross-encoder",
+              ...Object.fromEntries(
+                rerankerCatalog
+                  .filter((entry) => entry.model)
+                  .map((entry) => [entry.model!, `${entry.label} · ${modelSourceLabel(entry.source)}`]),
+              ),
+            }}
+            onChange={selectRerankerModel}
           />
-          <SettingText
-            id="settings-reranking-model"
-            label="Reranker model"
-            value={draft.reranking.model ?? ""}
-            error={validationByField.get("reranking.model")}
-            disabled={draft.reranking.strategy === "none"}
-            onChange={(value) => updateDraft((next) => { next.reranking.model = value; })}
-          />
+          {selectedRerankerOption === "__custom__" && draft.reranking.strategy !== "none" && (
+            <SettingText
+              id="settings-reranking-model"
+              label="Custom reranker model"
+              value={draft.reranking.model ?? ""}
+              error={validationByField.get("reranking.model")}
+              onChange={(value) => updateDraft((next) => { next.reranking.model = value; })}
+            />
+          )}
+          <div className="settings-model-guidance">
+            <strong>
+              {draft.reranking.strategy === "none"
+                ? "Reranking disabled"
+                : rerankerCatalog.find((entry) => entry.model === draft.reranking.model)?.label ??
+                  "Custom cross-encoder"}
+            </strong>
+            <small>
+              {draft.reranking.strategy === "none"
+                ? "Baseline retrieval ranking will be used without a local cross-encoder."
+                : rerankerCatalog.find((entry) => entry.model === draft.reranking.model)?.resource_notes ??
+                  "Custom cross-encoders should be cached locally before readiness checks or reranked search."}
+            </small>
+          </div>
         </section>
 
         <section className="card settings-section">
           <div className="eyebrow">Defaults</div>
           <h2>Chat defaults</h2>
-          <SettingText
-            id="settings-chat-model"
-            label="Chat model"
-            value={draft.model.ollama_chat_model}
-            error={validationByField.get("model.ollama_chat_model")}
-            onChange={(value) => updateDraft((next) => { next.model.ollama_chat_model = value; })}
-          />
-          {chatModelRegistry && (
+          {chatCatalog.length > 0 && (
             <SettingSelect
               id="settings-known-chat-model"
-              label="Known Ollama model"
+              label="Chat model"
               value={selectedChatModelInfo?.name ?? "__custom__"}
-              options={["__custom__", ...chatModelRegistry.models.map((model) => model.name)]}
+              options={["__custom__", ...chatCatalog.map((model) => model.name)]}
               labels={{
                 __custom__: "Custom local Ollama model",
                 ...Object.fromEntries(
-                  chatModelRegistry.models.map((model) => [
+                  chatCatalog.map((model) => [
                     model.name,
-                    `${model.label} · ${chatModelRoleLabel(model.role)}`,
+                    `${model.label} · ${chatModelRoleLabel(model.role)} · ${modelSourceLabel(model.source)}`,
                   ]),
                 ),
               }}
-              onChange={(value) => {
-                if (value !== "__custom__") {
-                  updateDraft((next) => { next.model.ollama_chat_model = value; });
-                }
-              }}
+              onChange={selectChatModel}
+            />
+          )}
+          {!selectedChatModelInfo && (
+            <SettingText
+              id="settings-chat-model"
+              label="Custom chat model"
+              value={draft.model.ollama_chat_model}
+              error={validationByField.get("model.ollama_chat_model")}
+              onChange={(value) => updateDraft((next) => { next.model.ollama_chat_model = value; })}
             />
           )}
           <div className="settings-model-guidance">
@@ -4453,6 +4511,7 @@ function SettingsModels({
               {selectedChatModelInfo?.setup_command ??
                 `Run ollama pull ${draft.model.ollama_chat_model || "<model>"} before checking readiness.`}
             </small>
+            <small>{modelCatalog?.runtime_detection.message ?? "Runtime model detection has not been run."}</small>
           </div>
           <SettingSelect
             id="settings-active-prompt"
@@ -6864,6 +6923,10 @@ function chatModelRoleLabel(role: ChatModelInfo["role"]) {
     case "reasoning_experimental":
       return "reasoning experimental";
   }
+}
+
+function modelSourceLabel(source: ModelCatalogSource) {
+  return source === "detected" ? "detected locally" : "project-known";
 }
 
 function settingsSummaryRows(settings: RepositorySettings | null) {
