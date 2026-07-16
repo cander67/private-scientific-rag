@@ -85,6 +85,23 @@ test("Settings / Models uses the PRD23 model catalog for chat and reranker choic
   assert.match(source, /Custom reranker model/);
 });
 
+test("Settings / Models explains Qdrant collection state and workflow ownership", () => {
+  assert.match(source, /settings-collection-info/);
+  assert.match(source, /Collection state/);
+  assert.match(source, /Vector rebuild writes this collection/);
+  assert.match(source, /vector search reads the latest active vector/);
+  assert.match(source, /Changing the collection name does not migrate vectors/);
+  assert.match(source, /Stale until rebuild/);
+  assert.match(source, /Not checked/);
+  assert.match(source, /Open Search Lab/);
+  assert.match(source, /Open Repository Administration/);
+  assert.match(source, /onNavigate\("admin"\)/);
+  assert.match(styles, /\.settings-collection-ready/);
+  assert.match(styles, /\.settings-collection-stale/);
+  assert.match(styles, /\.settings-collection-missing/);
+  assert.match(styles, /\.settings-collection-not_checked/);
+});
+
 test("Settings / Models supports edit, save, cancel, and field validation", () => {
   assert.match(source, /function saveRepositorySettings/);
   assert.match(source, /method: "PUT"/);

@@ -2627,6 +2627,7 @@ function App() {
                 settings={repositorySettings}
                 chatModelRegistry={chatModelRegistry}
                 modelCatalog={modelCatalog}
+                dashboardSummary={dashboardSummary}
                 onNavigate={navigateTo}
                 onSave={saveRepositorySettings}
                 onAnalyzeImpact={previewRepositorySettingsImpact}
@@ -3925,6 +3926,7 @@ function SettingsModels({
   settings,
   chatModelRegistry,
   modelCatalog,
+  dashboardSummary,
   onNavigate,
   onSave,
   onAnalyzeImpact,
@@ -3934,6 +3936,7 @@ function SettingsModels({
   settings: RepositorySettings | null;
   chatModelRegistry: ChatModelRegistry | null;
   modelCatalog: RepositoryModelCatalog | null;
+  dashboardSummary: DashboardSummary | null;
   onNavigate: (view: View) => void;
   onSave: (settings: RepositorySettings) => Promise<RepositorySettings>;
   onAnalyzeImpact: (settings: RepositorySettings) => Promise<SettingsImpactResponse>;
@@ -4004,6 +4007,21 @@ function SettingsModels({
       : rerankerCatalog.find(
           (entry) => entry.strategy === draft?.reranking.strategy && entry.model === draft.reranking.model,
         )?.model ?? "__custom__";
+  const collectionChanged = Boolean(
+    settings && draft && settings.vector.collection_name !== draft.vector.collection_name,
+  );
+  const collectionStatus = collectionChanged
+    ? "stale"
+    : dashboardSummary?.vector.status ?? "not_checked";
+  const collectionStatusText = collectionChanged
+    ? "Stale until rebuild"
+    : collectionStatus === "not_checked"
+      ? "Not checked"
+      : dashboardIndexStatusLabel(collectionStatus);
+  const collectionMessage = collectionChanged
+    ? "Changing the collection name does not migrate vectors. Save settings, then rebuild vectors before search uses the new collection."
+    : dashboardSummary?.vector.message ??
+      "Collection state has not been checked for this repository in the current dashboard summary.";
   const dirty = Boolean(settings && draft && JSON.stringify(settings) !== JSON.stringify(draft));
   const visibleImpact = dirty ? pendingImpact : lastSavedImpact;
 
@@ -4404,6 +4422,28 @@ function SettingsModels({
             error={validationByField.get("vector.collection_name")}
             onChange={(value) => updateDraft((next) => { next.vector.collection_name = value; })}
           />
+          <div className={`settings-collection-info settings-collection-${collectionStatus}`}>
+            <div className="row row-between">
+              <strong>Collection state</strong>
+              <span className="badge">
+                <span className="dot" />
+                {collectionStatusText}
+              </span>
+            </div>
+            <p>
+              Vector rebuild writes this collection, and vector search reads the latest active vector
+              index for this repository.
+            </p>
+            <small>{collectionMessage}</small>
+            <div className="settings-readiness-actions">
+              <button className="btn btn-sm" type="button" onClick={() => onNavigate("search")}>
+                Open Search Lab
+              </button>
+              <button className="btn btn-sm" type="button" onClick={() => onNavigate("admin")}>
+                Open Repository Administration
+              </button>
+            </div>
+          </div>
           <SettingNumber
             id="settings-vector-size"
             label="Vector size"
