@@ -46,7 +46,7 @@ def rebuild_repository_vector_index(
 ) -> VectorRebuildResponse:
     try:
         rebuilt = rebuild_vector_index(session, repository_id, store, embedder)
-    except (RuntimeError, VectorStoreError) as exc:
+    except (RuntimeError, ValueError, VectorStoreError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if rebuilt is None:
         raise HTTPException(status_code=404, detail="Repository not found")
@@ -73,7 +73,7 @@ def search_repository_vector_index(
         )
     except VectorIndexMissingError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (RuntimeError, VectorStoreError) as exc:
+    except (RuntimeError, ValueError, VectorStoreError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if response is None:
         raise HTTPException(status_code=404, detail="Repository not found")
