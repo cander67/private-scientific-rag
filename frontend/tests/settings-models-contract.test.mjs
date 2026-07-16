@@ -22,6 +22,11 @@ test("Settings / Models shows repository-scoped grouped defaults", () => {
   assert.match(source, /Vector and embedding/);
   assert.match(source, /Reranking/);
   assert.match(source, /Chat defaults/);
+  assert.match(source, /chatModelRegistry/);
+  assert.match(source, /Known Ollama model/);
+  assert.match(source, /Custom local Ollama model/);
+  assert.match(source, /settings-known-chat-model/);
+  assert.match(source, /settings-model-guidance/);
   assert.match(source, /Export defaults/);
   assert.match(source, /draft\.chunking\.chunk_size/);
   assert.match(source, /draft\.export\.include_sources/);
@@ -33,6 +38,8 @@ test("Settings / Models exposes required models and readiness placeholders", () 
   assert.match(source, /Check readiness/);
   assert.match(source, /function checkRepositorySettingsReadiness/);
   assert.match(source, /settings\/readiness/);
+  assert.match(source, /chat\/models/);
+  assert.match(source, /type ChatModelRegistry/);
   assert.match(source, /ReadinessCard/);
   assert.match(source, /Qdrant/);
   assert.match(source, /Embedding/);
