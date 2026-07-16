@@ -21,6 +21,7 @@ from private_rag.repositories.schemas import (
     RepositoryDeleteRequest,
     RepositoryDeleteResult,
     RepositoryManifest,
+    RepositoryModelCatalogResponse,
     RepositoryRead,
     RepositorySettingsImpactRequest,
     RepositorySettingsImpactResponse,
@@ -45,6 +46,7 @@ from private_rag.repositories.service import (
     preview_repository_deletion,
     repository_admin_inventory,
     repository_dashboard_summary,
+    repository_model_catalog,
     retry_vector_cleanup,
     update_repository_settings,
     validate_recreate_request,
@@ -196,6 +198,23 @@ def read_repository_settings(
     if repository is None:
         raise HTTPException(status_code=404, detail="Repository not found")
     return repository
+
+
+@router.get(
+    "/{repository_id}/settings/model-catalog", response_model=RepositoryModelCatalogResponse
+)
+def read_repository_model_catalog(
+    repository_id: str,
+    session: DbSession,
+) -> RepositoryModelCatalogResponse:
+    catalog = repository_model_catalog(
+        session,
+        repository_id=repository_id,
+        app_settings=get_settings(),
+    )
+    if catalog is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return catalog
 
 
 @router.get("/{repository_id}/summary", response_model=RepositoryDashboardSummary)

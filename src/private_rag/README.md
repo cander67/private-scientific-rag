@@ -31,6 +31,7 @@ Current API surface:
 - `PUT /repositories/{repository_id}/settings`: validates and saves repository settings.
 - `POST /repositories/{repository_id}/settings/impact`: previews rebuild, workflow, export/recreate, and evaluation-freshness impact for draft settings.
 - `POST /repositories/{repository_id}/settings/readiness`: runs explicit, opt-in Qdrant, chat model, embedding model, and reranker readiness checks through mockable service boundaries.
+- `GET /repositories/{repository_id}/settings/model-catalog`: returns deterministic Settings / Models catalog metadata for known embedding, chat, and reranker options without contacting Ollama or loading local model weights.
 - `GET /repositories/{repository_id}/summary`: returns Repository Dashboard data for one repository, including identity, counts, full-text/vector readiness, PRD21-style service/model readiness, active configuration, warnings, and recent activity.
 - `GET /repositories/{repository_id}/manifest`: exports a reproducibility manifest and stores a snapshot.
 - `POST /repositories/{repository_id}/exports/bundle`: exports a portable repository ZIP with manifest, settings, prompt library, document/chunk metadata, chat history, retrieval history, citations, and selected source files. PRD8 sandbox runs/comparisons are excluded by default and included only when explicitly requested.
@@ -79,6 +80,8 @@ Current status:
 Repository chat prompts live in repository settings under `prompt.library`, with `prompt.active_chat_prompt_id` selecting the active prompt. The default prompt requires repository-grounded answers, inline citations, and explicit uncertainty when context is insufficient. Chat retrieval settings are stored on each chat session and may be overridden per question; they do not inherit frontend Search Lab state and do not trigger automatic index rebuilds. Readiness is explicit: full-text and vector status compare parsed chunks against indexed chunks, report missing/partial/stale/ready states, and require the selected retrieval mode plus a responding local model before chat is marked ready.
 
 Settings readiness is also explicit and opt-in. The Settings / Models readiness endpoint distinguishes not checked, unavailable runtime, not installed, ready, failed, and skipped states. Chat readiness uses the same local-model smoke boundary and reports missing Ollama tags with `ollama pull <model>` guidance. Default tests mock Qdrant, chat, embedding, and reranker boundaries; live Qdrant/Ollama/SentenceTransformers/cross-encoder checks stay in the opt-in live test suite.
+
+Settings model catalog metadata is deterministic by default. The catalog endpoint combines the embedding registry, chat registry, and configured default cross-encoder into known-model choices, while leaving runtime Ollama detection as a separate not-checked section so opening Settings / Models never downloads weights or probes local runtimes.
 
 Embedding model details live in `docs/embedding_models.md`. PRD15 keeps one latest vector index per repository: changing embedding settings requires a rebuild and replaces the previous latest vector collection after validation. PRD16 owns future immutable multi-index comparison and index selection history.
 

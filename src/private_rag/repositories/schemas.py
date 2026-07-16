@@ -215,6 +215,63 @@ class RepositorySettingsReadinessResponse(BaseModel):
     items: list[RepositorySettingsReadinessItem]
 
 
+class ModelCatalogRuntimeDetection(BaseModel):
+    checked: bool = False
+    provider: Literal["ollama"] = "ollama"
+    models: list[str] = Field(default_factory=list)
+    message: str
+
+
+class EmbeddingModelCatalogEntry(BaseModel):
+    provider: Literal["sentence_transformers", "ollama"]
+    model: str
+    label: str
+    source: Literal["known", "detected"] = "known"
+    vector_size: int
+    supported_distances: list[Literal["cosine", "dot", "euclid"]]
+    resource_notes: str
+    setup_hint: str
+    requires_local_model: bool
+    requires_live_probe: bool
+
+
+class ChatModelCatalogEntry(BaseModel):
+    name: str
+    label: str
+    source: Literal["known", "detected"] = "known"
+    role: Literal[
+        "recommended_default",
+        "balanced_local",
+        "larger_local",
+        "reasoning_experimental",
+    ]
+    required: bool = False
+    notes: str | None = None
+    setup_command: str | None = None
+    local_resource_notes: str | None = None
+    context_window_notes: str | None = None
+    readiness_required: bool = True
+
+
+class RerankerModelCatalogEntry(BaseModel):
+    strategy: Literal["cross_encoder", "none"]
+    model: str | None = None
+    label: str
+    source: Literal["known", "detected"] = "known"
+    enabled: bool
+    resource_notes: str
+    setup_hint: str | None = None
+    readiness_required: bool
+
+
+class RepositoryModelCatalogResponse(BaseModel):
+    repository_id: str
+    embedding_models: list[EmbeddingModelCatalogEntry]
+    chat_models: list[ChatModelCatalogEntry]
+    reranker_models: list[RerankerModelCatalogEntry]
+    runtime_detection: ModelCatalogRuntimeDetection
+
+
 class RepositoryDashboardCounts(BaseModel):
     documents: int = 0
     parsed_documents: int = 0

@@ -188,6 +188,49 @@ def test_repository_settings_impact_endpoint_reports_categories() -> None:
     assert "export_recreate" in categories
 
 
+def test_repository_settings_model_catalog_returns_known_defaults() -> None:
+    client = _client_with_database()
+    created = client.get("/repositories/default").json()
+    repository_id = created["repository"]["id"]
+
+    response = client.get(f"/repositories/{repository_id}/settings/model-catalog")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["repository_id"] == repository_id
+    assert payload["runtime_detection"] == {
+        "checked": False,
+        "provider": "ollama",
+        "models": [],
+        "message": (
+            "Runtime model detection has not been run. Loading this catalog uses only "
+            "project-known metadata and does not contact Ollama or load local models."
+        ),
+    }
+    embedding_by_model = {
+        (entry["provider"], entry["model"]): entry for entry in payload["embedding_models"]
+    }
+    minilm = embedding_by_model[("sentence_transformers", "sentence-transformers/all-MiniLM-L6-v2")]
+    assert minilm["source"] == "known"
+    assert minilm["vector_size"] == 384
+    assert minilm["supported_distances"] == ["cosine", "dot", "euclid"]
+    ollama_embedding = embedding_by_model[("ollama", "embeddinggemma:300m")]
+    assert ollama_embedding["requires_local_model"] is True
+    assert ollama_embedding["supported_distances"] == ["cosine"]
+    assert any(
+        entry["name"] == created["settings"]["model"]["ollama_chat_model"]
+        and entry["source"] == "known"
+        and entry["required"] is True
+        for entry in payload["chat_models"]
+    )
+    assert {
+        (entry["strategy"], entry["model"], entry["source"]) for entry in payload["reranker_models"]
+    } >= {
+        ("none", None, "known"),
+        ("cross_encoder", created["settings"]["reranking"]["model"], "known"),
+    }
+
+
 class FakeSettingsLLM:
     def complete(self, *, model: str, messages: list[ChatMessage]) -> ChatCompletion:
         return ChatCompletion(content="local model ready [1]", model=model)

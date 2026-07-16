@@ -9,6 +9,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
+from private_rag.chat.llm import MODEL_REGISTRY as CHAT_MODEL_REGISTRY
 from private_rag.chat.llm import ChatLLM, OllamaUnavailableError
 from private_rag.chat.models import ChatMessageRow, ChatSession
 from private_rag.core.settings import Settings, get_settings
@@ -16,6 +17,9 @@ from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersio
 from private_rag.prompt_sandbox.models import SandboxComparison, SandboxPromptVersion, SandboxRun
 from private_rag.repositories.models import Repository, RepositorySettingsRow, RepositorySnapshot
 from private_rag.repositories.schemas import (
+    ChatModelCatalogEntry,
+    EmbeddingModelCatalogEntry,
+    ModelCatalogRuntimeDetection,
     RecreateValidationIssue,
     RecreateValidationRequest,
     RecreateValidationResponse,
@@ -36,6 +40,7 @@ from private_rag.repositories.schemas import (
     RepositoryDeletePreview,
     RepositoryDeleteResult,
     RepositoryManifest,
+    RepositoryModelCatalogResponse,
     RepositoryRead,
     RepositorySettings,
     RepositorySettingsImpact,
@@ -44,11 +49,13 @@ from private_rag.repositories.schemas import (
     RepositorySettingsReadinessResponse,
     RepositoryVectorCleanupRetryResult,
     RepositoryWithSettings,
+    RerankerModelCatalogEntry,
     source_file_exists,
 )
 from private_rag.retrieval.models import RetrievalResult, RetrievalRun
 from private_rag.search.service import FTS_TABLE
 from private_rag.vector.embeddings import SentenceTransformersEmbeddingProvider
+from private_rag.vector.model_registry import known_embedding_models
 from private_rag.vector.models import EmbeddingRun
 from private_rag.vector.store import VectorStore, VectorStoreError
 
@@ -304,6 +311,83 @@ def get_repository_with_settings(
     if repository is None or repository.settings is None:
         return None
     return _with_settings(repository)
+
+
+def repository_model_catalog(
+    session: Session,
+    *,
+    repository_id: str,
+    app_settings: Settings,
+) -> RepositoryModelCatalogResponse | None:
+    repository = session.get(Repository, repository_id)
+    if repository is None:
+        return None
+    return RepositoryModelCatalogResponse(
+        repository_id=repository_id,
+        embedding_models=[
+            EmbeddingModelCatalogEntry(
+                provider=metadata.provider,
+                model=metadata.model,
+                label=metadata.label,
+                source="known",
+                vector_size=metadata.vector_size,
+                supported_distances=list(metadata.supported_distances),
+                resource_notes=metadata.resource_notes,
+                setup_hint=metadata.setup_hint,
+                requires_local_model=metadata.requires_local_model,
+                requires_live_probe=metadata.requires_live_probe,
+            )
+            for metadata in known_embedding_models()
+        ],
+        chat_models=[
+            ChatModelCatalogEntry(
+                name=metadata.name,
+                label=metadata.label,
+                source="known",
+                role=metadata.role,
+                required=metadata.required or metadata.name == app_settings.default_llm,
+                notes=metadata.notes,
+                setup_command=metadata.setup_command,
+                local_resource_notes=metadata.local_resource_notes,
+                context_window_notes=metadata.context_window_notes,
+                readiness_required=metadata.readiness_required,
+            )
+            for metadata in CHAT_MODEL_REGISTRY
+        ],
+        reranker_models=[
+            RerankerModelCatalogEntry(
+                strategy="none",
+                model=None,
+                label="No reranking",
+                enabled=False,
+                resource_notes="Use baseline retrieval ranking without a local cross-encoder.",
+                readiness_required=False,
+            ),
+            RerankerModelCatalogEntry(
+                strategy="cross_encoder",
+                model=app_settings.default_reranker,
+                label="MS MARCO MiniLM cross-encoder",
+                enabled=True,
+                resource_notes=(
+                    "Local SentenceTransformers cross-encoder used to rescore retrieved chunks."
+                ),
+                setup_hint=(
+                    f"Cache with SentenceTransformers before live reranking: "
+                    f"{app_settings.default_reranker}."
+                ),
+                readiness_required=True,
+            ),
+        ],
+        runtime_detection=ModelCatalogRuntimeDetection(
+            checked=False,
+            provider="ollama",
+            models=[],
+            message=(
+                "Runtime model detection has not been run. Loading this catalog uses only "
+                "project-known metadata and does not contact Ollama or load local models."
+            ),
+        ),
+    )
 
 
 def list_repositories(session: Session) -> list[RepositoryRead]:

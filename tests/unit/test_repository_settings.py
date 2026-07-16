@@ -4,9 +4,15 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from private_rag.chat.llm import ChatCompletion, ChatMessage, OllamaUnavailableError
 from private_rag.core.settings import Settings
+from private_rag.db.base import Base
+from private_rag.repositories import models as repository_models  # noqa: F401
+from private_rag.repositories.models import Repository, RepositorySettingsRow
 from private_rag.repositories.schemas import (
     RecreateValidationRequest,
     RepositorySettings,
@@ -14,6 +20,7 @@ from private_rag.repositories.schemas import (
 from private_rag.repositories.service import (
     LocalSettingsReadinessChecker,
     analyze_settings_impact,
+    repository_model_catalog,
     validate_recreate_request,
 )
 
@@ -181,6 +188,47 @@ def test_readiness_checker_reports_missing_chat_model_with_pull_guidance() -> No
     assert result.status == "not_installed"
     assert result.ready is False
     assert "ollama pull custom-local:latest" in result.message
+
+
+def test_model_catalog_uses_known_metadata_without_runtime_detection() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, class_=Session)
+    app_settings = Settings(default_llm="llama3.2:3b", default_reranker="cross-encoder/test")
+    with session_factory() as session:
+        settings = RepositorySettings.from_app_settings(app_settings)
+        repository = Repository(name="Catalog test")
+        session.add(repository)
+        session.flush()
+        repository.settings = RepositorySettingsRow(settings=settings.model_dump(mode="json"))
+        session.commit()
+        repository_id = repository.id
+
+        catalog = repository_model_catalog(
+            session,
+            repository_id=repository_id,
+            app_settings=app_settings,
+        )
+
+    assert catalog is not None
+    assert catalog.repository_id == repository_id
+    assert catalog.runtime_detection.checked is False
+    assert catalog.runtime_detection.models == []
+    assert all(entry.source == "known" for entry in catalog.embedding_models)
+    assert all(entry.source == "known" for entry in catalog.chat_models)
+    assert {
+        ("sentence_transformers", "sentence-transformers/all-MiniLM-L6-v2", 384),
+        ("ollama", "embeddinggemma:300m", 768),
+    } <= {(entry.provider, entry.model, entry.vector_size) for entry in catalog.embedding_models}
+    assert any(entry.name == "llama3.2:3b" and entry.required for entry in catalog.chat_models)
+    assert any(
+        entry.strategy == "cross_encoder" and entry.model == "cross-encoder/test"
+        for entry in catalog.reranker_models
+    )
 
 
 def test_recreate_validation_reports_missing_files_and_models(tmp_path: Path) -> None:
