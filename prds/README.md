@@ -26,6 +26,8 @@ Current status:
 - Complete: PRD20 repository dashboard and home alias.
 - Complete: PRD21 settings and model manager.
 - Selected next: PRD22 Ollama chat model expansion.
+- Backlog: PRD23 settings model catalog and collection guardrails.
+- Backlog: PRD24 local storage provenance and housekeeping.
 
 Next PRD selected: PRD22 Ollama chat model expansion.
 
@@ -74,3 +76,5 @@ PRD files:
 20. [Repository dashboard and home alias](20-repository-dashboard-home.md) - complete
 21. [Settings and model manager](21-settings-models-manager.md) - complete
 22. [Ollama chat model expansion](22-ollama-chat-model-expansion.md) - selected next
+23. [Settings model catalog and collection guardrails](23-settings-model-catalog-guardrails.md) - backlog
+24. [Local storage provenance and housekeeping](24-local-storage-housekeeping.md) - backlog
