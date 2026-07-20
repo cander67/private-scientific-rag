@@ -21,6 +21,7 @@ from private_rag.ingestion.service import (
     _write_source_file,
     delete_document,
     inspect_document,
+    inspect_document_version,
     list_documents,
     reprocess_document,
     upload_document,
@@ -126,14 +127,26 @@ def test_reprocess_document_updates_chunks_from_stored_source(tmp_path: Path) ->
         settings=Settings(data_dir=tmp_path),
     )
     assert uploaded is not None
+    first_version_id = uploaded.version.id
     Path(uploaded.version.storage_path).write_bytes(b"Summary\nsecond version\nwith more content\n")
 
     inspection = reprocess_document(session, repository_id, uploaded.document.id)
+    prior_inspection = inspect_document_version(
+        session,
+        repository_id,
+        uploaded.document.id,
+        first_version_id,
+    )
 
     assert inspection is not None
+    assert prior_inspection is not None
+    assert inspection.version.id != first_version_id
+    assert inspection.document.current_version_id == inspection.version.id
     assert inspection.version.status == "parsed"
     assert inspection.version.chunk_count == len(inspection.chunks)
     assert "second version" in inspection.chunks[0].text
+    assert "first version" in prior_inspection.chunks[0].text
+    assert inspection.version.metadata["reprocess"]["source_version_id"] == first_version_id
 
 
 def test_reprocess_document_reports_missing_source_file(tmp_path: Path) -> None:
@@ -148,13 +161,23 @@ def test_reprocess_document_reports_missing_source_file(tmp_path: Path) -> None:
         settings=Settings(data_dir=tmp_path),
     )
     assert uploaded is not None
+    first_version_id = uploaded.version.id
     Path(uploaded.version.storage_path).unlink()
 
     inspection = reprocess_document(session, repository_id, uploaded.document.id)
+    prior_inspection = inspect_document_version(
+        session,
+        repository_id,
+        uploaded.document.id,
+        first_version_id,
+    )
 
     assert inspection is not None
+    assert prior_inspection is not None
+    assert inspection.version.id != first_version_id
     assert inspection.version.status == "failed"
     assert "Original source file is missing." in inspection.version.warnings
+    assert inspection.version.metadata["reprocess"]["source_version_id"] == first_version_id
 
 
 def test_upload_parser_exception_creates_failed_inspectable_version(
@@ -322,3 +345,117 @@ def test_upload_uses_repository_parser_settings_and_records_fingerprint(
     assert payload["source_hash"] == uploaded.version.sha256
     assert uploaded.chunks_preview[0].metadata["parser_fingerprint"] == fingerprint
     assert uploaded.chunks_preview[0].metadata["parser_route"] == ["pymupdf"]
+
+
+def test_document_read_reports_stale_reprocess_status_after_chunking_change(
+    tmp_path: Path,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "notes.txt",
+        "text/plain",
+        b"Abstract\nchunking settings can make this parsed version stale\n",
+        settings=Settings(data_dir=tmp_path),
+    )
+    assert uploaded is not None
+
+    repository = session.get(Repository, repository_id)
+    assert repository is not None
+    assert repository.settings is not None
+    settings = RepositorySettings.model_validate(repository.settings.settings)
+    settings.chunking.chunk_size = 400
+    repository.settings.settings = settings.model_dump(mode="json")
+    session.add(repository.settings)
+    session.commit()
+
+    documents = list_documents(session, repository_id)
+    inspection = inspect_document(session, repository_id, uploaded.document.id)
+
+    assert documents is not None
+    assert inspection is not None
+    assert documents[0].current_version is not None
+    status = documents[0].current_version.metadata["reprocess_status"]
+    assert status["status"] == "stale"
+    assert status["stale"] is True
+    assert status["changed_fields"] == ["chunking.chunk_size"]
+    assert inspection.version.metadata["reprocess_status"]["status"] == "stale"
+
+
+def test_reprocess_records_unchanged_and_changed_fingerprint_paths(tmp_path: Path) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "notes.txt",
+        "text/plain",
+        b"Abstract\nsame source can be reprocessed under changing settings\n",
+        settings=Settings(data_dir=tmp_path),
+    )
+    assert uploaded is not None
+
+    unchanged = reprocess_document(session, repository_id, uploaded.document.id)
+    assert unchanged is not None
+    assert unchanged.version.metadata["reprocess"]["fingerprint_changed"] is False
+    assert unchanged.version.metadata["reprocess"]["changed_fields"] == []
+
+    repository = session.get(Repository, repository_id)
+    assert repository is not None
+    assert repository.settings is not None
+    settings = RepositorySettings.model_validate(repository.settings.settings)
+    settings.parser.structured_parser = "built_in_fallback"
+    repository.settings.settings = settings.model_dump(mode="json")
+    session.add(repository.settings)
+    session.commit()
+
+    changed = reprocess_document(session, repository_id, uploaded.document.id)
+
+    assert changed is not None
+    assert changed.version.metadata["reprocess"]["fingerprint_changed"] is True
+    assert changed.version.metadata["reprocess"]["changed_fields"] == ["parser.structured_parser"]
+
+
+def test_reprocess_parser_failure_creates_failed_version_without_deleting_prior_chunks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "notes.txt",
+        "text/plain",
+        b"Abstract\nfirst version\n",
+        settings=Settings(data_dir=tmp_path),
+    )
+    assert uploaded is not None
+    first_version_id = uploaded.version.id
+
+    def broken_parser(
+        filename: str,
+        content_type: str | None,
+        data: bytes,
+        **kwargs: object,
+    ) -> ParsedDocument:
+        raise RuntimeError("parser boom")
+
+    monkeypatch.setattr(ingestion_service, "parse_source", broken_parser)
+
+    inspection = reprocess_document(session, repository_id, uploaded.document.id)
+    prior_inspection = inspect_document_version(
+        session,
+        repository_id,
+        uploaded.document.id,
+        first_version_id,
+    )
+
+    assert inspection is not None
+    assert prior_inspection is not None
+    assert inspection.version.status == "failed"
+    assert inspection.version.chunk_count == 0
+    assert "Parsing failed: RuntimeError: parser boom" in inspection.version.warnings
+    assert "first version" in prior_inspection.chunks[0].text

@@ -167,6 +167,55 @@ def test_upload_markdown_and_annotation_then_inspect_and_delete() -> None:
     assert deleted_inspection.status_code == 404
 
 
+def test_reprocess_creates_new_version_and_preserves_prior_inspection() -> None:
+    client = _client_with_database()
+    default = client.get("/repositories/default").json()
+    repository_id = default["repository"]["id"]
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("notes.txt", b"Abstract\nfirst version\n", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    upload_payload = upload_response.json()
+    document_id = upload_payload["document"]["id"]
+    first_version_id = upload_payload["version"]["id"]
+
+    settings = default["settings"]
+    settings["chunking"]["chunk_size"] = 400
+    settings_response = client.put(
+        f"/repositories/{repository_id}/settings",
+        json={"settings": settings},
+    )
+    documents_before = client.get(f"/repositories/{repository_id}/documents")
+    reprocess_response = client.post(
+        f"/repositories/{repository_id}/documents/{document_id}/reprocess"
+    )
+    current_payload = reprocess_response.json()
+    prior_response = client.get(
+        f"/repositories/{repository_id}/documents/{document_id}/versions/{first_version_id}"
+    )
+
+    assert settings_response.status_code == 200
+    assert documents_before.status_code == 200
+    assert (
+        documents_before.json()[0]["current_version"]["metadata"]["reprocess_status"]["status"]
+        == "stale"
+    )
+    assert reprocess_response.status_code == 200
+    assert current_payload["version"]["id"] != first_version_id
+    assert current_payload["document"]["current_version_id"] == current_payload["version"]["id"]
+    assert (
+        current_payload["version"]["metadata"]["reprocess"]["source_version_id"] == first_version_id
+    )
+    assert current_payload["version"]["metadata"]["reprocess"]["changed_fields"] == [
+        "chunking.chunk_size"
+    ]
+    assert current_payload["version"]["metadata"]["reprocess_status"]["status"] == "current"
+    assert prior_response.status_code == 200
+    assert prior_response.json()["version"]["id"] == first_version_id
+    assert prior_response.json()["chunks"][0]["text"] == "Abstract\nfirst version"
+
+
 def test_delete_all_repository_documents() -> None:
     client = _client_with_database()
     repository_id = client.get("/repositories/default").json()["repository"]["id"]

@@ -12,6 +12,7 @@ from private_rag.ingestion.service import (
     delete_document,
     document_page_image_path,
     inspect_document,
+    inspect_document_version,
     list_documents,
     reprocess_document,
     upload_document,
@@ -84,6 +85,19 @@ def read_document_page_image(
     if path is None:
         raise HTTPException(status_code=404, detail="Page image not found")
     return FileResponse(path, media_type="image/png")
+
+
+@router.get("/{document_id}/versions/{version_id}", response_model=DocumentInspection)
+def inspect_repository_document_version(
+    repository_id: str,
+    document_id: str,
+    version_id: str,
+    session: DbSession,
+) -> DocumentInspection:
+    inspection = inspect_document_version(session, repository_id, document_id, version_id)
+    if inspection is None:
+        raise HTTPException(status_code=404, detail="Document version not found")
+    return inspection
 
 
 @router.post("/{document_id}/reprocess", response_model=DocumentInspection)
