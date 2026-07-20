@@ -5941,9 +5941,7 @@ function ChatWorkspace({
               >
                 {rebuildBusy === "vector" ? "Rebuilding vector" : "Rebuild vector"}
               </button>
-              <span className="muted">
-                {activeSession?.model ?? chatDefaultModel} · settings are saved on send
-              </span>
+              <span className="muted">Chat model: {activeSession?.model ?? chatDefaultModel}</span>
             </div>
             <div className="chat-defaults-note">
               <strong>New chat default</strong>
