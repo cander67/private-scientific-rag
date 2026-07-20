@@ -8,9 +8,9 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-PRD1 through PRD9, PRD15, and PRD19 through PRD22 are complete and closed. PRD23 Settings Model Catalog and Collection Guardrails is implemented and ready for review. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search with additional local embedding models, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, local Ollama-backed retrieval-augmented chat with citations and expanded local chat model registry/readiness support, a Prompt Sandbox for prompt/retrieval/model comparisons, portable export/recreate workflows for moving repositories across supported local hosts, guarded repository administration/reset workflows, a repository-scoped Settings / Models manager with catalog-backed model guardrails, and a dashboard home surface for repository status and workflow navigation.
+PRD1 through PRD9, PRD15, and PRD19 through PRD22 are complete and closed. PRD23 Settings Model Catalog and Collection Guardrails remains open for user-testing remediation around model/runtime readiness and explanatory docs. The project now has the local app foundation, repository settings/reproducibility, document ingestion/source inspection, inspectable SQLite FTS5 search, dense vector search with additional local embedding models, hybrid Reciprocal Rank Fusion, selectable reranking, retrieval evaluation, local Ollama-backed retrieval-augmented chat with citations and expanded local chat model registry/readiness support, a Prompt Sandbox for prompt/retrieval/model comparisons, portable export/recreate workflows for moving repositories across supported local hosts, guarded repository administration/reset workflows, a repository-scoped Settings / Models manager with catalog-backed model guardrails, and a dashboard home surface for repository status and workflow navigation.
 
-Later PRDs include OCR execution (PRD13), structured table extraction (PRD14), bulk patent downloads/raw patent-data feeds (PRD12), clearer chunk-level versus document-level search labels (PRD17), and immutable document storage. Immutable multi-index embedding comparison remains PRD16 scope.
+Later PRDs include OCR execution (PRD13), structured table extraction (PRD14), bulk patent downloads/raw patent-data feeds (PRD12), clearer chunk-level versus document-level search labels (PRD17), chat context inspection (PRD25), repository loading/parser controls (PRD26), and immutable document storage. Immutable multi-index embedding comparison remains PRD16 scope.
 
 The app currently provides:
 
@@ -81,7 +81,7 @@ PowerShell:
 docker compose up -d qdrant
 ```
 
-Vector rebuilds use the repository embedding/vector settings and replace the repository's latest Qdrant collection after validation. Supported embedding options include the MiniLM baseline, `sentence-transformers/all-mpnet-base-v2`, `embeddinggemma:300m`, and `qwen3-embedding:8b`; see [embedding model documentation](docs/embedding_models.md) for dimensions, local setup, provider tradeoffs, and the PRD15/PRD16 index boundary. The default embedding model is `sentence-transformers/all-MiniLM-L6-v2` with 384-dimensional cosine vectors.
+Vector rebuilds use the repository embedding/vector settings and replace the repository's latest Qdrant collection after validation. Supported embedding options include the MiniLM baseline, `sentence-transformers/all-mpnet-base-v2`, `embeddinggemma:300m`, and `qwen3-embedding:8b`; see [embedding model documentation](docs/embedding_models.md) for dimensions, local setup, GPU/CPU behavior, provider tradeoffs, and the PRD15/PRD16 index boundary. The default embedding model is `sentence-transformers/all-MiniLM-L6-v2` with 384-dimensional cosine vectors.
 
 Unified retrieval defaults to a candidate pool of `top_k * 5` and an RRF constant of `60`; both can be adjusted per request. Cross-encoder reranking uses `cross-encoder/ms-marco-MiniLM-L6-v2` by default and requires the model to be downloaded into the local SentenceTransformers cache. See [test documentation](tests/README.md) for the download command and separate deterministic, live-vector, and live-cross-encoder test commands.
 
@@ -191,6 +191,7 @@ The `example_code/` folder is local inspiration code and should not be committed
 - [Documents workspace](documents/README.md)
 - [Test documentation](tests/README.md)
 - [Embedding model guide](docs/embedding_models.md)
+- [Chunking modes guide](docs/chunking_modes.md)
 - [Backend documentation](src/private_rag/README.md)
 - [Frontend documentation](frontend/README.md)
 - [Export/recreate transfer guide](docs/export_recreate.md)

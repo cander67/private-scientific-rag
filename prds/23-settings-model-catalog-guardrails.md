@@ -1,6 +1,6 @@
 # PRD 23: Settings Model Catalog and Collection Guardrails
 
-**Status:** Ready for review.
+**Status:** Open. Implemented baseline is ready for review; user-testing remediation is being planned under the current PRD.
 
 ## Problem Statement
 
@@ -64,3 +64,26 @@ The page should also explain the Qdrant collection lifecycle in the setting itse
 
 - This PRD is a user-testing follow-up to PRD15 and PRD21. Those PRDs built the registry, validation, and Settings / Models page; this PRD makes those capabilities harder to misuse.
 - Qdrant collection management should be explained here but administered through Repository Administration and PRD16's future immutable index lifecycle.
+
+## User Testing Remediation
+
+Hands-on testing after the baseline implementation surfaced several model and documentation gaps that remain inside PRD23 scope because they directly affect Settings / Models, model catalog guardrails, readiness checks, and model/runtime explanations.
+
+### Additional User Stories
+
+14. As a researcher, I want Settings / Models to include the local chat models I actually have installed, so that I can select them without typing model names from memory.
+15. As a researcher, I want chat model guidance to clarify whether normal chat uses repository retrieval by default, so that I can trust the app is searching local context before asking the LLM.
+16. As a Windows user, I want Ollama embedding readiness to check the configured Ollama runtime and model, so that a pulled model is not reported as unavailable without explaining which endpoint failed.
+17. As a researcher, I want embedding readiness to cover both SentenceTransformers and Ollama providers, so that Settings / Models reflects the same providers vector rebuild can use.
+18. As a researcher with a GPU-capable host, I want SentenceTransformers embedding checks and rebuilds to use GPU acceleration when available and safely fall back to CPU, so that larger local indexes can run faster without becoming GPU-required.
+19. As a researcher, I want clear documentation for MiniLM device behavior, supported tokenizer choices, and chunking modes, so that model/runtime tradeoffs are understandable before changing settings.
+
+### Additional Implementation Decisions
+
+- Add `gemma4:e4b`, `gemma4:12b`, `qwen3.6`, and `qwen3.5:9b` to the known Ollama chat model catalog with setup guidance and resource/context notes. Treat them as ordinary Ollama `/api/chat` models unless future testing proves they need model-specific prompting.
+- Keep chat retrieval defaults local and repository-grounded. Improve UI/docs copy rather than changing the default path: new chat sessions should continue to use chat-owned retrieval settings with hybrid retrieval by default.
+- Extend Settings / Models readiness so Ollama embedding models are checked through the configured Ollama base URL and `/api/embed`, including vector-dimension validation against repository settings.
+- Distinguish unavailable Ollama runtime, missing model, failed embedding response, and dimension mismatch in readiness messages.
+- Add a SentenceTransformers device policy for embeddings and reranker-adjacent docs: prefer GPU/MPS/CUDA when available and configured for automatic acceleration, then fall back to CPU when no supported accelerator is available or when an accelerator load fails safely.
+- Do not make GPU a required dependency for default CI or local setup. Default tests should continue to mock live model/runtime boundaries.
+- Document current tokenizer support (`unicode61`, `porter`) and explicitly defer broader tokenizer expansion until retrieval-quality evidence or corpus needs justify it.
