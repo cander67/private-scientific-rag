@@ -283,6 +283,27 @@ def test_readiness_checker_reports_ollama_embedding_dimension_mismatch() -> None
     assert "vector size is 2" in result.message
 
 
+def test_readiness_checker_reports_pulled_but_not_loaded_guidance() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "model load failed"}, request=request)
+
+    checker = LocalSettingsReadinessChecker(
+        ollama_embedding_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = checker.check_embedding(
+        provider="ollama",
+        model="qwen3-embedding:8b",
+        expected_vector_size=4096,
+        ollama_base_url="http://ollama.test",
+    )
+
+    assert result.status == "failed"
+    assert result.ready is False
+    assert "pulled" in result.message
+    assert "RAM/VRAM" in result.message
+
+
 def test_model_catalog_uses_known_metadata_without_runtime_detection() -> None:
     engine = create_engine(
         "sqlite://",

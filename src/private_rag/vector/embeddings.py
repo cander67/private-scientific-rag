@@ -24,6 +24,8 @@ class EmbeddingProviderFactory(Protocol):
 
 
 EmbeddingProviderSource = EmbeddingProvider | EmbeddingProviderFactory
+OLLAMA_EMBEDDING_KEEP_ALIVE = "10m"
+OLLAMA_EMBEDDING_TIMEOUT_SECONDS = 180.0
 
 
 class LocalEmbeddingProviderFactory:
@@ -171,12 +173,14 @@ class OllamaEmbeddingProvider:
         base_url: str,
         model_name: str,
         *,
-        timeout: float = 60.0,
+        timeout: float = OLLAMA_EMBEDDING_TIMEOUT_SECONDS,
+        keep_alive: str = OLLAMA_EMBEDDING_KEEP_ALIVE,
         client: httpx.Client | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model_name = model_name
         self._timeout = timeout
+        self._keep_alive = keep_alive
         self._client = client
         metadata = lookup_embedding_model("ollama", model_name)
         self._vector_size = metadata.vector_size if metadata is not None else None
@@ -249,7 +253,11 @@ class OllamaEmbeddingProvider:
         try:
             response = client.post(
                 f"{self._base_url}/api/embed",
-                json={"model": self._model_name, "input": texts},
+                json={
+                    "model": self._model_name,
+                    "input": texts,
+                    "keep_alive": self._keep_alive,
+                },
             )
             response.raise_for_status()
             payload = response.json()
@@ -264,13 +272,16 @@ class OllamaEmbeddingProvider:
                 ) from exc
             raise OllamaEmbeddingError(
                 f"Ollama embedding request failed for model '{self._model_name}'. "
-                "Check the local Ollama logs and rerun readiness.",
+                "Check the local Ollama logs and rerun readiness. If the model is pulled "
+                "but still fails, the runtime may be unable to load it into host RAM/VRAM.",
                 readiness_status="failed",
             ) from exc
         except httpx.RequestError as exc:
             raise OllamaEmbeddingError(
                 f"Ollama is not reachable at {self._base_url}. Start Ollama, then run "
-                f"`ollama pull {self._model_name}` if needed.",
+                f"`ollama pull {self._model_name}` if needed. If the model is already "
+                "installed, the first embedding request may still need to load it into "
+                "memory; large models can time out or fail when host RAM/VRAM is insufficient.",
                 readiness_status="unavailable_runtime",
             ) from exc
         except ValueError as exc:
@@ -298,7 +309,11 @@ class OllamaEmbeddingProvider:
         try:
             response = client.post(
                 f"{self._base_url}/api/embeddings",
-                json={"model": self._model_name, "prompt": text},
+                json={
+                    "model": self._model_name,
+                    "prompt": text,
+                    "keep_alive": self._keep_alive,
+                },
             )
             response.raise_for_status()
             payload = response.json()
@@ -311,13 +326,16 @@ class OllamaEmbeddingProvider:
                 ) from exc
             raise OllamaEmbeddingError(
                 f"Ollama embedding request failed for model '{self._model_name}'. "
-                "Check the local Ollama logs and rerun readiness.",
+                "Check the local Ollama logs and rerun readiness. If the model is pulled "
+                "but still fails, the runtime may be unable to load it into host RAM/VRAM.",
                 readiness_status="failed",
             ) from exc
         except httpx.RequestError as exc:
             raise OllamaEmbeddingError(
                 f"Ollama is not reachable at {self._base_url}. Start Ollama, then run "
-                f"`ollama pull {self._model_name}` if needed.",
+                f"`ollama pull {self._model_name}` if needed. If the model is already "
+                "installed, the first embedding request may still need to load it into "
+                "memory; large models can time out or fail when host RAM/VRAM is insufficient.",
                 readiness_status="unavailable_runtime",
             ) from exc
         except ValueError as exc:

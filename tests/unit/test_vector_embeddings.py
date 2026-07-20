@@ -9,6 +9,8 @@ import httpx
 import pytest
 
 from private_rag.vector.embeddings import (
+    OLLAMA_EMBEDDING_KEEP_ALIVE,
+    OLLAMA_EMBEDDING_TIMEOUT_SECONDS,
     LocalEmbeddingProviderFactory,
     OllamaEmbeddingError,
     OllamaEmbeddingProvider,
@@ -163,10 +165,15 @@ def test_ollama_embedding_provider_posts_batched_input_and_validates_vectors() -
 
     assert captured == {
         "url": "http://ollama.test/api/embed",
-        "payload": {"model": "custom-embed:latest", "input": ["alpha", "beta"]},
+        "payload": {
+            "model": "custom-embed:latest",
+            "input": ["alpha", "beta"],
+            "keep_alive": OLLAMA_EMBEDDING_KEEP_ALIVE,
+        },
     }
     assert vectors == [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]
     assert provider.vector_size == 3
+    assert OLLAMA_EMBEDDING_TIMEOUT_SECONDS >= 180.0
 
 
 def test_ollama_embedding_provider_falls_back_to_legacy_embeddings_endpoint() -> None:
@@ -195,15 +202,27 @@ def test_ollama_embedding_provider_falls_back_to_legacy_embeddings_endpoint() ->
     assert calls == [
         {
             "url": "http://ollama.test/api/embed",
-            "payload": {"model": "custom-embed:latest", "input": ["alpha", "beta"]},
+            "payload": {
+                "model": "custom-embed:latest",
+                "input": ["alpha", "beta"],
+                "keep_alive": OLLAMA_EMBEDDING_KEEP_ALIVE,
+            },
         },
         {
             "url": "http://ollama.test/api/embeddings",
-            "payload": {"model": "custom-embed:latest", "prompt": "alpha"},
+            "payload": {
+                "model": "custom-embed:latest",
+                "prompt": "alpha",
+                "keep_alive": OLLAMA_EMBEDDING_KEEP_ALIVE,
+            },
         },
         {
             "url": "http://ollama.test/api/embeddings",
-            "payload": {"model": "custom-embed:latest", "prompt": "beta"},
+            "payload": {
+                "model": "custom-embed:latest",
+                "prompt": "beta",
+                "keep_alive": OLLAMA_EMBEDDING_KEEP_ALIVE,
+            },
         },
     ]
     assert vectors == [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]
