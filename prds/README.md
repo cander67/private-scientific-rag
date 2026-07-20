@@ -26,12 +26,12 @@ Current status:
 - Complete: PRD20 repository dashboard and home alias.
 - Complete: PRD21 settings and model manager.
 - Complete: PRD22 Ollama chat model expansion.
-- Ready for review: PRD23 settings model catalog and collection guardrails, including user-testing remediation for model/runtime/docs feedback.
+- Ready for final review: PRD23 settings model catalog and collection guardrails, including user-testing remediation for model/runtime readiness, Windows Ollama embedding compatibility, Chat Workspace embedding visibility, and docs feedback.
 - Backlog: PRD24 local storage provenance and housekeeping.
 - Backlog: PRD25 chat context inspection.
 - Backlog: PRD26 repository loading and parser controls.
 
-PRD23 is ready for review after catalog guardrails and user-testing remediation. PRD25 and PRD26 capture follow-up interaction work that should not be bundled into PRD23.
+PRD23 is ready for final review after catalog guardrails and user-testing remediation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional live Ollama/Qdrant/GPU checks remain explicit manual checks. PRD25 and PRD26 capture follow-up interaction work that should not be bundled into PRD23.
 
 The remaining backlog should be prioritized from hands-on use of the current app, adjusting order when a later PRD is needed to unblock an earlier one.
 
@@ -80,7 +80,7 @@ PRD files:
 20. [Repository dashboard and home alias](20-repository-dashboard-home.md) - complete
 21. [Settings and model manager](21-settings-models-manager.md) - complete
 22. [Ollama chat model expansion](22-ollama-chat-model-expansion.md) - complete
-23. [Settings model catalog and collection guardrails](23-settings-model-catalog-guardrails.md) - ready for review
+23. [Settings model catalog and collection guardrails](23-settings-model-catalog-guardrails.md) - ready for final review
 24. [Local storage provenance and housekeeping](24-local-storage-housekeeping.md) - backlog
 25. [Chat context inspection](25-chat-context-inspection.md) - backlog
 26. [Repository loading and parser controls](26-repository-loading-and-parser-controls.md) - backlog

@@ -1,6 +1,6 @@
 # PRD 23: Settings Model Catalog and Collection Guardrails
 
-**Status:** Ready for review. Baseline catalog guardrails and user-testing remediation are implemented with deterministic checks passing; optional live Ollama/Qdrant/GPU checks remain opt-in.
+**Status:** Ready for final review. Baseline catalog guardrails and all user-testing remediation phases are implemented with deterministic checks passing; optional live Ollama/Qdrant/GPU checks remain opt-in.
 
 ## Problem Statement
 
@@ -64,6 +64,21 @@ The page should also explain the Qdrant collection lifecycle in the setting itse
 
 - This PRD is a user-testing follow-up to PRD15 and PRD21. Those PRDs built the registry, validation, and Settings / Models page; this PRD makes those capabilities harder to misuse.
 - Qdrant collection management should be explained here but administered through Repository Administration and PRD16's future immutable index lifecycle.
+
+## Final Review Summary
+
+PRD23 is ready for final review with the implementation plan fully checked off. The delivered scope includes:
+
+- Catalog-backed Settings / Models choices for known embedding, chat, and reranker models, with detected/runtime entries separated from project-validated registry entries.
+- Derived vector dimensions and compatible distance guardrails for known embedding models, while preserving explicit advanced/custom local model paths.
+- Qdrant collection state and guidance that explain which workflow writes the vector collection, when rebuild is required, and where cleanup belongs.
+- Expanded Ollama chat catalog guidance for current local workstation models while continuing to use the generic `/api/chat` provider.
+- Ollama embedding readiness through the configured runtime, preferring `/api/embed`, falling back to legacy `/api/embeddings`, sending warm-up `keep_alive`, using startup-friendly timeouts, and marking readiness complete only after a vector with the expected dimension is returned.
+- Load-aware Windows guidance that distinguishes unreachable runtime, missing pulled model, timeout/load-in-progress/load-failed responses, malformed responses, and vector-dimension mismatches.
+- Chat Workspace visibility for the configured retrieval embedding model and latest vector-index model.
+- Documentation for MiniLM device behavior, GPU/MPS/CUDA-to-CPU fallback, tokenizer choices, chunking modes, custom Ollama embedding models, and opt-in live checks.
+
+Deterministic verification completed for the final review gate: formatting, linting, typing, backend tests, frontend contract tests, and frontend build. Live Ollama, Qdrant, SentenceTransformers cache, cross-encoder, and GPU checks are intentionally manual because they depend on local host/runtime state.
 
 ## User Testing Remediation
 

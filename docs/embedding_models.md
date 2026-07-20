@@ -1,6 +1,6 @@
 # Embedding Models
 
-PRD15 expands vector search beyond the MiniLM baseline while keeping embeddings local-first. Repository settings choose one active embedding provider/model at a time, and vector rebuilds replace the repository's latest Qdrant collection with vectors from that active model.
+PRD15 expands vector search beyond the MiniLM baseline while keeping embeddings local-first. PRD23 is ready for final review and adds Settings / Models catalog guardrails around those choices: known embedding models derive vector size and compatible distance choices from registry metadata, while custom local models remain explicit advanced entries. Repository settings choose one active embedding provider/model at a time, and vector rebuilds replace the repository's latest Qdrant collection with vectors from that active model.
 
 ## Provider Tradeoffs
 
@@ -76,7 +76,7 @@ Known models should be added as `EmbeddingModelMetadata` entries in `src/private
 
 Unknown Ollama embedding model names are treated as advanced local entries. They can be used only when the runtime supports embeddings and a live dimension probe succeeds before rebuild. Unknown models are compatibility-checked, but they are not quality-vetted by PRD15.
 
-Settings / Models readiness checks Ollama embedding models through the configured `PRIVATE_RAG_OLLAMA_BASE_URL` and Ollama's `/api/embed` endpoint first. If that endpoint is unavailable or incompatible, the check retries through the legacy `/api/embeddings` endpoint and normalizes the response into the same vector validation path. Readiness distinguishes an unreachable runtime, a missing pulled model, malformed or failed embedding responses, pulled-but-not-loadable models, and vector-dimension mismatches against repository settings. These checks are user-triggered and mocked in default tests.
+Settings / Models readiness checks Ollama embedding models through the configured `PRIVATE_RAG_OLLAMA_BASE_URL` and Ollama's `/api/embed` endpoint first. If that endpoint is unavailable or incompatible, the check retries through the legacy `/api/embeddings` endpoint and normalizes the response into the same vector validation path. Readiness sends `keep_alive` to warm successfully checked models for the next rebuild/search workflow and is considered complete only after the runtime returns a finite vector with the expected dimension. Readiness distinguishes an unreachable runtime, a missing pulled model, timeout/load-in-progress/load-failed responses, malformed embedding responses, pulled-but-not-loadable models, and vector-dimension mismatches against repository settings. These checks are user-triggered and mocked in default tests.
 
 ## Evaluation
 
