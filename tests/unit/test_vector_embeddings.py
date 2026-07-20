@@ -278,6 +278,55 @@ def test_ollama_embedding_provider_reports_missing_runtime_or_model_guidance() -
     assert exc_info.value.readiness_status == "not_installed"
 
 
+def test_ollama_embedding_provider_reports_installed_model_that_is_not_loaded() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if str(request.url) == "http://ollama.test/api/tags":
+            return httpx.Response(
+                200,
+                json={"models": [{"name": "qwen3-embedding:8b"}]},
+                request=request,
+            )
+        return httpx.Response(404, json={"error": "loading"}, request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = OllamaEmbeddingProvider(
+        "http://ollama.test",
+        "qwen3-embedding:8b",
+        client=client,
+    )
+
+    with pytest.raises(OllamaEmbeddingError, match="installed") as exc_info:
+        provider.embed(["alpha"])
+
+    assert calls == [
+        "http://ollama.test/api/embed",
+        "http://ollama.test/api/embeddings",
+        "http://ollama.test/api/tags",
+    ]
+    assert exc_info.value.readiness_status == "failed"
+    assert "loading" in str(exc_info.value)
+
+
+def test_ollama_embedding_provider_reports_timeout_as_incomplete_load() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("load still running", request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = OllamaEmbeddingProvider(
+        "http://ollama.test",
+        "qwen3-embedding:8b",
+        client=client,
+    )
+
+    with pytest.raises(OllamaEmbeddingError, match="did not finish loading") as exc_info:
+        provider.embed(["alpha"])
+
+    assert exc_info.value.readiness_status == "failed"
+
+
 def test_ollama_embedding_provider_reports_connection_guidance() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused", request=request)

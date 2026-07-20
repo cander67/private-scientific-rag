@@ -50,9 +50,9 @@ ollama pull embeddinggemma:300m
 ollama pull qwen3-embedding:8b
 ```
 
-Pulling a model installs the model files; it does not guarantee the model is already loaded into the Ollama runtime. The first readiness check or vector rebuild still has to load the model into memory. Settings / Models sends `keep_alive` with Ollama embedding smoke checks so a successful check warms the model for the next workflow, and vector rebuilds use the same provider behavior.
+Pulling a model installs the model files; it does not guarantee the model is already loaded into the Ollama runtime. The first readiness check or vector rebuild still has to load the model into memory. Settings / Models sends `keep_alive` with Ollama embedding smoke checks so a successful check warms the model for the next workflow, and vector rebuilds use the same provider behavior. Readiness is considered complete only when Ollama returns an embedding vector with the expected dimension.
 
-Large embedding models can still fail after they are installed. `qwen3-embedding:8b` is a 4.7 GB Ollama model with a large context window and up to 4096 output dimensions, so Windows hosts may need more startup time and enough system RAM/VRAM for Ollama to load it. If readiness says the model failed rather than missing, check the Ollama runtime logs and host memory/VRAM before assuming the model name is wrong.
+Large embedding models can still fail after they are installed. `qwen3-embedding:8b` is a 4.7 GB Ollama model with a large context window and up to 4096 output dimensions, so Windows hosts may need more startup time and enough system RAM/VRAM for Ollama to load it. If readiness says the model failed or timed out rather than missing, wait and retry once, then check the Ollama runtime logs and host memory/VRAM before assuming the model name is wrong. If Ollama lists the model locally but the embedding endpoint still returns no vector, the app treats that as installed-but-not-loaded or load-failed, not as not installed.
 
 PowerShell:
 

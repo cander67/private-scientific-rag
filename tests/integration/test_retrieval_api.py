@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -358,6 +359,12 @@ def test_retrieval_history_keeps_five_recent_runs_per_repository() -> None:
         )
         assert response.status_code == 200
         run_ids.append(response.json()["run_id"])
+        if index == 0:
+            with session_factory() as session:
+                first_run = session.get(RetrievalRun, run_ids[0])
+                assert first_run is not None
+                first_run.created_at = datetime(2000, 1, 1, tzinfo=UTC)
+                session.commit()
 
     with session_factory() as session:
         retained = list(

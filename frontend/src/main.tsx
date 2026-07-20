@@ -5767,6 +5767,12 @@ function ChatWorkspace({
     (prompt) => prompt.id === settings.prompt.active_chat_prompt_id,
   );
   const chatDefaultModel = settings?.model.ollama_chat_model ?? "gemma3:4b";
+  const configuredEmbeddingModel = settings
+    ? `${settings.embedding.provider} / ${shortModelName(settings.embedding.model)}`
+    : "embedding unavailable";
+  const latestVectorModel = readiness?.vector.model
+    ? shortModelName(readiness.vector.model)
+    : "no vector index model yet";
 
   useEffect(() => {
     const thread = threadRef.current;
@@ -5913,6 +5919,11 @@ function ChatWorkspace({
               <ReadinessPill label="Vector" item={readiness?.vector ?? null} />
               <ReadinessPill label="Local model" item={readiness?.local_model ?? null} />
             </div>
+            <div className="chat-defaults-note chat-embedding-note">
+              <strong>Embedding for retrieval</strong>
+              <small>Configured: {configuredEmbeddingModel}</small>
+              <small>Latest vector index: {latestVectorModel}</small>
+            </div>
             <div className="row chat-index-actions">
               <button
                 className="btn btn-sm"
@@ -5942,6 +5953,7 @@ function ChatWorkspace({
               <small>
                 Normal chat searches local repository context first with these chat-owned retrieval settings.
               </small>
+              <small>Retrieval embedding: {configuredEmbeddingModel}</small>
             </div>
           </div>
         </aside>

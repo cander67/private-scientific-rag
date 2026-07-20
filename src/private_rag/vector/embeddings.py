@@ -276,6 +276,13 @@ class OllamaEmbeddingProvider:
                 "but still fails, the runtime may be unable to load it into host RAM/VRAM.",
                 readiness_status="failed",
             ) from exc
+        except httpx.TimeoutException as exc:
+            raise OllamaEmbeddingError(
+                f"Ollama embedding model '{self._model_name}' did not finish loading before "
+                "the readiness timeout. If it is installed, wait and retry readiness, or "
+                "check Ollama logs and host RAM/VRAM before rebuilding vectors.",
+                readiness_status="failed",
+            ) from exc
         except httpx.RequestError as exc:
             raise OllamaEmbeddingError(
                 f"Ollama is not reachable at {self._base_url}. Start Ollama, then run "
@@ -319,6 +326,14 @@ class OllamaEmbeddingProvider:
             payload = response.json()
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
+                if self._ollama_model_is_installed(client):
+                    raise OllamaEmbeddingError(
+                        f"Ollama embedding model '{self._model_name}' is installed, but "
+                        "the runtime did not return embeddings yet. The model may still be "
+                        "loading or may be too large for available RAM/VRAM. Wait and retry "
+                        "readiness, or check the local Ollama logs.",
+                        readiness_status="failed",
+                    ) from exc
                 raise OllamaEmbeddingError(
                     f"Ollama embedding model '{self._model_name}' is not installed. "
                     f"Run `ollama pull {self._model_name}`.",
@@ -328,6 +343,13 @@ class OllamaEmbeddingProvider:
                 f"Ollama embedding request failed for model '{self._model_name}'. "
                 "Check the local Ollama logs and rerun readiness. If the model is pulled "
                 "but still fails, the runtime may be unable to load it into host RAM/VRAM.",
+                readiness_status="failed",
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise OllamaEmbeddingError(
+                f"Ollama embedding model '{self._model_name}' did not finish loading before "
+                "the readiness timeout. If it is installed, wait and retry readiness, or "
+                "check Ollama logs and host RAM/VRAM before rebuilding vectors.",
                 readiness_status="failed",
             ) from exc
         except httpx.RequestError as exc:
@@ -343,6 +365,21 @@ class OllamaEmbeddingProvider:
         if not isinstance(payload, dict):
             raise RuntimeError("Ollama returned an unexpected response body.")
         return payload
+
+    def _ollama_model_is_installed(self, client: httpx.Client) -> bool:
+        try:
+            response = client.get(f"{self._base_url}/api/tags")
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError):
+            return False
+        if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+            return False
+        return any(
+            _ollama_model_names_match(self._model_name, item.get("name"))
+            for item in payload["models"]
+            if isinstance(item, dict)
+        )
 
     def _coerce_vector(self, raw_vector: object) -> list[float]:
         if not isinstance(raw_vector, list):
@@ -360,6 +397,16 @@ class OllamaEmbeddingProvider:
                 )
             vector.append(numeric_value)
         return vector
+
+
+def _ollama_model_names_match(expected: str, actual: object) -> bool:
+    if not isinstance(actual, str):
+        return False
+    if actual == expected:
+        return True
+    if f"{expected}:latest" == actual:
+        return True
+    return expected.endswith(":latest") and expected.removesuffix(":latest") == actual
 
 
 class DeterministicEmbeddingProvider:

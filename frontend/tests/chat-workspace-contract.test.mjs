@@ -56,6 +56,10 @@ test("Chat Workspace exposes retrieval readiness and explicit rebuild controls",
   assert.match(source, /Last checked/);
   assert.match(source, /Checking indexes and local model/);
   assert.match(source, /searches local repository context first/);
+  assert.match(source, /Embedding for retrieval/);
+  assert.match(source, /Configured: \{configuredEmbeddingModel\}/);
+  assert.match(source, /Latest vector index: \{latestVectorModel\}/);
+  assert.match(source, /Retrieval embedding: \{configuredEmbeddingModel\}/);
 });
 
 test("Chat Workspace supports thinking state and session deletion", () => {
