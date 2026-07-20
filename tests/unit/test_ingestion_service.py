@@ -12,6 +12,7 @@ from private_rag.core.settings import Settings
 from private_rag.db.base import Base
 from private_rag.ingestion import service as ingestion_service
 from private_rag.ingestion.models import Document
+from private_rag.ingestion.parser import ParserExecutionSettings
 from private_rag.ingestion.schemas import ParsedDocument, ParsedSegment
 from private_rag.ingestion.service import (
     _chunk_parsed_document,
@@ -24,6 +25,8 @@ from private_rag.ingestion.service import (
     reprocess_document,
     upload_document,
 )
+from private_rag.repositories.models import Repository
+from private_rag.repositories.schemas import RepositorySettings
 from private_rag.repositories.service import ensure_default_repository
 
 
@@ -161,7 +164,12 @@ def test_upload_parser_exception_creates_failed_inspectable_version(
     session = next(_session())
     repository_id = _repository_id(session, tmp_path)
 
-    def broken_parser(filename: str, content_type: str | None, data: bytes) -> ParsedDocument:
+    def broken_parser(
+        filename: str,
+        content_type: str | None,
+        data: bytes,
+        **kwargs: object,
+    ) -> ParsedDocument:
         raise RuntimeError("parser boom")
 
     monkeypatch.setattr(ingestion_service, "parse_source", broken_parser)
@@ -247,3 +255,70 @@ def test_helper_storage_and_chunk_edges(tmp_path: Path) -> None:
     assert blank_chunks == []
     assert len(coalesced) >= 2
     assert coalesced[-1].metadata["sections"] == ["B"]
+
+
+def test_upload_uses_repository_parser_settings_and_records_fingerprint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    repository = session.get(Repository, repository_id)
+    assert repository is not None
+    assert repository.settings is not None
+    repository_settings = RepositorySettings.model_validate(repository.settings.settings)
+    repository_settings.parser.structured_parser = "pymupdf"
+    repository_settings.parser.fallback_parser = "built_in_fallback"
+    repository.settings.settings = repository_settings.model_dump(mode="json")
+    session.add(repository.settings)
+    session.commit()
+
+    def fake_parser(
+        filename: str,
+        content_type: str | None,
+        data: bytes,
+        **kwargs: object,
+    ) -> ParsedDocument:
+        parser_settings = kwargs["parser_settings"]
+        assert isinstance(parser_settings, ParserExecutionSettings)
+        assert parser_settings.structured_parser == "pymupdf"
+        assert parser_settings.fallback_parser == "built_in_fallback"
+        return ParsedDocument(
+            source_type="text",
+            text="Abstract\nrepository settings reached the parser",
+            parser_name="pymupdf",
+            parser_version="test",
+            segments=[ParsedSegment(text="repository settings reached the parser")],
+            metadata={
+                "parser_route": ["pymupdf"],
+                "parser_settings": {
+                    "structured_parser": "pymupdf",
+                    "fallback_parser": "built_in_fallback",
+                },
+                "parser_package_versions": {"pymupdf": "test"},
+                "parser_quality_thresholds": {"min_text_length": 80},
+            },
+        )
+
+    monkeypatch.setattr(ingestion_service, "parse_source", fake_parser)
+
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "paper.txt",
+        "text/plain",
+        b"Abstract\nrepository settings reached the parser",
+        settings=Settings(data_dir=tmp_path),
+    )
+
+    assert uploaded is not None
+    fingerprint = uploaded.version.metadata["parser_fingerprint"]
+    payload = uploaded.version.metadata["parser_fingerprint_payload"]
+    assert len(fingerprint) == 64
+    assert payload["parser"] == {
+        "structured_parser": "pymupdf",
+        "fallback_parser": "built_in_fallback",
+    }
+    assert payload["source_hash"] == uploaded.version.sha256
+    assert uploaded.chunks_preview[0].metadata["parser_fingerprint"] == fingerprint
+    assert uploaded.chunks_preview[0].metadata["parser_route"] == ["pymupdf"]

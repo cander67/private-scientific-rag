@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
 from collections.abc import Iterable
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from private_rag.core.settings import Settings, get_settings
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
-from private_rag.ingestion.parser import detect_source_type, parse_source
+from private_rag.ingestion.parser import ParserExecutionSettings, detect_source_type, parse_source
 from private_rag.ingestion.schemas import (
     DocumentChunkRead,
     DocumentInspection,
@@ -54,9 +55,14 @@ def upload_document(
 
     app_settings = settings or get_settings()
     storage_path = _write_source_file(repository_id, filename, digest, data, app_settings)
-    parsed = _parse_document_safely(filename, content_type, data)
-    _attach_annotation_pair_metadata(session, repository_id, filename, parsed)
     repository_settings = RepositorySettings.model_validate(repository.settings.settings)
+    parsed = _parse_document_safely(filename, content_type, data, repository_settings)
+    _attach_annotation_pair_metadata(session, repository_id, filename, parsed)
+    _attach_parser_fingerprint(
+        parsed=parsed,
+        repository_settings=repository_settings,
+        source_hash=digest,
+    )
 
     document = Document(repository_id=repository_id, display_name=filename)
     session.add(document)
@@ -168,12 +174,22 @@ def reprocess_document(
         return inspect_document(session, repository_id, document_id)
 
     data = source_path.read_bytes()
-    parsed = _parse_document_safely(version.original_filename, version.content_type, data)
-    _attach_annotation_pair_metadata(session, repository_id, version.original_filename, parsed)
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
         return None
     repository_settings = RepositorySettings.model_validate(repository.settings.settings)
+    parsed = _parse_document_safely(
+        version.original_filename,
+        version.content_type,
+        data,
+        repository_settings,
+    )
+    _attach_annotation_pair_metadata(session, repository_id, version.original_filename, parsed)
+    _attach_parser_fingerprint(
+        parsed=parsed,
+        repository_settings=repository_settings,
+        source_hash=version.sha256,
+    )
 
     session.query(DocumentChunk).filter(DocumentChunk.document_version_id == version.id).delete(
         synchronize_session=False
@@ -263,9 +279,16 @@ def _parse_document_safely(
     filename: str,
     content_type: str | None,
     data: bytes,
+    repository_settings: RepositorySettings | None = None,
 ) -> ParsedDocument:
     try:
-        return parse_source(filename, content_type, data)
+        parser_settings = None
+        if repository_settings is not None:
+            parser_settings = ParserExecutionSettings(
+                structured_parser=repository_settings.parser.structured_parser,
+                fallback_parser=repository_settings.parser.fallback_parser,
+            )
+        return parse_source(filename, content_type, data, parser_settings=parser_settings)
     except Exception as exc:
         return ParsedDocument(
             source_type=detect_source_type(filename, content_type),
@@ -275,6 +298,35 @@ def _parse_document_safely(
             warnings=[f"Parsing failed: {type(exc).__name__}: {exc}"],
             metadata={"parse_error": type(exc).__name__},
         )
+
+
+def _attach_parser_fingerprint(
+    parsed: ParsedDocument,
+    repository_settings: RepositorySettings,
+    source_hash: str,
+) -> None:
+    payload = _parser_fingerprint_payload(
+        parsed=parsed,
+        repository_settings=repository_settings,
+        source_hash=source_hash,
+    )
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    parsed.metadata["parser_fingerprint"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    parsed.metadata["parser_fingerprint_payload"] = payload
+
+
+def _parser_fingerprint_payload(
+    parsed: ParsedDocument,
+    repository_settings: RepositorySettings,
+    source_hash: str,
+) -> dict[str, object]:
+    return {
+        "parser": repository_settings.parser.model_dump(mode="json"),
+        "parser_package_versions": parsed.metadata.get("parser_package_versions", {}),
+        "parser_quality_thresholds": parsed.metadata.get("parser_quality_thresholds", {}),
+        "source_hash": source_hash,
+        "chunking": repository_settings.chunking.model_dump(mode="json"),
+    }
 
 
 def _status_for_parsed_document(parsed: ParsedDocument) -> DocumentStatus:
@@ -483,6 +535,11 @@ def _chunk_parsed_document(
                     **segment.metadata,
                     "source_hash": source_hash,
                     "source_type": parsed.source_type,
+                    "parser_name": parsed.parser_name,
+                    "parser_route": parsed.metadata.get("parser_route")
+                    or parsed.metadata.get("parser_chain", []),
+                    "parser_settings": parsed.metadata.get("parser_settings", {}),
+                    "parser_fingerprint": parsed.metadata.get("parser_fingerprint", ""),
                 },
             )
         )

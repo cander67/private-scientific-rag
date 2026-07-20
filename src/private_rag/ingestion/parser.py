@@ -12,6 +12,9 @@ from private_rag.ingestion.schemas import ParsedDocument, ParsedSegment, SourceT
 BUILT_IN_PARSER_NAME = "private-rag-built-in"
 BUILT_IN_PARSER_VERSION = "prd3-v1"
 PDF_MIN_TEXT_LENGTH = 80
+PDF_QUALITY_THRESHOLDS = {
+    "min_text_length": PDF_MIN_TEXT_LENGTH,
+}
 
 _PATENT_SECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("abstract", re.compile(r"\babstract\b", re.IGNORECASE)),
@@ -38,10 +41,21 @@ def detect_source_type(filename: str, content_type: str | None) -> SourceType:
     return "text"
 
 
-def parse_source(filename: str, content_type: str | None, data: bytes) -> ParsedDocument:
+@dataclass(frozen=True)
+class ParserExecutionSettings:
+    structured_parser: str = "auto"
+    fallback_parser: str = "auto"
+
+
+def parse_source(
+    filename: str,
+    content_type: str | None,
+    data: bytes,
+    parser_settings: ParserExecutionSettings | None = None,
+) -> ParsedDocument:
     source_type = detect_source_type(filename, content_type)
     if source_type == "pdf":
-        return _parse_pdf(data)
+        return _parse_pdf(data, parser_settings or ParserExecutionSettings())
     if source_type == "markdown":
         return _parse_markdown(data)
     if source_type == "annotation":
@@ -49,8 +63,8 @@ def parse_source(filename: str, content_type: str | None, data: bytes) -> Parsed
     return _parse_text(data)
 
 
-def _parse_pdf(data: bytes) -> ParsedDocument:
-    result = _extract_pdf_with_parser_chain(data)
+def _parse_pdf(data: bytes, parser_settings: ParserExecutionSettings) -> ParsedDocument:
+    result = _extract_pdf_with_parser_chain(data, parser_settings)
     text = result.text
     page_count = max(1, len(re.findall(rb"/Type\s*/Page\b", data)))
     if result.page_count is not None:
@@ -71,6 +85,13 @@ def _parse_pdf(data: bytes) -> ParsedDocument:
         "page_images_available": True,
         "patent_section_hints": patent_sections,
         "parser_chain": result.parser_chain,
+        "parser_route": result.parser_chain,
+        "parser_settings": {
+            "structured_parser": parser_settings.structured_parser,
+            "fallback_parser": parser_settings.fallback_parser,
+        },
+        "parser_package_versions": parser_package_versions(),
+        "parser_quality_thresholds": PDF_QUALITY_THRESHOLDS,
         "structure_hints": structure_hints,
     }
     if patent_sections:
@@ -167,7 +188,17 @@ def _decode(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def _extract_pdf_with_parser_chain(data: bytes) -> PdfExtractionResult:
+def _extract_pdf_with_parser_chain(
+    data: bytes,
+    parser_settings: ParserExecutionSettings | None = None,
+) -> PdfExtractionResult:
+    settings = parser_settings or ParserExecutionSettings()
+    if settings.structured_parser != "auto":
+        return _extract_pdf_with_explicit_route(data, settings)
+    return _extract_pdf_with_auto_chain(data)
+
+
+def _extract_pdf_with_auto_chain(data: bytes) -> PdfExtractionResult:
     failures: list[str] = []
     pypdf_result = _extract_with_pypdf(data)
     if pypdf_result.text.strip():
@@ -208,6 +239,87 @@ def _extract_pdf_with_parser_chain(data: bytes) -> PdfExtractionResult:
         parser_version=BUILT_IN_PARSER_VERSION,
         parser_chain=["pypdf", "pymupdf", "docling", "built_in_fallback"],
         warnings=failures,
+    )
+
+
+def _extract_pdf_with_explicit_route(
+    data: bytes,
+    parser_settings: ParserExecutionSettings,
+) -> PdfExtractionResult:
+    attempted: list[str] = []
+    failures: list[str] = []
+    primary = _extract_with_named_parser(data, parser_settings.structured_parser)
+    attempted.append(parser_settings.structured_parser)
+    primary.parser_chain = [*attempted]
+    if primary.text.strip():
+        return primary
+    failures.extend(primary.warnings)
+
+    fallback = parser_settings.fallback_parser
+    if fallback == "auto":
+        auto_result = _extract_pdf_with_auto_chain(data)
+        auto_attempts = [name for name in auto_result.parser_chain if name not in attempted]
+        auto_result.parser_chain = [*attempted, *auto_attempts]
+        auto_result.warnings = [*failures, *auto_result.warnings]
+        return auto_result
+
+    if fallback == "needs_ocr":
+        return PdfExtractionResult(
+            text="",
+            parser_name=BUILT_IN_PARSER_NAME,
+            parser_version=BUILT_IN_PARSER_VERSION,
+            parser_chain=[*attempted, fallback],
+            warnings=[
+                *failures,
+                "Fallback parser routed this PDF to OCR inspection without running OCR.",
+            ],
+        )
+
+    if fallback in {"ocrmypdf_tesseract", "rapidocr"}:
+        return PdfExtractionResult(
+            text="",
+            parser_name=BUILT_IN_PARSER_NAME,
+            parser_version=BUILT_IN_PARSER_VERSION,
+            parser_chain=[*attempted, fallback],
+            warnings=[
+                *failures,
+                f"{fallback} is an OCR provider and is not available during ordinary ingestion.",
+            ],
+        )
+
+    if fallback == parser_settings.structured_parser:
+        return PdfExtractionResult(
+            text="",
+            parser_name=primary.parser_name,
+            parser_version=primary.parser_version,
+            parser_chain=attempted,
+            page_count=primary.page_count,
+            warnings=failures,
+        )
+
+    fallback_result = _extract_with_named_parser(data, fallback)
+    fallback_result.parser_chain = [*attempted, fallback]
+    fallback_result.warnings = [*failures, *fallback_result.warnings]
+    return fallback_result
+
+
+def _extract_with_named_parser(data: bytes, parser_name: str) -> PdfExtractionResult:
+    if parser_name == "pypdf":
+        return _extract_with_pypdf(data)
+    if parser_name == "pymupdf":
+        return _extract_with_pymupdf(data)
+    if parser_name == "docling":
+        return _extract_with_docling(data)
+    if parser_name == "pdfplumber":
+        return _extract_with_pdfplumber(data)
+    if parser_name == "built_in_fallback":
+        return _extract_with_built_in_pdf_fallback(data)
+    return PdfExtractionResult(
+        text="",
+        parser_name=parser_name,
+        parser_version="unknown",
+        parser_chain=[parser_name],
+        warnings=[f"Unsupported parser route requested: {parser_name}."],
     )
 
 
@@ -254,6 +366,35 @@ def _extract_with_docling(data: bytes) -> PdfExtractionResult:
             parser_version=parser_version,
             parser_chain=["pypdf", "pymupdf", parser_name],
             page_count=_page_count_from_docling_document(document),
+            segments=segments,
+        )
+    except Exception as exc:
+        return _pdf_parser_failure(parser_name, parser_version, exc)
+
+
+def _extract_with_pdfplumber(data: bytes) -> PdfExtractionResult:
+    parser_name = "pdfplumber"
+    parser_version = _package_version(parser_name)
+    try:
+        import pdfplumber
+    except Exception as exc:
+        return _pdf_parser_failure(parser_name, parser_version, exc)
+
+    try:
+        pages: list[tuple[int, str]] = []
+        with pdfplumber.open(BytesIO(data)) as pdf:
+            for page_index, page in enumerate(pdf.pages, start=1):
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    pages.append((page_index, page_text))
+            page_count = len(pdf.pages)
+        segments = _segments_from_page_text(pages)
+        return PdfExtractionResult(
+            text="\n".join(page_text.strip() for _, page_text in pages),
+            parser_name=parser_name,
+            parser_version=parser_version,
+            parser_chain=[parser_name],
+            page_count=page_count,
             segments=segments,
         )
     except Exception as exc:
@@ -388,6 +529,16 @@ def _package_version(package_name: str) -> str:
         return version(package_name)
     except PackageNotFoundError:
         return "not-installed"
+
+
+def parser_package_versions() -> dict[str, str]:
+    return {
+        "pypdf": _package_version("pypdf"),
+        "pymupdf": _package_version("pymupdf"),
+        "docling": _package_version("docling"),
+        "pdfplumber": _package_version("pdfplumber"),
+        "private-rag-built-in": BUILT_IN_PARSER_VERSION,
+    }
 
 
 def _extract_pdf_text(data: bytes) -> str:
