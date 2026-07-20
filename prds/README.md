@@ -31,7 +31,7 @@ Current status:
 - Backlog: PRD25 chat context inspection.
 - Ready for review: PRD26 repository loading and parser controls.
 
-PRD23 is ready for final review after catalog guardrails and user-testing remediation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional live Ollama/Qdrant/GPU checks remain explicit manual checks. PRD26 is ready for review with repository-switch loading states and catalog-backed parser controls; PRD25 remains backlog follow-up work.
+PRD23 is ready for final review after catalog guardrails and user-testing remediation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional live Ollama/Qdrant/GPU checks remain explicit manual checks. PRD26 is ready for review with repository-switch loading states and catalog-backed parser controls; operational parser routing during upload/reprocess and stale parser/chunk index freshness are assigned to PRD13. PRD25 remains backlog follow-up work.
 
 The remaining backlog should be prioritized from hands-on use of the current app, adjusting order when a later PRD is needed to unblock an earlier one.
 
