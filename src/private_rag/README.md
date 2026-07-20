@@ -14,7 +14,7 @@ Module boundaries:
 - `chat/`: local Ollama chat boundary, model registry metadata, chat session/message persistence, RAG prompt assembly, readiness checks, and citation mapping.
 - `exports/`: portable repository ZIP bundle schemas and export assembly.
 - `services/`: local service checks and future domain services.
-- `ingestion/`: document upload models, PDF parser fallback chain, parser/chunker service, source file storage, and provenance schemas.
+- `ingestion/`: document upload models, repository-scoped PDF parser routing, parser/chunker service, source file storage, and provenance schemas.
 - Ingestion keeps original source files, parsed artifacts, chunks, and provenance metadata distinct.
 
 Current API surface:
@@ -65,6 +65,7 @@ Current status:
 - PRD1 foundation is complete.
 - PRD2 repository-aware settings and reproducibility are complete.
 - PRD3 local document ingestion and source inspection are complete.
+- PRD13 parser selection, OCR, and page-image text recovery is in progress: upload/reprocess now honor repository parser settings for parser routing and record parser route/fingerprint metadata; OCR execution remains deferred to later PRD13 phases.
 - PRD4 full-text search is complete: sparse index rebuild, full-text query API, metadata filters, exact-match evaluation, and frontend Search Lab are available.
 - PRD5 vector search with Qdrant is complete: latest-index rebuild, vector query API, metadata filters, embedding run metadata, deterministic CI tests, semantic recall evaluation, and frontend Search Lab vector mode are available.
 - PRD15 additional embedding models is complete and closed: the embedding registry supports MiniLM, mpnet, EmbeddingGemma, and Qwen embedding models; vector rebuild/search report provider/model metadata; generic Ollama embeddings validate dimensions before rebuild; and deterministic evaluation can compare supported embedding models while reporting unavailable live models as skipped.
@@ -90,4 +91,4 @@ Repository Dashboard summaries are read-mostly. The summary endpoint scopes all 
 
 The default cross-encoder is `cross-encoder/ms-marco-MiniLM-L6-v2`. It must be downloaded into the local SentenceTransformers cache before live reranking; a missing model returns setup guidance instead of silently falling back. Diversity/MMR remains a future strategy. Default CI uses deterministic providers, while real Qdrant and cross-encoder checks are explicit opt-in tests documented in `tests/README.md`.
 
-PDF parsing tries `pypdf`, then PyMuPDF, gates image-only/no-native-text pages as `needs_ocr`, then uses Docling and a conservative built-in fallback for remaining non-image PDFs. PRD3 intentionally does not run a full OCR pipeline; PRD13 owns OCRmyPDF/Tesseract and fallback OCR. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12. More precise result-label metadata scoping is deferred to PRD17.
+PDF parsing uses repository parser settings during upload/reprocess. The `Auto` route preserves the PRD3 chain: `pypdf`, PyMuPDF, the `needs_ocr` gate for image-only/no-native-text pages, Docling, then a conservative built-in fallback. Explicit pypdf, PyMuPDF, Docling, pdfplumber, and built-in choices run the selected parser first and record the actual parser route, package versions where available, quality thresholds, source hash, chunking settings, and a stable parser fingerprint on document-version and chunk metadata. PRD13 later phases own OCRmyPDF/Tesseract execution, RapidOCR fallback, stale-index gates, and richer Source Viewer OCR inspection. Bulk patent-data feeds and multi-jurisdiction patent parsing are deferred to PRD12. More precise result-label metadata scoping is deferred to PRD17.

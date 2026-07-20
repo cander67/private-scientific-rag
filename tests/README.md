@@ -9,6 +9,8 @@ Live tests that require local services or models use the `live` marker and do no
 
 PRD3 ingestion/source-inspection coverage is complete. Default CI does not read from `documents/golden_corpus/`; that directory is local/manual evaluation material. Tests use committed fixtures in `tests/fixtures/ingestion/` plus generated miniature PDFs for text-layer and image-only OCR-gate behavior. Larger files in `documents/golden_corpus/pdf/` and `documents/golden_corpus/ocr/` are useful for local/manual parser checks and future OCR work, but should not be default CI prerequisites unless they are intentionally copied into `tests/fixtures/` with redistribution approval.
 
+PRD13 parser-selection coverage is in progress. Phase 1 default tests cover `Auto` preserving the PRD3 parser chain, explicit parser routing for selected structured parsers, dependency-missing fallback warnings, repository parser settings reaching upload, and parser fingerprint metadata recorded on document versions and chunks. OCR provider execution and golden-corpus OCR checks remain later, opt-in PRD13 work.
+
 PRD4 full-text search coverage includes unit tests for FTS query normalization and field weights, API integration coverage for rebuilding a repository index and searching citation-ready chunk results, metadata filter coverage, repository settings snapshot coverage, and CI exact-match recall evaluation.
 
 Exact-match search fixtures live in `tests/fixtures/search/`. They cover formulas, abbreviations, identifiers, patent terms, and section headings, and require `recall@5` and `recall@10` to remain at `1.0` for the committed fixture set.
