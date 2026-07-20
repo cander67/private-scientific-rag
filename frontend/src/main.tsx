@@ -479,6 +479,14 @@ type DocumentVersion = {
   created_at: string;
 };
 
+type ReprocessStatus = {
+  status: "current" | "stale" | "source_missing" | "unknown";
+  stale: boolean;
+  reprocess_available: boolean;
+  message: string;
+  changed_fields: string[];
+};
+
 type DocumentSummary = {
   id: string;
   display_name: string;
@@ -2833,6 +2841,11 @@ function App() {
                                           )}`
                                         : "No parsed version"}
                                     </div>
+                                    {document.current_version && (
+                                      <div className="muted table-sub">
+                                        {reprocessStatusLabel(document.current_version)}
+                                      </div>
+                                    )}
                                   </td>
                                   <td>
                                     <StatusBadge status={document.current_version?.status ?? "failed"} />
@@ -3020,6 +3033,8 @@ function App() {
                         </dd>
                         <dt>parser</dt>
                         <dd>{inspection.version.parser_version}</dd>
+                        <dt>reprocess</dt>
+                        <dd>{reprocessStatusLabel(inspection.version)}</dd>
                         <dt>source hash</dt>
                         <dd>{shortHash(selectedChunk.source_hash)}</dd>
                         <dt>offsets</dt>
@@ -3039,6 +3054,8 @@ function App() {
                         <dd>{inspection.version.status}</dd>
                         <dt>parser</dt>
                         <dd>{inspection.version.parser_version}</dd>
+                        <dt>reprocess</dt>
+                        <dd>{reprocessStatusLabel(inspection.version)}</dd>
                         <dt>source hash</dt>
                         <dd>{shortHash(inspection.version.sha256)}</dd>
                         <dt>source type</dt>
@@ -6783,6 +6800,8 @@ function SelectedDocumentCard({
         <dd>{version.chunk_count}</dd>
         <dt>Parser</dt>
         <dd>{version.parser_version}</dd>
+        <dt>Reprocess</dt>
+        <dd>{reprocessStatusLabel(version)}</dd>
         <dt>Hash</dt>
         <dd>{shortHash(version.sha256)}</dd>
       </dl>
@@ -6827,6 +6846,13 @@ function StatusBadge({ status }: { status: DocumentVersion["status"] }) {
 }
 
 function versionSummary(version: DocumentVersion) {
+  const reprocessStatus = getReprocessStatus(version);
+  if (reprocessStatus?.status === "stale") {
+    return reprocessStatus.message;
+  }
+  if (reprocessStatus?.status === "source_missing") {
+    return reprocessStatus.message;
+  }
   const hints = version.metadata.patent_section_hints;
   if (Array.isArray(hints) && hints.length > 0) {
     return `Patent PDF hints: ${hints.join(", ")}`;
@@ -6842,6 +6868,50 @@ function versionSummary(version: DocumentVersion) {
     return version.warnings.join(" ");
   }
   return `${version.parser_version} produced inspectable source chunks.`;
+}
+
+function getReprocessStatus(version: DocumentVersion): ReprocessStatus | null {
+  const status = version.metadata.reprocess_status;
+  if (!status || typeof status !== "object") {
+    return null;
+  }
+  const value = status as Partial<ReprocessStatus>;
+  if (
+    value.status !== "current" &&
+    value.status !== "stale" &&
+    value.status !== "source_missing" &&
+    value.status !== "unknown"
+  ) {
+    return null;
+  }
+  return {
+    status: value.status,
+    stale: Boolean(value.stale),
+    reprocess_available: Boolean(value.reprocess_available),
+    message: typeof value.message === "string" ? value.message : "",
+    changed_fields: Array.isArray(value.changed_fields)
+      ? value.changed_fields.filter((field): field is string => typeof field === "string")
+      : [],
+  };
+}
+
+function reprocessStatusLabel(version: DocumentVersion) {
+  const status = getReprocessStatus(version);
+  if (!status) {
+    return "Reprocess status unknown";
+  }
+  if (status.status === "stale") {
+    return status.changed_fields.length > 0
+      ? `Stale: ${status.changed_fields.join(", ")}`
+      : "Stale";
+  }
+  if (status.status === "source_missing") {
+    return "Source missing";
+  }
+  if (status.status === "unknown") {
+    return "Status unknown";
+  }
+  return "Current";
 }
 
 function absoluteApiUrl(path: string) {

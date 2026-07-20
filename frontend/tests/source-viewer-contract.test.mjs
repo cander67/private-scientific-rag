@@ -27,6 +27,16 @@ test("Source Viewer keeps PRD3 document actions and provenance visible", () => {
   assert.match(source, /Source structure hints/);
 });
 
+test("Document Manager and Source Viewer expose parser reprocess status", () => {
+  assert.match(source, /type ReprocessStatus =/);
+  assert.match(source, /metadata\.reprocess_status/);
+  assert.match(source, /function getReprocessStatus/);
+  assert.match(source, /function reprocessStatusLabel/);
+  assert.match(source, /Stale: \$\{status\.changed_fields\.join/);
+  assert.match(source, /<dt>Reprocess<\/dt>/);
+  assert.match(source, /<dt>reprocess<\/dt>/);
+});
+
 test("Document Manager and Source Viewer render as separate live views", () => {
   assert.match(source, /activeView === "documents"/);
   assert.match(source, /activeView === "source"/);
