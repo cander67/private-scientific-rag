@@ -169,6 +169,46 @@ def test_ollama_embedding_provider_posts_batched_input_and_validates_vectors() -
     assert provider.vector_size == 3
 
 
+def test_ollama_embedding_provider_falls_back_to_legacy_embeddings_endpoint() -> None:
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        calls.append({"url": str(request.url), "payload": payload})
+        if str(request.url) == "http://ollama.test/api/embed":
+            return httpx.Response(404, json={"error": "not found"}, request=request)
+        legacy_vectors = {
+            "alpha": [0.0, 1.0, 2.0],
+            "beta": [3.0, 4.0, 5.0],
+        }
+        return httpx.Response(200, json={"embedding": legacy_vectors[payload["prompt"]]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = OllamaEmbeddingProvider(
+        "http://ollama.test",
+        "custom-embed:latest",
+        client=client,
+    )
+
+    vectors = provider.embed(["alpha", "beta"])
+
+    assert calls == [
+        {
+            "url": "http://ollama.test/api/embed",
+            "payload": {"model": "custom-embed:latest", "input": ["alpha", "beta"]},
+        },
+        {
+            "url": "http://ollama.test/api/embeddings",
+            "payload": {"model": "custom-embed:latest", "prompt": "alpha"},
+        },
+        {
+            "url": "http://ollama.test/api/embeddings",
+            "payload": {"model": "custom-embed:latest", "prompt": "beta"},
+        },
+    ]
+    assert vectors == [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]
+
+
 def test_ollama_embedding_provider_reports_known_registry_vector_size_without_probe() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise AssertionError("known registry vector size should not require an HTTP probe")

@@ -158,9 +158,11 @@ class OllamaEmbeddingError(RuntimeError):
         message: str,
         *,
         readiness_status: str = "failed",
+        allow_legacy_fallback: bool = False,
     ) -> None:
         super().__init__(message)
         self.readiness_status = readiness_status
+        self.allow_legacy_fallback = allow_legacy_fallback
 
 
 class OllamaEmbeddingProvider:
@@ -226,9 +228,77 @@ class OllamaEmbeddingProvider:
         client = self._client or httpx.Client(timeout=self._timeout)
         close_client = self._client is None
         try:
+            try:
+                return self._post_current_embed(client, texts)
+            except OllamaEmbeddingError as exc:
+                if not exc.allow_legacy_fallback:
+                    raise
+            payload = self._post_legacy_embeddings(client, texts)
+        finally:
+            if close_client:
+                client.close()
+        if not isinstance(payload, dict):
+            raise RuntimeError("Ollama returned an unexpected response body.")
+        return payload
+
+    def _post_current_embed(
+        self,
+        client: httpx.Client,
+        texts: list[str],
+    ) -> dict[str, object]:
+        try:
             response = client.post(
                 f"{self._base_url}/api/embed",
                 json={"model": self._model_name, "input": texts},
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if status_code in {400, 404, 405}:
+                raise OllamaEmbeddingError(
+                    f"Ollama /api/embed is not compatible with model '{self._model_name}' "
+                    "from this runtime.",
+                    readiness_status="failed",
+                    allow_legacy_fallback=True,
+                ) from exc
+            raise OllamaEmbeddingError(
+                f"Ollama embedding request failed for model '{self._model_name}'. "
+                "Check the local Ollama logs and rerun readiness.",
+                readiness_status="failed",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise OllamaEmbeddingError(
+                f"Ollama is not reachable at {self._base_url}. Start Ollama, then run "
+                f"`ollama pull {self._model_name}` if needed.",
+                readiness_status="unavailable_runtime",
+            ) from exc
+        except ValueError as exc:
+            raise RuntimeError("Ollama returned an unexpected response body.") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("Ollama returned an unexpected response body.")
+        return payload
+
+    def _post_legacy_embeddings(
+        self,
+        client: httpx.Client,
+        texts: list[str],
+    ) -> dict[str, object]:
+        embeddings: list[object] = []
+        for text in texts:
+            payload = self._post_legacy_embedding(client, text)
+            embeddings.append(payload.get("embedding"))
+        return {"model": self._model_name, "embeddings": embeddings}
+
+    def _post_legacy_embedding(
+        self,
+        client: httpx.Client,
+        text: str,
+    ) -> dict[str, object]:
+        try:
+            response = client.post(
+                f"{self._base_url}/api/embeddings",
+                json={"model": self._model_name, "prompt": text},
             )
             response.raise_for_status()
             payload = response.json()
@@ -252,9 +322,6 @@ class OllamaEmbeddingProvider:
             ) from exc
         except ValueError as exc:
             raise RuntimeError("Ollama returned an unexpected response body.") from exc
-        finally:
-            if close_client:
-                client.close()
         if not isinstance(payload, dict):
             raise RuntimeError("Ollama returned an unexpected response body.")
         return payload

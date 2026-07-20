@@ -215,6 +215,34 @@ def test_readiness_checker_checks_ollama_embedding_with_configured_url() -> None
     assert "/api/embed" in result.message
 
 
+def test_readiness_checker_accepts_legacy_ollama_embedding_fallback() -> None:
+    urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        if str(request.url) == "http://windows-ollama.test/api/embed":
+            return httpx.Response(404, json={"error": "not found"}, request=request)
+        return httpx.Response(200, json={"embedding": [0.0, 1.0, 2.0]})
+
+    checker = LocalSettingsReadinessChecker(
+        ollama_embedding_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = checker.check_embedding(
+        provider="ollama",
+        model="custom-embed:latest",
+        expected_vector_size=3,
+        ollama_base_url="http://windows-ollama.test",
+    )
+
+    assert urls == [
+        "http://windows-ollama.test/api/embed",
+        "http://windows-ollama.test/api/embeddings",
+    ]
+    assert result.status == "ready"
+    assert result.ready is True
+
+
 def test_readiness_checker_reports_missing_ollama_embedding_model() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"error": "model not found"}, request=request)

@@ -83,6 +83,7 @@ Hands-on testing after the baseline implementation surfaced several model and do
 - Add `gemma4:e4b`, `gemma4:12b`, `qwen3.6`, and `qwen3.5:9b` to the known Ollama chat model catalog with setup guidance and resource/context notes. Treat them as ordinary Ollama `/api/chat` models unless future testing proves they need model-specific prompting.
 - Keep chat retrieval defaults local and repository-grounded. Improve UI/docs copy rather than changing the default path: new chat sessions should continue to use chat-owned retrieval settings with hybrid retrieval by default.
 - Extend Settings / Models readiness so Ollama embedding models are checked through the configured Ollama base URL and `/api/embed`, including vector-dimension validation against repository settings.
+- Retry Ollama embedding readiness through the legacy `/api/embeddings` endpoint when a Windows or older local Ollama runtime cannot serve the current `/api/embed` endpoint, while keeping `/api/embed` as the preferred path.
 - Distinguish unavailable Ollama runtime, missing model, failed embedding response, and dimension mismatch in readiness messages.
 - Add a SentenceTransformers device policy for embeddings and reranker-adjacent docs: prefer GPU/MPS/CUDA when available and configured for automatic acceleration, then fall back to CPU when no supported accelerator is available or when an accelerator load fails safely.
 - Do not make GPU a required dependency for default CI or local setup. Default tests should continue to mock live model/runtime boundaries.

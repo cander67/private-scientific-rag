@@ -68,11 +68,11 @@ The repository-scoped Settings / Models screen remains the source of truth for a
 
 ## Custom Ollama Embedding Models
 
-Known models should be added as `EmbeddingModelMetadata` entries in `src/private_rag/vector/model_registry.py`. Add the provider, model name, label, vector size, supported distances, resource notes, setup hint, and local-model requirement. No new provider class is needed for a normal Ollama embedding model because the generic Ollama provider sends the configured model name to `/api/embed`.
+Known models should be added as `EmbeddingModelMetadata` entries in `src/private_rag/vector/model_registry.py`. Add the provider, model name, label, vector size, supported distances, resource notes, setup hint, and local-model requirement. No new provider class is needed for a normal Ollama embedding model because the generic Ollama provider sends the configured model name to `/api/embed`, then falls back to the legacy `/api/embeddings` endpoint when a local runtime does not support the current batched endpoint.
 
 Unknown Ollama embedding model names are treated as advanced local entries. They can be used only when the runtime supports embeddings and a live dimension probe succeeds before rebuild. Unknown models are compatibility-checked, but they are not quality-vetted by PRD15.
 
-Settings / Models readiness checks Ollama embedding models through the configured `PRIVATE_RAG_OLLAMA_BASE_URL` and Ollama's `/api/embed` endpoint. Readiness distinguishes an unreachable runtime, a missing pulled model, malformed or failed embedding responses, and vector-dimension mismatches against repository settings. These checks are user-triggered and mocked in default tests.
+Settings / Models readiness checks Ollama embedding models through the configured `PRIVATE_RAG_OLLAMA_BASE_URL` and Ollama's `/api/embed` endpoint first. If that endpoint is unavailable or incompatible, the check retries through the legacy `/api/embeddings` endpoint and normalizes the response into the same vector validation path. Readiness distinguishes an unreachable runtime, a missing pulled model, malformed or failed embedding responses, and vector-dimension mismatches against repository settings. These checks are user-triggered and mocked in default tests.
 
 ## Evaluation
 
