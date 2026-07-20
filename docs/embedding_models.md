@@ -10,6 +10,12 @@ Ollama embedding models run through the local Ollama service configured by `PRIV
 
 Default CI does not download embedding models or require Ollama. Tests use deterministic fake embeddings and mocked Ollama responses unless a maintainer explicitly opts into live checks.
 
+## Device Behavior
+
+MiniLM is not inherently CPU-only. It is a SentenceTransformers model, so it can run on CPU or on an accelerator supported by the local PyTorch/SentenceTransformers install. PRD23 user-testing remediation should make this explicit in the app: prefer GPU acceleration when available and configured, then fall back to CPU when no supported accelerator is available or when the accelerator path cannot be used safely.
+
+The fallback rule is important for portability. A repository that works on a GPU workstation should still rebuild vectors on a CPU-only Windows or laptop host, just more slowly. Default CI and ordinary readiness checks must not require GPU hardware.
+
 ## Supported Models
 
 | Provider | Model | Vector size | Distance metrics | Resource profile | Setup |
