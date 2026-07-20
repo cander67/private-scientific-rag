@@ -4,7 +4,7 @@ PRD15 expands vector search beyond the MiniLM baseline while keeping embeddings 
 
 ## Provider Tradeoffs
 
-SentenceTransformers models run inside the Python process. They are simple to use for CPU-first local search, integrate with the existing deterministic test boundary, and can support cosine, dot, or Euclidean distance when the model settings declare those metrics. The tradeoff is that model files must be available in the local SentenceTransformers cache before live rebuilds, and larger models increase local memory and indexing time.
+SentenceTransformers models run inside the Python process. They use automatic device selection by default: CUDA when available, otherwise MPS when available, otherwise CPU. If an automatically selected accelerator cannot load the model safely, the provider retries on CPU so the repository remains portable across GPU workstations, CPU-only laptops, Windows-native Python, and Linux hosts. They integrate with the existing deterministic test boundary and can support cosine, dot, or Euclidean distance when the model settings declare those metrics. The tradeoff is that model files must be available in the local SentenceTransformers cache before live rebuilds, and larger models increase local memory and indexing time.
 
 Ollama embedding models run through the local Ollama service configured by `PRIVATE_RAG_OLLAMA_BASE_URL`. This keeps embedding downloads and runtime management aligned with the local chat model workflow. The tradeoff is an extra local service dependency: Ollama must be running, the model must be pulled, and the provider must return finite vectors with stable dimensions before rebuild continues. PRD15 supports known Ollama embedding models through one generic Ollama provider rather than one provider class per model.
 
@@ -12,7 +12,7 @@ Default CI does not download embedding models or require Ollama. Tests use deter
 
 ## Device Behavior
 
-MiniLM is not inherently CPU-only. It is a SentenceTransformers model, so it can run on CPU or on an accelerator supported by the local PyTorch/SentenceTransformers install. PRD23 user-testing remediation should make this explicit in the app: prefer GPU acceleration when available and configured, then fall back to CPU when no supported accelerator is available or when the accelerator path cannot be used safely.
+MiniLM is not inherently CPU-only. It is a SentenceTransformers model, so it can run on CPU or on an accelerator supported by the local PyTorch/SentenceTransformers install. The app prefers GPU acceleration when available through PyTorch CUDA or MPS, then falls back to CPU when no supported accelerator is available or when the accelerator path cannot be used safely.
 
 The fallback rule is important for portability. A repository that works on a GPU workstation should still rebuild vectors on a CPU-only Windows or laptop host, just more slowly. Default CI and ordinary readiness checks must not require GPU hardware.
 
@@ -71,6 +71,8 @@ The repository-scoped Settings / Models screen remains the source of truth for a
 Known models should be added as `EmbeddingModelMetadata` entries in `src/private_rag/vector/model_registry.py`. Add the provider, model name, label, vector size, supported distances, resource notes, setup hint, and local-model requirement. No new provider class is needed for a normal Ollama embedding model because the generic Ollama provider sends the configured model name to `/api/embed`.
 
 Unknown Ollama embedding model names are treated as advanced local entries. They can be used only when the runtime supports embeddings and a live dimension probe succeeds before rebuild. Unknown models are compatibility-checked, but they are not quality-vetted by PRD15.
+
+Settings / Models readiness checks Ollama embedding models through the configured `PRIVATE_RAG_OLLAMA_BASE_URL` and Ollama's `/api/embed` endpoint. Readiness distinguishes an unreachable runtime, a missing pulled model, malformed or failed embedding responses, and vector-dimension mismatches against repository settings. These checks are user-triggered and mocked in default tests.
 
 ## Evaluation
 

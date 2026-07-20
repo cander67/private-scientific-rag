@@ -1,6 +1,6 @@
 # PRD 23: Settings Model Catalog and Collection Guardrails
 
-**Status:** Open. Implemented baseline is ready for review; user-testing remediation is being planned under the current PRD.
+**Status:** Ready for review. Baseline catalog guardrails and user-testing remediation are implemented with deterministic checks passing; optional live Ollama/Qdrant/GPU checks remain opt-in.
 
 ## Problem Statement
 
