@@ -86,6 +86,24 @@ test("Settings / Models uses the PRD23 model catalog for chat and reranker choic
   assert.match(source, /Custom reranker model/);
 });
 
+test("Settings / Models renders catalog-backed parser choices", () => {
+  assert.match(source, /type ParserCatalogEntry =/);
+  assert.match(source, /parser_choices: ParserCatalogEntry\[\]/);
+  assert.match(source, /const parserCatalog = modelCatalog\?\.parser_choices \?\? defaultParserCatalog\(\)/);
+  assert.match(source, /const structuredParserChoices = parserCatalog\.filter/);
+  assert.match(source, /const fallbackParserChoices = parserCatalog\.filter/);
+  assert.match(source, /id="settings-structured-parser"/);
+  assert.match(source, /id="settings-fallback-parser"/);
+  assert.match(source, /options=\{structuredParserChoices\.map\(\(entry\) => entry\.id\)\}/);
+  assert.match(source, /options=\{fallbackParserChoices\.map\(\(entry\) => entry\.id\)\}/);
+  assert.match(source, /ocrmypdf_tesseract/);
+  assert.match(source, /rapidocr/);
+  assert.match(source, /needs_ocr/);
+  assert.match(source, /Choose a supported structured parser/);
+  assert.match(source, /Choose a supported fallback parser/);
+  assert.match(styles, /\.settings-field-note/);
+});
+
 test("Settings / Models explains Qdrant collection state and workflow ownership", () => {
   assert.match(source, /settings-collection-info/);
   assert.match(source, /Collection state/);
