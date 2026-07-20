@@ -51,6 +51,46 @@ def test_default_repository_settings_use_app_model_defaults() -> None:
     assert repository_settings.model.ollama_chat_model == "llama3.2:3b"
     assert repository_settings.embedding.model == "sentence-transformers/test-embedding"
     assert repository_settings.reranking.model == "cross-encoder/test-reranker"
+    assert repository_settings.parser.structured_parser == "auto"
+    assert repository_settings.parser.fallback_parser == "auto"
+
+
+@pytest.mark.parametrize(
+    ("structured_parser", "fallback_parser"),
+    [
+        ("auto", "auto"),
+        ("pymupdf", "pypdf"),
+        ("docling", "built_in_fallback"),
+        ("pdfplumber", "needs_ocr"),
+        ("pypdf", "ocrmypdf_tesseract"),
+        ("built_in_fallback", "rapidocr"),
+    ],
+)
+def test_repository_settings_accept_known_parser_choices(
+    structured_parser: str,
+    fallback_parser: str,
+) -> None:
+    payload = RepositorySettings.from_app_settings(Settings()).model_dump(mode="json")
+    payload["parser"] = {
+        "structured_parser": structured_parser,
+        "fallback_parser": fallback_parser,
+    }
+
+    settings = RepositorySettings.model_validate(payload)
+
+    assert settings.parser.structured_parser == structured_parser
+    assert settings.parser.fallback_parser == fallback_parser
+
+
+def test_repository_settings_reject_unsupported_parser_choices() -> None:
+    payload = RepositorySettings.from_app_settings(Settings()).model_dump(mode="json")
+    payload["parser"] = {
+        "structured_parser": "custom-shell-parser",
+        "fallback_parser": "cloud-ocr",
+    }
+
+    with pytest.raises(ValidationError, match="Unsupported structured parser"):
+        RepositorySettings.model_validate(payload)
 
 
 def test_repository_settings_reject_chunk_overlap_larger_than_chunk_size() -> None:
@@ -141,6 +181,24 @@ def test_settings_impact_reports_reprocessing_and_index_rebuilds() -> None:
     assert "vector_rebuild" in categories
     assert "export_recreate" in categories
     assert "evaluation_freshness" in categories
+
+
+def test_settings_impact_reports_parser_choice_changes() -> None:
+    current = RepositorySettings.from_app_settings(Settings())
+    draft_payload = current.model_dump(mode="json")
+    draft_payload["parser"]["structured_parser"] = "docling"
+    draft_payload["parser"]["fallback_parser"] = "needs_ocr"
+    draft = RepositorySettings.model_validate(draft_payload)
+
+    result = analyze_settings_impact(current, draft)
+
+    reprocessing = next(
+        impact for impact in result.impacts if impact.category == "document_reprocessing"
+    )
+    assert reprocessing.fields == [
+        "parser.structured_parser",
+        "parser.fallback_parser",
+    ]
 
 
 def test_settings_impact_reports_retrieval_chat_and_prompt_defaults() -> None:

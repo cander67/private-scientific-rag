@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from private_rag.core.settings import Settings
 from private_rag.vector.model_registry import (
@@ -21,9 +21,52 @@ class ChunkingSettings(BaseModel):
     mode: Literal["recursive", "semantic", "fixed"] = "recursive"
 
 
+STRUCTURED_PARSER_CHOICES = frozenset(
+    {
+        "auto",
+        "pymupdf",
+        "docling",
+        "pdfplumber",
+        "pypdf",
+        "built_in_fallback",
+    }
+)
+FALLBACK_PARSER_CHOICES = frozenset(
+    {
+        "auto",
+        "pypdf",
+        "pymupdf",
+        "docling",
+        "pdfplumber",
+        "built_in_fallback",
+        "needs_ocr",
+        "ocrmypdf_tesseract",
+        "rapidocr",
+    }
+)
+
+
 class ParserSettings(BaseModel):
-    structured_parser: str = Field(default="pymupdf", min_length=1)
-    fallback_parser: str = Field(default="pypdf", min_length=1)
+    structured_parser: str = Field(default="auto", min_length=1)
+    fallback_parser: str = Field(default="auto", min_length=1)
+
+    @field_validator("structured_parser")
+    @classmethod
+    def validate_structured_parser(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in STRUCTURED_PARSER_CHOICES:
+            choices = ", ".join(sorted(STRUCTURED_PARSER_CHOICES))
+            raise ValueError(f"Unsupported structured parser: {value}. Choose one of: {choices}.")
+        return normalized
+
+    @field_validator("fallback_parser")
+    @classmethod
+    def validate_fallback_parser(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized not in FALLBACK_PARSER_CHOICES:
+            choices = ", ".join(sorted(FALLBACK_PARSER_CHOICES))
+            raise ValueError(f"Unsupported fallback parser: {value}. Choose one of: {choices}.")
+        return normalized
 
 
 class FullTextSettings(BaseModel):
@@ -264,11 +307,22 @@ class RerankerModelCatalogEntry(BaseModel):
     readiness_required: bool
 
 
+class ParserCatalogEntry(BaseModel):
+    id: str
+    label: str
+    role: Literal["auto", "structured", "fallback", "ocr_gate", "ocr_provider"]
+    supported_as: list[Literal["structured", "fallback"]]
+    notes: str
+    setup_hint: str | None = None
+    readiness_required: bool = False
+
+
 class RepositoryModelCatalogResponse(BaseModel):
     repository_id: str
     embedding_models: list[EmbeddingModelCatalogEntry]
     chat_models: list[ChatModelCatalogEntry]
     reranker_models: list[RerankerModelCatalogEntry]
+    parser_choices: list[ParserCatalogEntry]
     runtime_detection: ModelCatalogRuntimeDetection
 
 

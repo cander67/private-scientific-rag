@@ -163,6 +163,22 @@ def test_repository_settings_endpoint_rejects_invalid_settings() -> None:
     assert "chunk_overlap must be smaller" in response.text
 
 
+def test_repository_settings_endpoint_rejects_unsupported_parser_choice() -> None:
+    client = _client_with_database()
+    created = client.get("/repositories/default").json()
+    repository_id = created["repository"]["id"]
+    settings = created["settings"]
+    settings["parser"]["structured_parser"] = "untracked-parser"
+
+    response = client.put(
+        f"/repositories/{repository_id}/settings",
+        json={"settings": settings},
+    )
+
+    assert response.status_code == 422
+    assert "Unsupported structured parser" in response.text
+
+
 def test_repository_settings_impact_endpoint_reports_categories() -> None:
     client = _client_with_database()
     created = client.get("/repositories/default").json()
@@ -232,6 +248,26 @@ def test_repository_settings_model_catalog_returns_known_defaults() -> None:
         ("none", None, "known"),
         ("cross_encoder", created["settings"]["reranking"]["model"], "known"),
     }
+    parser_by_id = {entry["id"]: entry for entry in payload["parser_choices"]}
+    assert created["settings"]["parser"] == {
+        "structured_parser": "auto",
+        "fallback_parser": "auto",
+    }
+    assert {"auto", "pymupdf", "docling", "pdfplumber", "pypdf", "built_in_fallback"} <= {
+        entry["id"] for entry in payload["parser_choices"] if "structured" in entry["supported_as"]
+    }
+    assert {
+        "auto",
+        "pypdf",
+        "pymupdf",
+        "docling",
+        "pdfplumber",
+        "built_in_fallback",
+        "needs_ocr",
+        "ocrmypdf_tesseract",
+        "rapidocr",
+    } <= {entry["id"] for entry in payload["parser_choices"] if "fallback" in entry["supported_as"]}
+    assert parser_by_id["ocrmypdf_tesseract"]["role"] == "ocr_provider"
 
 
 class FakeSettingsLLM:
