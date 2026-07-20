@@ -1,6 +1,6 @@
 # PRD 26: Repository Loading and Parser Controls
 
-**Status:** Backlog.
+**Status:** Ready for review.
 
 ## Problem Statement
 
@@ -55,3 +55,7 @@ The repository loading work should make state transitions visible without adding
 
 - This PRD combines user-testing feedback about repository loading status and parser controls because both improve confidence in repository-scoped state.
 - Future parser-selection logic can define what `Auto` means in more depth without changing the user-facing setting shape.
+- Implementation keeps `Auto` as the default structured and fallback parser setting. The catalog exposes current parser packages plus backlog parser choices from PRD13/PRD14: PyMuPDF, Docling, pdfplumber, pypdf, built-in fallback, the `needs_ocr` gate, OCRmyPDF/Tesseract, and RapidOCR.
+- OCR choices are selectable as repository-scoped fallback metadata, but PRD26 does not run OCR automatically. OCR execution, confidence handling, and dependency checks remain PRD13 scope.
+- Advanced arbitrary parser paths were intentionally not added because backend validation now rejects unsupported parser IDs; adding custom parser adapters should come with a validated adapter contract.
+- Verification for this branch: focused repository settings/API tests and the frontend production build passed locally.
