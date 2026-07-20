@@ -24,13 +24,15 @@ class EmbeddingProviderFactory(Protocol):
 
 
 EmbeddingProviderSource = EmbeddingProvider | EmbeddingProviderFactory
+OLLAMA_EMBEDDING_KEEP_ALIVE = "10m"
+OLLAMA_EMBEDDING_TIMEOUT_SECONDS = 180.0
 
 
 class LocalEmbeddingProviderFactory:
     def __init__(
         self,
         *,
-        sentence_transformers_device: str | None = None,
+        sentence_transformers_device: str | None = "auto",
         ollama_base_url: str = "http://localhost:11434",
     ) -> None:
         self._sentence_transformers_device = sentence_transformers_device
@@ -68,7 +70,7 @@ def resolve_embedding_provider(
 
 
 class SentenceTransformersEmbeddingProvider:
-    def __init__(self, model_name: str, *, device: str | None = None) -> None:
+    def __init__(self, model_name: str, *, device: str | None = "auto") -> None:
         self._model_name = model_name
         self._device = device
         self._model: Any | None = None
@@ -106,14 +108,63 @@ class SentenceTransformersEmbeddingProvider:
                 "before rebuilding the vector index."
             ) from exc
 
-        model_kwargs = {"device": self._device} if self._device is not None else {}
-        model = SentenceTransformer(self._model_name, **model_kwargs)
+        model = self._load_sentence_transformer(SentenceTransformer)
         dimension = model.get_sentence_embedding_dimension()
         if dimension is None:
             raise RuntimeError(f"Embedding model has no known vector size: {self._model_name}")
         self._model = model
         self._vector_size = int(dimension)
         return model
+
+    def _load_sentence_transformer(self, sentence_transformer: Any) -> Any:
+        if self._device and self._device != "auto":
+            return sentence_transformer(self._model_name, device=self._device)
+
+        preferred_device = _preferred_sentence_transformers_device()
+        try:
+            return sentence_transformer(self._model_name, device=preferred_device)
+        except Exception:
+            if preferred_device == "cpu":
+                raise
+            return sentence_transformer(self._model_name, device="cpu")
+
+
+def _preferred_sentence_transformers_device() -> str:
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+
+    cuda = getattr(torch, "cuda", None)
+    if cuda is not None and callable(getattr(cuda, "is_available", None)):
+        try:
+            if cuda.is_available():
+                return "cuda"
+        except Exception:
+            pass
+
+    backends = getattr(torch, "backends", None)
+    mps = getattr(backends, "mps", None) if backends is not None else None
+    if mps is not None and callable(getattr(mps, "is_available", None)):
+        try:
+            if mps.is_available():
+                return "mps"
+        except Exception:
+            pass
+    return "cpu"
+
+
+class OllamaEmbeddingError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        readiness_status: str = "failed",
+        allow_legacy_fallback: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.readiness_status = readiness_status
+        self.allow_legacy_fallback = allow_legacy_fallback
 
 
 class OllamaEmbeddingProvider:
@@ -122,12 +173,14 @@ class OllamaEmbeddingProvider:
         base_url: str,
         model_name: str,
         *,
-        timeout: float = 60.0,
+        timeout: float = OLLAMA_EMBEDDING_TIMEOUT_SECONDS,
+        keep_alive: str = OLLAMA_EMBEDDING_KEEP_ALIVE,
         client: httpx.Client | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model_name = model_name
         self._timeout = timeout
+        self._keep_alive = keep_alive
         self._client = client
         metadata = lookup_embedding_model("ollama", model_name)
         self._vector_size = metadata.vector_size if metadata is not None else None
@@ -179,25 +232,154 @@ class OllamaEmbeddingProvider:
         client = self._client or httpx.Client(timeout=self._timeout)
         close_client = self._client is None
         try:
-            response = client.post(
-                f"{self._base_url}/api/embed",
-                json={"model": self._model_name, "input": texts},
-            )
-            response.raise_for_status()
-            payload = response.json()
-        except httpx.HTTPError as exc:
-            raise RuntimeError(
-                f"Ollama is not reachable or embedding model '{self._model_name}' is unavailable. "
-                f"Start Ollama and run `ollama pull {self._model_name}`."
-            ) from exc
-        except ValueError as exc:
-            raise RuntimeError("Ollama returned an unexpected response body.") from exc
+            try:
+                return self._post_current_embed(client, texts)
+            except OllamaEmbeddingError as exc:
+                if not exc.allow_legacy_fallback:
+                    raise
+            payload = self._post_legacy_embeddings(client, texts)
         finally:
             if close_client:
                 client.close()
         if not isinstance(payload, dict):
             raise RuntimeError("Ollama returned an unexpected response body.")
         return payload
+
+    def _post_current_embed(
+        self,
+        client: httpx.Client,
+        texts: list[str],
+    ) -> dict[str, object]:
+        try:
+            response = client.post(
+                f"{self._base_url}/api/embed",
+                json={
+                    "model": self._model_name,
+                    "input": texts,
+                    "keep_alive": self._keep_alive,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            if status_code in {400, 404, 405}:
+                raise OllamaEmbeddingError(
+                    f"Ollama /api/embed is not compatible with model '{self._model_name}' "
+                    "from this runtime.",
+                    readiness_status="failed",
+                    allow_legacy_fallback=True,
+                ) from exc
+            raise OllamaEmbeddingError(
+                f"Ollama embedding request failed for model '{self._model_name}'. "
+                "Check the local Ollama logs and rerun readiness. If the model is pulled "
+                "but still fails, the runtime may be unable to load it into host RAM/VRAM.",
+                readiness_status="failed",
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise OllamaEmbeddingError(
+                f"Ollama embedding model '{self._model_name}' did not finish loading before "
+                "the readiness timeout. If it is installed, wait and retry readiness, or "
+                "check Ollama logs and host RAM/VRAM before rebuilding vectors.",
+                readiness_status="failed",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise OllamaEmbeddingError(
+                f"Ollama is not reachable at {self._base_url}. Start Ollama, then run "
+                f"`ollama pull {self._model_name}` if needed. If the model is already "
+                "installed, the first embedding request may still need to load it into "
+                "memory; large models can time out or fail when host RAM/VRAM is insufficient.",
+                readiness_status="unavailable_runtime",
+            ) from exc
+        except ValueError as exc:
+            raise RuntimeError("Ollama returned an unexpected response body.") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("Ollama returned an unexpected response body.")
+        return payload
+
+    def _post_legacy_embeddings(
+        self,
+        client: httpx.Client,
+        texts: list[str],
+    ) -> dict[str, object]:
+        embeddings: list[object] = []
+        for text in texts:
+            payload = self._post_legacy_embedding(client, text)
+            embeddings.append(payload.get("embedding"))
+        return {"model": self._model_name, "embeddings": embeddings}
+
+    def _post_legacy_embedding(
+        self,
+        client: httpx.Client,
+        text: str,
+    ) -> dict[str, object]:
+        try:
+            response = client.post(
+                f"{self._base_url}/api/embeddings",
+                json={
+                    "model": self._model_name,
+                    "prompt": text,
+                    "keep_alive": self._keep_alive,
+                },
+            )
+            response.raise_for_status()
+            payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                if self._ollama_model_is_installed(client):
+                    raise OllamaEmbeddingError(
+                        f"Ollama embedding model '{self._model_name}' is installed, but "
+                        "the runtime did not return embeddings yet. The model may still be "
+                        "loading or may be too large for available RAM/VRAM. Wait and retry "
+                        "readiness, or check the local Ollama logs.",
+                        readiness_status="failed",
+                    ) from exc
+                raise OllamaEmbeddingError(
+                    f"Ollama embedding model '{self._model_name}' is not installed. "
+                    f"Run `ollama pull {self._model_name}`.",
+                    readiness_status="not_installed",
+                ) from exc
+            raise OllamaEmbeddingError(
+                f"Ollama embedding request failed for model '{self._model_name}'. "
+                "Check the local Ollama logs and rerun readiness. If the model is pulled "
+                "but still fails, the runtime may be unable to load it into host RAM/VRAM.",
+                readiness_status="failed",
+            ) from exc
+        except httpx.TimeoutException as exc:
+            raise OllamaEmbeddingError(
+                f"Ollama embedding model '{self._model_name}' did not finish loading before "
+                "the readiness timeout. If it is installed, wait and retry readiness, or "
+                "check Ollama logs and host RAM/VRAM before rebuilding vectors.",
+                readiness_status="failed",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise OllamaEmbeddingError(
+                f"Ollama is not reachable at {self._base_url}. Start Ollama, then run "
+                f"`ollama pull {self._model_name}` if needed. If the model is already "
+                "installed, the first embedding request may still need to load it into "
+                "memory; large models can time out or fail when host RAM/VRAM is insufficient.",
+                readiness_status="unavailable_runtime",
+            ) from exc
+        except ValueError as exc:
+            raise RuntimeError("Ollama returned an unexpected response body.") from exc
+        if not isinstance(payload, dict):
+            raise RuntimeError("Ollama returned an unexpected response body.")
+        return payload
+
+    def _ollama_model_is_installed(self, client: httpx.Client) -> bool:
+        try:
+            response = client.get(f"{self._base_url}/api/tags")
+            response.raise_for_status()
+            payload = response.json()
+        except (httpx.HTTPError, ValueError):
+            return False
+        if not isinstance(payload, dict) or not isinstance(payload.get("models"), list):
+            return False
+        return any(
+            _ollama_model_names_match(self._model_name, item.get("name"))
+            for item in payload["models"]
+            if isinstance(item, dict)
+        )
 
     def _coerce_vector(self, raw_vector: object) -> list[float]:
         if not isinstance(raw_vector, list):
@@ -215,6 +397,16 @@ class OllamaEmbeddingProvider:
                 )
             vector.append(numeric_value)
         return vector
+
+
+def _ollama_model_names_match(expected: str, actual: object) -> bool:
+    if not isinstance(actual, str):
+        return False
+    if actual == expected:
+        return True
+    if f"{expected}:latest" == actual:
+        return True
+    return expected.endswith(":latest") and expected.removesuffix(":latest") == actual
 
 
 class DeterministicEmbeddingProvider:

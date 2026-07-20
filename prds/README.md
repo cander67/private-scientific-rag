@@ -26,10 +26,12 @@ Current status:
 - Complete: PRD20 repository dashboard and home alias.
 - Complete: PRD21 settings and model manager.
 - Complete: PRD22 Ollama chat model expansion.
-- Selected next: PRD23 settings model catalog and collection guardrails.
+- Ready for final review: PRD23 settings model catalog and collection guardrails, including user-testing remediation for model/runtime readiness, Windows Ollama embedding compatibility, Chat Workspace embedding visibility, and docs feedback.
 - Backlog: PRD24 local storage provenance and housekeeping.
+- Backlog: PRD25 chat context inspection.
+- Backlog: PRD26 repository loading and parser controls.
 
-Next PRD selected: PRD23 settings model catalog and collection guardrails.
+PRD23 is ready for final review after catalog guardrails and user-testing remediation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional live Ollama/Qdrant/GPU checks remain explicit manual checks. PRD25 and PRD26 capture follow-up interaction work that should not be bundled into PRD23.
 
 The remaining backlog should be prioritized from hands-on use of the current app, adjusting order when a later PRD is needed to unblock an earlier one.
 
@@ -51,6 +53,8 @@ Shared decisions:
 - Test fixture posture: default CI uses `tests/fixtures/`, not `documents/golden_corpus/`.
 - Ollama embedding scope: PRD15 should add one generic Ollama embedding provider plus registry metadata for known supported embedding models. New Ollama embedding models should usually be registry/settings additions when they support Ollama embeddings and pass readiness/vector-dimension checks; they should not require one-off provider code.
 - Ollama chat scope: ordinary Ollama chat models should flow through the existing generic chat provider by model name. PRD22 tracks registry/readiness/docs expansion for additional chat models; focused model-specific work is only expected for unusual prompting, context, multimodal, tool/function, or structured-output requirements.
+- Chat context inspection scope: PRD25 owns exposing the exact local LLM payload for normal chat. Prompt Sandbox remains the owner for side-by-side prompt/retrieval/model experiments.
+- Repository loading and parser controls scope: PRD26 owns visible repository-switch loading states and fixed parser-choice controls, including an `Auto` parser option.
 
 PRD files:
 
@@ -76,5 +80,7 @@ PRD files:
 20. [Repository dashboard and home alias](20-repository-dashboard-home.md) - complete
 21. [Settings and model manager](21-settings-models-manager.md) - complete
 22. [Ollama chat model expansion](22-ollama-chat-model-expansion.md) - complete
-23. [Settings model catalog and collection guardrails](23-settings-model-catalog-guardrails.md) - selected next
+23. [Settings model catalog and collection guardrails](23-settings-model-catalog-guardrails.md) - ready for final review
 24. [Local storage provenance and housekeeping](24-local-storage-housekeeping.md) - backlog
+25. [Chat context inspection](25-chat-context-inspection.md) - backlog
+26. [Repository loading and parser controls](26-repository-loading-and-parser-controls.md) - backlog

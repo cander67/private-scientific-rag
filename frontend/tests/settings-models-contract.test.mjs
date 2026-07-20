@@ -22,8 +22,8 @@ test("Settings / Models shows repository-scoped grouped defaults", () => {
   assert.match(source, /Vector and embedding/);
   assert.match(source, /Reranking/);
   assert.match(source, /Chat defaults/);
-  assert.match(source, /chatModelRegistry/);
-  assert.match(source, /Known Ollama model/);
+  assert.match(source, /modelCatalog/);
+  assert.match(source, /Chat model/);
   assert.match(source, /Custom local Ollama model/);
   assert.match(source, /settings-known-chat-model/);
   assert.match(source, /settings-model-guidance/);
@@ -52,6 +52,55 @@ test("Settings / Models exposes required models and readiness placeholders", () 
   assert.match(styles, /\.settings-readiness-ready/);
   assert.match(styles, /\.settings-readiness-unavailable_runtime/);
   assert.match(styles, /\.settings-readiness-not_installed/);
+});
+
+test("Settings / Models uses the PRD23 model catalog for embedding guardrails", () => {
+  assert.match(source, /type RepositoryModelCatalog/);
+  assert.match(source, /settings\/model-catalog/);
+  assert.match(source, /modelCatalog=\{modelCatalog\}/);
+  assert.match(source, /settings-known-embedding-model/);
+  assert.match(source, /Known embedding model/);
+  assert.match(source, /Custom embedding model/);
+  assert.match(source, /applyKnownEmbeddingModel/);
+  assert.match(source, /next\.vector\.vector_size = metadata\.vector_size/);
+  assert.match(source, /disabled=\{Boolean\(selectedEmbeddingModel\)\}/);
+  assert.match(source, /disabledOptions=\{disabledDistanceOptions\}/);
+  assert.match(source, /supported_distances\.includes/);
+  assert.match(source, /requires .* dimensions/);
+  assert.match(source, /Custom Ollama embeddings require cosine distance and a live dimension probe/);
+});
+
+test("Settings / Models uses the PRD23 model catalog for chat and reranker choices", () => {
+  assert.match(source, /const chatCatalog/);
+  assert.match(source, /modelCatalog\?\.chat_models/);
+  assert.match(source, /selectChatModel/);
+  assert.match(source, /modelSourceLabel/);
+  assert.match(source, /detected locally/);
+  assert.match(source, /Runtime model detection has not been run/);
+  assert.match(source, /Normal Chat Workspace sessions search local repository context by default/);
+  assert.match(source, /settings-reranking-model-choice/);
+  assert.match(source, /No reranking/);
+  assert.match(source, /Custom cross-encoder/);
+  assert.match(source, /selectRerankerModel/);
+  assert.match(source, /rerankerCatalog/);
+  assert.match(source, /Custom reranker model/);
+});
+
+test("Settings / Models explains Qdrant collection state and workflow ownership", () => {
+  assert.match(source, /settings-collection-info/);
+  assert.match(source, /Collection state/);
+  assert.match(source, /Vector rebuild writes this collection/);
+  assert.match(source, /vector search reads the latest active vector/);
+  assert.match(source, /Changing the collection name does not migrate vectors/);
+  assert.match(source, /Stale until rebuild/);
+  assert.match(source, /Not checked/);
+  assert.match(source, /Open Search Lab/);
+  assert.match(source, /Open Repository Administration/);
+  assert.match(source, /onNavigate\("admin"\)/);
+  assert.match(styles, /\.settings-collection-ready/);
+  assert.match(styles, /\.settings-collection-stale/);
+  assert.match(styles, /\.settings-collection-missing/);
+  assert.match(styles, /\.settings-collection-not_checked/);
 });
 
 test("Settings / Models supports edit, save, cancel, and field validation", () => {

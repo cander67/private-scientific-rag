@@ -9,7 +9,10 @@ import httpx
 import pytest
 
 from private_rag.vector.embeddings import (
+    OLLAMA_EMBEDDING_KEEP_ALIVE,
+    OLLAMA_EMBEDDING_TIMEOUT_SECONDS,
     LocalEmbeddingProviderFactory,
+    OllamaEmbeddingError,
     OllamaEmbeddingProvider,
     SentenceTransformersEmbeddingProvider,
 )
@@ -61,6 +64,38 @@ def test_sentence_transformers_provider_passes_configured_device(
 
     assert provider.embed(["query"]) == [[0.0, 1.0]]
     assert captured == {"model_name": "test-model", "kwargs": {"device": "cpu"}}
+
+
+def test_sentence_transformers_provider_auto_device_falls_back_to_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    devices: list[str] = []
+
+    class FakeSentenceTransformer:
+        def __init__(self, model_name: str, **kwargs: Any) -> None:
+            device = str(kwargs.get("device"))
+            devices.append(device)
+            if device == "mps":
+                raise RuntimeError("accelerator unavailable")
+
+        def get_sentence_embedding_dimension(self) -> int:
+            return 2
+
+        def encode(self, texts: list[str], *, normalize_embeddings: bool) -> list[list[float]]:
+            return [[0.0, 1.0] for _ in texts]
+
+    fake_module = types.SimpleNamespace(SentenceTransformer=FakeSentenceTransformer)
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(is_available=lambda: False),
+        backends=types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: True)),
+    )
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    provider = SentenceTransformersEmbeddingProvider("test-model")
+
+    assert provider.embed(["query"]) == [[0.0, 1.0]]
+    assert devices == ["mps", "cpu"]
 
 
 def test_local_embedding_provider_factory_uses_configured_sentence_transformers_model(
@@ -130,10 +165,67 @@ def test_ollama_embedding_provider_posts_batched_input_and_validates_vectors() -
 
     assert captured == {
         "url": "http://ollama.test/api/embed",
-        "payload": {"model": "custom-embed:latest", "input": ["alpha", "beta"]},
+        "payload": {
+            "model": "custom-embed:latest",
+            "input": ["alpha", "beta"],
+            "keep_alive": OLLAMA_EMBEDDING_KEEP_ALIVE,
+        },
     }
     assert vectors == [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]
     assert provider.vector_size == 3
+    assert OLLAMA_EMBEDDING_TIMEOUT_SECONDS >= 180.0
+
+
+def test_ollama_embedding_provider_falls_back_to_legacy_embeddings_endpoint() -> None:
+    calls: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        calls.append({"url": str(request.url), "payload": payload})
+        if str(request.url) == "http://ollama.test/api/embed":
+            return httpx.Response(404, json={"error": "not found"}, request=request)
+        legacy_vectors = {
+            "alpha": [0.0, 1.0, 2.0],
+            "beta": [3.0, 4.0, 5.0],
+        }
+        return httpx.Response(200, json={"embedding": legacy_vectors[payload["prompt"]]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = OllamaEmbeddingProvider(
+        "http://ollama.test",
+        "custom-embed:latest",
+        client=client,
+    )
+
+    vectors = provider.embed(["alpha", "beta"])
+
+    assert calls == [
+        {
+            "url": "http://ollama.test/api/embed",
+            "payload": {
+                "model": "custom-embed:latest",
+                "input": ["alpha", "beta"],
+                "keep_alive": OLLAMA_EMBEDDING_KEEP_ALIVE,
+            },
+        },
+        {
+            "url": "http://ollama.test/api/embeddings",
+            "payload": {
+                "model": "custom-embed:latest",
+                "prompt": "alpha",
+                "keep_alive": OLLAMA_EMBEDDING_KEEP_ALIVE,
+            },
+        },
+        {
+            "url": "http://ollama.test/api/embeddings",
+            "payload": {
+                "model": "custom-embed:latest",
+                "prompt": "beta",
+                "keep_alive": OLLAMA_EMBEDDING_KEEP_ALIVE,
+            },
+        },
+    ]
+    assert vectors == [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]
 
 
 def test_ollama_embedding_provider_reports_known_registry_vector_size_without_probe() -> None:
@@ -181,8 +273,58 @@ def test_ollama_embedding_provider_reports_missing_runtime_or_model_guidance() -
         client=client,
     )
 
-    with pytest.raises(RuntimeError, match="ollama pull embeddinggemma:300m"):
+    with pytest.raises(OllamaEmbeddingError, match="ollama pull embeddinggemma:300m") as exc_info:
         provider.embed(["alpha"])
+    assert exc_info.value.readiness_status == "not_installed"
+
+
+def test_ollama_embedding_provider_reports_installed_model_that_is_not_loaded() -> None:
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(str(request.url))
+        if str(request.url) == "http://ollama.test/api/tags":
+            return httpx.Response(
+                200,
+                json={"models": [{"name": "qwen3-embedding:8b"}]},
+                request=request,
+            )
+        return httpx.Response(404, json={"error": "loading"}, request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = OllamaEmbeddingProvider(
+        "http://ollama.test",
+        "qwen3-embedding:8b",
+        client=client,
+    )
+
+    with pytest.raises(OllamaEmbeddingError, match="installed") as exc_info:
+        provider.embed(["alpha"])
+
+    assert calls == [
+        "http://ollama.test/api/embed",
+        "http://ollama.test/api/embeddings",
+        "http://ollama.test/api/tags",
+    ]
+    assert exc_info.value.readiness_status == "failed"
+    assert "loading" in str(exc_info.value)
+
+
+def test_ollama_embedding_provider_reports_timeout_as_incomplete_load() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("load still running", request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    provider = OllamaEmbeddingProvider(
+        "http://ollama.test",
+        "qwen3-embedding:8b",
+        client=client,
+    )
+
+    with pytest.raises(OllamaEmbeddingError, match="did not finish loading") as exc_info:
+        provider.embed(["alpha"])
+
+    assert exc_info.value.readiness_status == "failed"
 
 
 def test_ollama_embedding_provider_reports_connection_guidance() -> None:
@@ -196,8 +338,9 @@ def test_ollama_embedding_provider_reports_connection_guidance() -> None:
         client=client,
     )
 
-    with pytest.raises(RuntimeError, match="Start Ollama"):
+    with pytest.raises(OllamaEmbeddingError, match="Start Ollama") as exc_info:
         provider.embed(["alpha"])
+    assert exc_info.value.readiness_status == "unavailable_runtime"
 
 
 def test_ollama_embedding_provider_rejects_malformed_response() -> None:

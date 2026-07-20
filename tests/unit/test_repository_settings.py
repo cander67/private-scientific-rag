@@ -2,11 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from private_rag.chat.llm import ChatCompletion, ChatMessage, OllamaUnavailableError
 from private_rag.core.settings import Settings
+from private_rag.db.base import Base
+from private_rag.repositories import models as repository_models  # noqa: F401
+from private_rag.repositories.models import Repository, RepositorySettingsRow
 from private_rag.repositories.schemas import (
     RecreateValidationRequest,
     RepositorySettings,
@@ -14,6 +21,7 @@ from private_rag.repositories.schemas import (
 from private_rag.repositories.service import (
     LocalSettingsReadinessChecker,
     analyze_settings_impact,
+    repository_model_catalog,
     validate_recreate_request,
 )
 
@@ -181,6 +189,160 @@ def test_readiness_checker_reports_missing_chat_model_with_pull_guidance() -> No
     assert result.status == "not_installed"
     assert result.ready is False
     assert "ollama pull custom-local:latest" in result.message
+
+
+def test_readiness_checker_checks_ollama_embedding_with_configured_url() -> None:
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"embeddings": [[0.0, 1.0, 2.0]]})
+
+    checker = LocalSettingsReadinessChecker(
+        ollama_embedding_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = checker.check_embedding(
+        provider="ollama",
+        model="custom-embed:latest",
+        expected_vector_size=3,
+        ollama_base_url="http://configured-ollama.test",
+    )
+
+    assert captured["url"] == "http://configured-ollama.test/api/embed"
+    assert result.status == "ready"
+    assert result.ready is True
+    assert "/api/embed" in result.message
+
+
+def test_readiness_checker_accepts_legacy_ollama_embedding_fallback() -> None:
+    urls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        urls.append(str(request.url))
+        if str(request.url) == "http://windows-ollama.test/api/embed":
+            return httpx.Response(404, json={"error": "not found"}, request=request)
+        return httpx.Response(200, json={"embedding": [0.0, 1.0, 2.0]})
+
+    checker = LocalSettingsReadinessChecker(
+        ollama_embedding_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = checker.check_embedding(
+        provider="ollama",
+        model="custom-embed:latest",
+        expected_vector_size=3,
+        ollama_base_url="http://windows-ollama.test",
+    )
+
+    assert urls == [
+        "http://windows-ollama.test/api/embed",
+        "http://windows-ollama.test/api/embeddings",
+    ]
+    assert result.status == "ready"
+    assert result.ready is True
+
+
+def test_readiness_checker_reports_missing_ollama_embedding_model() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": "model not found"}, request=request)
+
+    checker = LocalSettingsReadinessChecker(
+        ollama_embedding_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = checker.check_embedding(
+        provider="ollama",
+        model="embeddinggemma:300m",
+        expected_vector_size=768,
+        ollama_base_url="http://ollama.test",
+    )
+
+    assert result.status == "not_installed"
+    assert result.ready is False
+    assert "ollama pull embeddinggemma:300m" in result.message
+
+
+def test_readiness_checker_reports_ollama_embedding_dimension_mismatch() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"embeddings": [[0.0, 1.0]]})
+
+    checker = LocalSettingsReadinessChecker(
+        ollama_embedding_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = checker.check_embedding(
+        provider="ollama",
+        model="custom-embed:latest",
+        expected_vector_size=3,
+        ollama_base_url="http://ollama.test",
+    )
+
+    assert result.status == "failed"
+    assert result.ready is False
+    assert "vector size is 2" in result.message
+
+
+def test_readiness_checker_reports_pulled_but_not_loaded_guidance() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": "model load failed"}, request=request)
+
+    checker = LocalSettingsReadinessChecker(
+        ollama_embedding_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = checker.check_embedding(
+        provider="ollama",
+        model="qwen3-embedding:8b",
+        expected_vector_size=4096,
+        ollama_base_url="http://ollama.test",
+    )
+
+    assert result.status == "failed"
+    assert result.ready is False
+    assert "pulled" in result.message
+    assert "RAM/VRAM" in result.message
+
+
+def test_model_catalog_uses_known_metadata_without_runtime_detection() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False, class_=Session)
+    app_settings = Settings(default_llm="llama3.2:3b", default_reranker="cross-encoder/test")
+    with session_factory() as session:
+        settings = RepositorySettings.from_app_settings(app_settings)
+        repository = Repository(name="Catalog test")
+        session.add(repository)
+        session.flush()
+        repository.settings = RepositorySettingsRow(settings=settings.model_dump(mode="json"))
+        session.commit()
+        repository_id = repository.id
+
+        catalog = repository_model_catalog(
+            session,
+            repository_id=repository_id,
+            app_settings=app_settings,
+        )
+
+    assert catalog is not None
+    assert catalog.repository_id == repository_id
+    assert catalog.runtime_detection.checked is False
+    assert catalog.runtime_detection.models == []
+    assert all(entry.source == "known" for entry in catalog.embedding_models)
+    assert all(entry.source == "known" for entry in catalog.chat_models)
+    assert {
+        ("sentence_transformers", "sentence-transformers/all-MiniLM-L6-v2", 384),
+        ("ollama", "embeddinggemma:300m", 768),
+    } <= {(entry.provider, entry.model, entry.vector_size) for entry in catalog.embedding_models}
+    assert any(entry.name == "llama3.2:3b" and entry.required for entry in catalog.chat_models)
+    assert any(
+        entry.strategy == "cross_encoder" and entry.model == "cross-encoder/test"
+        for entry in catalog.reranker_models
+    )
 
 
 def test_recreate_validation_reports_missing_files_and_models(tmp_path: Path) -> None:

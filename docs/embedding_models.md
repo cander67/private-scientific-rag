@@ -1,14 +1,20 @@
 # Embedding Models
 
-PRD15 expands vector search beyond the MiniLM baseline while keeping embeddings local-first. Repository settings choose one active embedding provider/model at a time, and vector rebuilds replace the repository's latest Qdrant collection with vectors from that active model.
+PRD15 expands vector search beyond the MiniLM baseline while keeping embeddings local-first. PRD23 is ready for final review and adds Settings / Models catalog guardrails around those choices: known embedding models derive vector size and compatible distance choices from registry metadata, while custom local models remain explicit advanced entries. Repository settings choose one active embedding provider/model at a time, and vector rebuilds replace the repository's latest Qdrant collection with vectors from that active model.
 
 ## Provider Tradeoffs
 
-SentenceTransformers models run inside the Python process. They are simple to use for CPU-first local search, integrate with the existing deterministic test boundary, and can support cosine, dot, or Euclidean distance when the model settings declare those metrics. The tradeoff is that model files must be available in the local SentenceTransformers cache before live rebuilds, and larger models increase local memory and indexing time.
+SentenceTransformers models run inside the Python process. They use automatic device selection by default: CUDA when available, otherwise MPS when available, otherwise CPU. If an automatically selected accelerator cannot load the model safely, the provider retries on CPU so the repository remains portable across GPU workstations, CPU-only laptops, Windows-native Python, and Linux hosts. They integrate with the existing deterministic test boundary and can support cosine, dot, or Euclidean distance when the model settings declare those metrics. The tradeoff is that model files must be available in the local SentenceTransformers cache before live rebuilds, and larger models increase local memory and indexing time.
 
 Ollama embedding models run through the local Ollama service configured by `PRIVATE_RAG_OLLAMA_BASE_URL`. This keeps embedding downloads and runtime management aligned with the local chat model workflow. The tradeoff is an extra local service dependency: Ollama must be running, the model must be pulled, and the provider must return finite vectors with stable dimensions before rebuild continues. PRD15 supports known Ollama embedding models through one generic Ollama provider rather than one provider class per model.
 
 Default CI does not download embedding models or require Ollama. Tests use deterministic fake embeddings and mocked Ollama responses unless a maintainer explicitly opts into live checks.
+
+## Device Behavior
+
+MiniLM is not inherently CPU-only. It is a SentenceTransformers model, so it can run on CPU or on an accelerator supported by the local PyTorch/SentenceTransformers install. The app prefers GPU acceleration when available through PyTorch CUDA or MPS, then falls back to CPU when no supported accelerator is available or when the accelerator path cannot be used safely.
+
+The fallback rule is important for portability. A repository that works on a GPU workstation should still rebuild vectors on a CPU-only Windows or laptop host, just more slowly. Default CI and ordinary readiness checks must not require GPU hardware.
 
 ## Supported Models
 
@@ -44,6 +50,10 @@ ollama pull embeddinggemma:300m
 ollama pull qwen3-embedding:8b
 ```
 
+Pulling a model installs the model files; it does not guarantee the model is already loaded into the Ollama runtime. The first readiness check or vector rebuild still has to load the model into memory. Settings / Models sends `keep_alive` with Ollama embedding smoke checks so a successful check warms the model for the next workflow, and vector rebuilds use the same provider behavior. Readiness is considered complete only when Ollama returns an embedding vector with the expected dimension.
+
+Large embedding models can still fail after they are installed. `qwen3-embedding:8b` is a 4.7 GB Ollama model with a large context window and up to 4096 output dimensions, so Windows hosts may need more startup time and enough system RAM/VRAM for Ollama to load it. If readiness says the model failed or timed out rather than missing, wait and retry once, then check the Ollama runtime logs and host memory/VRAM before assuming the model name is wrong. If Ollama lists the model locally but the embedding endpoint still returns no vector, the app treats that as installed-but-not-loaded or load-failed, not as not installed.
+
 PowerShell:
 
 ```powershell
@@ -62,9 +72,11 @@ The repository-scoped Settings / Models screen remains the source of truth for a
 
 ## Custom Ollama Embedding Models
 
-Known models should be added as `EmbeddingModelMetadata` entries in `src/private_rag/vector/model_registry.py`. Add the provider, model name, label, vector size, supported distances, resource notes, setup hint, and local-model requirement. No new provider class is needed for a normal Ollama embedding model because the generic Ollama provider sends the configured model name to `/api/embed`.
+Known models should be added as `EmbeddingModelMetadata` entries in `src/private_rag/vector/model_registry.py`. Add the provider, model name, label, vector size, supported distances, resource notes, setup hint, and local-model requirement. No new provider class is needed for a normal Ollama embedding model because the generic Ollama provider sends the configured model name to `/api/embed`, then falls back to the legacy `/api/embeddings` endpoint when a local runtime does not support the current batched endpoint.
 
 Unknown Ollama embedding model names are treated as advanced local entries. They can be used only when the runtime supports embeddings and a live dimension probe succeeds before rebuild. Unknown models are compatibility-checked, but they are not quality-vetted by PRD15.
+
+Settings / Models readiness checks Ollama embedding models through the configured `PRIVATE_RAG_OLLAMA_BASE_URL` and Ollama's `/api/embed` endpoint first. If that endpoint is unavailable or incompatible, the check retries through the legacy `/api/embeddings` endpoint and normalizes the response into the same vector validation path. Readiness sends `keep_alive` to warm successfully checked models for the next rebuild/search workflow and is considered complete only after the runtime returns a finite vector with the expected dimension. Readiness distinguishes an unreachable runtime, a missing pulled model, timeout/load-in-progress/load-failed responses, malformed embedding responses, pulled-but-not-loadable models, and vector-dimension mismatches against repository settings. These checks are user-triggered and mocked in default tests.
 
 ## Evaluation
 

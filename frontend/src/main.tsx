@@ -112,6 +112,49 @@ type SettingsReadinessResponse = {
   items: SettingsReadinessItem[];
 };
 
+type ModelCatalogSource = "known" | "detected";
+
+type EmbeddingModelCatalogEntry = {
+  provider: "sentence_transformers" | "ollama";
+  model: string;
+  label: string;
+  source: ModelCatalogSource;
+  vector_size: number;
+  supported_distances: string[];
+  resource_notes: string;
+  setup_hint: string;
+  requires_local_model: boolean;
+  requires_live_probe: boolean;
+};
+
+type ChatModelCatalogEntry = ChatModelInfo & {
+  source: ModelCatalogSource;
+};
+
+type RerankerModelCatalogEntry = {
+  strategy: string;
+  model: string | null;
+  label: string;
+  source: ModelCatalogSource;
+  enabled: boolean;
+  resource_notes: string;
+  setup_hint: string | null;
+  readiness_required: boolean;
+};
+
+type RepositoryModelCatalog = {
+  repository_id: string;
+  embedding_models: EmbeddingModelCatalogEntry[];
+  chat_models: ChatModelCatalogEntry[];
+  reranker_models: RerankerModelCatalogEntry[];
+  runtime_detection: {
+    checked: boolean;
+    provider: "ollama";
+    models: string[];
+    message: string;
+  };
+};
+
 type DashboardIndexStatus = "ready" | "missing" | "partial" | "stale";
 
 type DashboardIndexSummary = {
@@ -841,6 +884,7 @@ function App() {
   const [sandboxMessage, setSandboxMessage] = useState("Save a prompt, then run a comparison.");
   const [repositorySettings, setRepositorySettings] = useState<RepositorySettings | null>(null);
   const [chatModelRegistry, setChatModelRegistry] = useState<ChatModelRegistry | null>(null);
+  const [modelCatalog, setModelCatalog] = useState<RepositoryModelCatalog | null>(null);
   const [exportIncludeSources, setExportIncludeSources] = useState(true);
   const [exportIncludeSandbox, setExportIncludeSandbox] = useState(false);
   const [exportBusy, setExportBusy] = useState(false);
@@ -896,6 +940,7 @@ function App() {
     if (repository) {
       void loadDocuments(repository.id);
       void loadRepositorySettings(repository.id);
+      void loadRepositoryModelCatalog(repository.id);
       void loadChatModelRegistry(repository.id);
       void loadDashboardSummary(repository.id);
       void loadChatSessions(repository.id);
@@ -1061,6 +1106,7 @@ function App() {
     setSearchResults([]);
     setLastRebuild(null);
     setChatModelRegistry(null);
+    setModelCatalog(null);
     setDashboardSummary(null);
     setDashboardMessage("Loading repository summary");
     setDeletePreview(null);
@@ -1124,6 +1170,18 @@ function App() {
       setSandboxModel((current) => current || payload.default_model);
     } catch {
       setChatModelRegistry(null);
+    }
+  }
+
+  async function loadRepositoryModelCatalog(repositoryId: string) {
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repositoryId}/settings/model-catalog`);
+      if (!response.ok) {
+        throw new Error("model catalog unavailable");
+      }
+      setModelCatalog((await response.json()) as RepositoryModelCatalog);
+    } catch {
+      setModelCatalog(null);
     }
   }
 
@@ -2568,6 +2626,8 @@ function App() {
                 repository={repository}
                 settings={repositorySettings}
                 chatModelRegistry={chatModelRegistry}
+                modelCatalog={modelCatalog}
+                dashboardSummary={dashboardSummary}
                 onNavigate={navigateTo}
                 onSave={saveRepositorySettings}
                 onAnalyzeImpact={previewRepositorySettingsImpact}
@@ -3865,6 +3925,8 @@ function SettingsModels({
   repository,
   settings,
   chatModelRegistry,
+  modelCatalog,
+  dashboardSummary,
   onNavigate,
   onSave,
   onAnalyzeImpact,
@@ -3873,6 +3935,8 @@ function SettingsModels({
   repository: RepositoryResponse["repository"] | null;
   settings: RepositorySettings | null;
   chatModelRegistry: ChatModelRegistry | null;
+  modelCatalog: RepositoryModelCatalog | null;
+  dashboardSummary: DashboardSummary | null;
   onNavigate: (view: View) => void;
   onSave: (settings: RepositorySettings) => Promise<RepositorySettings>;
   onAnalyzeImpact: (settings: RepositorySettings) => Promise<SettingsImpactResponse>;
@@ -3902,15 +3966,62 @@ function SettingsModels({
     setReadinessMessage("Readiness has not been checked.");
   }, [settings, repository?.id]);
 
-  const validationIssues = useMemo(() => validateSettingsDraft(draft), [draft]);
+  const validationIssues = useMemo(() => validateSettingsDraft(draft, modelCatalog), [draft, modelCatalog]);
   const validationByField = useMemo(
     () => new Map(validationIssues.map((issue) => [issue.field, issue.message])),
     [validationIssues],
   );
   const requiredModels = requiredModelsForSettings(draft);
-  const selectedChatModelInfo = chatModelRegistry?.models.find(
+  const embeddingCatalog = modelCatalog?.embedding_models ?? [];
+  const selectedEmbeddingModel = embeddingCatalog.find(
+    (model) => model.provider === draft?.embedding.provider && model.model === draft.embedding.model,
+  );
+  const embeddingProviders = Array.from(
+    new Set(
+      [draft?.embedding.provider, ...embeddingCatalog.map((model) => model.provider)].filter(
+        (provider): provider is string => Boolean(provider),
+      ),
+    ),
+  );
+  const providerEmbeddingModels = embeddingCatalog.filter(
+    (model) => model.provider === draft?.embedding.provider,
+  );
+  const embeddingModelSelectValue = selectedEmbeddingModel?.model ?? "__custom__";
+  const distanceOptions = ["cosine", "dot", "euclid"];
+  const disabledDistanceOptions = selectedEmbeddingModel
+    ? distanceOptions.filter((distance) => !selectedEmbeddingModel.supported_distances.includes(distance))
+    : draft?.embedding.provider === "ollama"
+      ? ["dot", "euclid"]
+      : [];
+  const chatCatalog =
+    modelCatalog?.chat_models ??
+    chatModelRegistry?.models.map((model) => ({ ...model, source: "known" as ModelCatalogSource })) ??
+    [];
+  const selectedChatModelInfo = chatCatalog.find(
     (model) => model.name === draft?.model.ollama_chat_model,
   );
+  const rerankerCatalog = modelCatalog?.reranker_models ?? [];
+  const selectedRerankerOption =
+    draft?.reranking.strategy === "none"
+      ? "__none__"
+      : rerankerCatalog.find(
+          (entry) => entry.strategy === draft?.reranking.strategy && entry.model === draft.reranking.model,
+        )?.model ?? "__custom__";
+  const collectionChanged = Boolean(
+    settings && draft && settings.vector.collection_name !== draft.vector.collection_name,
+  );
+  const collectionStatus = collectionChanged
+    ? "stale"
+    : dashboardSummary?.vector.status ?? "not_checked";
+  const collectionStatusText = collectionChanged
+    ? "Stale until rebuild"
+    : collectionStatus === "not_checked"
+      ? "Not checked"
+      : dashboardIndexStatusLabel(collectionStatus);
+  const collectionMessage = collectionChanged
+    ? "Changing the collection name does not migrate vectors. Save settings, then rebuild vectors before search uses the new collection."
+    : dashboardSummary?.vector.message ??
+      "Collection state has not been checked for this repository in the current dashboard summary.";
   const dirty = Boolean(settings && draft && JSON.stringify(settings) !== JSON.stringify(draft));
   const visibleImpact = dirty ? pendingImpact : lastSavedImpact;
 
@@ -4058,6 +4169,66 @@ function SettingsModels({
     });
   }
 
+  function applyKnownEmbeddingModel(next: RepositorySettings, metadata: EmbeddingModelCatalogEntry) {
+    next.embedding.provider = metadata.provider;
+    next.embedding.model = metadata.model;
+    next.vector.vector_size = metadata.vector_size;
+    if (!metadata.supported_distances.includes(next.vector.distance)) {
+      next.vector.distance = metadata.supported_distances[0] ?? "cosine";
+    }
+  }
+
+  function selectEmbeddingProvider(provider: string) {
+    updateDraft((next) => {
+      const firstKnownModel = embeddingCatalog.find((model) => model.provider === provider);
+      if (firstKnownModel) {
+        applyKnownEmbeddingModel(next, firstKnownModel);
+        return;
+      }
+      next.embedding.provider = provider;
+    });
+  }
+
+  function selectEmbeddingModel(modelName: string) {
+    updateDraft((next) => {
+      if (modelName === "__custom__") {
+        return;
+      }
+      const metadata = embeddingCatalog.find(
+        (model) => model.provider === next.embedding.provider && model.model === modelName,
+      );
+      if (metadata) {
+        applyKnownEmbeddingModel(next, metadata);
+      }
+    });
+  }
+
+  function selectChatModel(modelName: string) {
+    if (modelName === "__custom__") {
+      return;
+    }
+    updateDraft((next) => {
+      next.model.ollama_chat_model = modelName;
+    });
+  }
+
+  function selectRerankerModel(value: string) {
+    updateDraft((next) => {
+      if (value === "__none__") {
+        next.reranking.strategy = "none";
+        next.reranking.model = null;
+        return;
+      }
+      next.reranking.strategy = "cross_encoder";
+      if (value === "__custom__") {
+        next.reranking.model = next.reranking.model ?? "";
+        return;
+      }
+      const catalogEntry = rerankerCatalog.find((entry) => entry.model === value);
+      next.reranking.model = catalogEntry?.model ?? value;
+    });
+  }
+
   if (!draft) {
     return (
       <div className="empty">
@@ -4201,16 +4372,49 @@ function SettingsModels({
             id="settings-embedding-provider"
             label="Embedding provider"
             value={draft.embedding.provider}
-            options={["sentence_transformers", "ollama"]}
-            onChange={(value) => updateDraft((next) => { next.embedding.provider = value; })}
+            options={embeddingProviders}
+            onChange={selectEmbeddingProvider}
           />
-          <SettingText
-            id="settings-embedding-model"
-            label="Embedding model"
-            value={draft.embedding.model}
-            error={validationByField.get("embedding.model")}
-            onChange={(value) => updateDraft((next) => { next.embedding.model = value; })}
-          />
+          {providerEmbeddingModels.length > 0 && (
+            <SettingSelect
+              id="settings-known-embedding-model"
+              label="Known embedding model"
+              value={embeddingModelSelectValue}
+              options={["__custom__", ...providerEmbeddingModels.map((model) => model.model)]}
+              labels={{
+                __custom__: "Custom embedding model",
+                ...Object.fromEntries(
+                  providerEmbeddingModels.map((model) => [
+                    model.model,
+                    `${model.label} · ${model.vector_size} dimensions`,
+                  ]),
+                ),
+              }}
+              onChange={selectEmbeddingModel}
+            />
+          )}
+          {!selectedEmbeddingModel && (
+            <SettingText
+              id="settings-embedding-model"
+              label="Custom embedding model"
+              value={draft.embedding.model}
+              error={validationByField.get("embedding.model")}
+              onChange={(value) => updateDraft((next) => { next.embedding.model = value; })}
+            />
+          )}
+          <div className="settings-model-guidance settings-embedding-guidance">
+            <strong>{selectedEmbeddingModel?.label ?? "Advanced custom embedding model"}</strong>
+            <small>
+              {selectedEmbeddingModel?.resource_notes ??
+                "Custom models remain available, but verify vector dimensions before rebuilding."}
+            </small>
+            <small>
+              {selectedEmbeddingModel?.setup_hint ??
+                (draft.embedding.provider === "ollama"
+                  ? "Custom Ollama embeddings require cosine distance and a live dimension probe before rebuild."
+                  : "Custom SentenceTransformers models should be cached locally and dimension-checked before rebuild.")}
+            </small>
+          </div>
           <SettingText
             id="settings-vector-collection"
             label="Qdrant collection"
@@ -4218,18 +4422,42 @@ function SettingsModels({
             error={validationByField.get("vector.collection_name")}
             onChange={(value) => updateDraft((next) => { next.vector.collection_name = value; })}
           />
+          <div className={`settings-collection-info settings-collection-${collectionStatus}`}>
+            <div className="row row-between">
+              <strong>Collection state</strong>
+              <span className="badge">
+                <span className="dot" />
+                {collectionStatusText}
+              </span>
+            </div>
+            <p>
+              Vector rebuild writes this collection, and vector search reads the latest active vector
+              index for this repository.
+            </p>
+            <small>{collectionMessage}</small>
+            <div className="settings-readiness-actions">
+              <button className="btn btn-sm" type="button" onClick={() => onNavigate("search")}>
+                Open Search Lab
+              </button>
+              <button className="btn btn-sm" type="button" onClick={() => onNavigate("admin")}>
+                Open Repository Administration
+              </button>
+            </div>
+          </div>
           <SettingNumber
             id="settings-vector-size"
             label="Vector size"
             value={draft.vector.vector_size}
             error={validationByField.get("vector.vector_size")}
+            disabled={Boolean(selectedEmbeddingModel)}
             onChange={(value) => updateDraft((next) => { next.vector.vector_size = value; })}
           />
           <SettingSelect
             id="settings-vector-distance"
             label="Distance"
             value={draft.vector.distance}
-            options={["cosine", "dot", "euclid"]}
+            options={distanceOptions}
+            disabledOptions={disabledDistanceOptions}
             error={validationByField.get("vector.distance")}
             onChange={(value) => updateDraft((next) => { next.vector.distance = value; })}
           />
@@ -4239,57 +4467,78 @@ function SettingsModels({
           <div className="eyebrow">Defaults</div>
           <h2>Reranking</h2>
           <SettingSelect
-            id="settings-reranking-strategy"
-            label="Strategy"
-            value={draft.reranking.strategy}
-            options={["cross_encoder", "none"]}
-            onChange={(value) => updateDraft((next) => {
-              next.reranking.strategy = value;
-              if (value === "none") {
-                next.reranking.model = null;
-              }
-            })}
+            id="settings-reranking-model-choice"
+            label="Reranker"
+            value={selectedRerankerOption}
+            options={[
+              "__none__",
+              "__custom__",
+              ...rerankerCatalog.filter((entry) => entry.enabled && entry.model).map((entry) => entry.model!),
+            ]}
+            labels={{
+              __none__: "No reranking",
+              __custom__: "Custom cross-encoder",
+              ...Object.fromEntries(
+                rerankerCatalog
+                  .filter((entry) => entry.model)
+                  .map((entry) => [entry.model!, `${entry.label} · ${modelSourceLabel(entry.source)}`]),
+              ),
+            }}
+            onChange={selectRerankerModel}
           />
-          <SettingText
-            id="settings-reranking-model"
-            label="Reranker model"
-            value={draft.reranking.model ?? ""}
-            error={validationByField.get("reranking.model")}
-            disabled={draft.reranking.strategy === "none"}
-            onChange={(value) => updateDraft((next) => { next.reranking.model = value; })}
-          />
+          {selectedRerankerOption === "__custom__" && draft.reranking.strategy !== "none" && (
+            <SettingText
+              id="settings-reranking-model"
+              label="Custom reranker model"
+              value={draft.reranking.model ?? ""}
+              error={validationByField.get("reranking.model")}
+              onChange={(value) => updateDraft((next) => { next.reranking.model = value; })}
+            />
+          )}
+          <div className="settings-model-guidance">
+            <strong>
+              {draft.reranking.strategy === "none"
+                ? "Reranking disabled"
+                : rerankerCatalog.find((entry) => entry.model === draft.reranking.model)?.label ??
+                  "Custom cross-encoder"}
+            </strong>
+            <small>
+              {draft.reranking.strategy === "none"
+                ? "Baseline retrieval ranking will be used without a local cross-encoder."
+                : rerankerCatalog.find((entry) => entry.model === draft.reranking.model)?.resource_notes ??
+                  "Custom cross-encoders should be cached locally before readiness checks or reranked search."}
+            </small>
+          </div>
         </section>
 
         <section className="card settings-section">
           <div className="eyebrow">Defaults</div>
           <h2>Chat defaults</h2>
-          <SettingText
-            id="settings-chat-model"
-            label="Chat model"
-            value={draft.model.ollama_chat_model}
-            error={validationByField.get("model.ollama_chat_model")}
-            onChange={(value) => updateDraft((next) => { next.model.ollama_chat_model = value; })}
-          />
-          {chatModelRegistry && (
+          {chatCatalog.length > 0 && (
             <SettingSelect
               id="settings-known-chat-model"
-              label="Known Ollama model"
+              label="Chat model"
               value={selectedChatModelInfo?.name ?? "__custom__"}
-              options={["__custom__", ...chatModelRegistry.models.map((model) => model.name)]}
+              options={["__custom__", ...chatCatalog.map((model) => model.name)]}
               labels={{
                 __custom__: "Custom local Ollama model",
                 ...Object.fromEntries(
-                  chatModelRegistry.models.map((model) => [
+                  chatCatalog.map((model) => [
                     model.name,
-                    `${model.label} · ${chatModelRoleLabel(model.role)}`,
+                    `${model.label} · ${chatModelRoleLabel(model.role)} · ${modelSourceLabel(model.source)}`,
                   ]),
                 ),
               }}
-              onChange={(value) => {
-                if (value !== "__custom__") {
-                  updateDraft((next) => { next.model.ollama_chat_model = value; });
-                }
-              }}
+              onChange={selectChatModel}
+            />
+          )}
+          {!selectedChatModelInfo && (
+            <SettingText
+              id="settings-chat-model"
+              label="Custom chat model"
+              value={draft.model.ollama_chat_model}
+              error={validationByField.get("model.ollama_chat_model")}
+              onChange={(value) => updateDraft((next) => { next.model.ollama_chat_model = value; })}
             />
           )}
           <div className="settings-model-guidance">
@@ -4299,9 +4548,14 @@ function SettingsModels({
                 "Any local Ollama model can be used here when it supports the normal /api/chat contract."}
             </small>
             <small>
+              Normal Chat Workspace sessions search local repository context by default using chat-owned
+              retrieval settings, then send that context to this Ollama model.
+            </small>
+            <small>
               {selectedChatModelInfo?.setup_command ??
                 `Run ollama pull ${draft.model.ollama_chat_model || "<model>"} before checking readiness.`}
             </small>
+            <small>{modelCatalog?.runtime_detection.message ?? "Runtime model detection has not been run."}</small>
           </div>
           <SettingSelect
             id="settings-active-prompt"
@@ -4539,12 +4793,14 @@ function SettingNumber({
   label,
   value,
   error,
+  disabled = false,
   onChange,
 }: {
   id: string;
   label: string;
   value: number;
   error?: string;
+  disabled?: boolean;
   onChange: (value: number) => void;
 }) {
   return (
@@ -4554,6 +4810,7 @@ function SettingNumber({
         id={id}
         type="number"
         value={Number.isFinite(value) ? value : 0}
+        disabled={disabled}
         onChange={(event) => onChange(Number(event.target.value))}
       />
       {error && <small className="settings-field-error">{error}</small>}
@@ -4567,6 +4824,7 @@ function SettingSelect({
   value,
   options,
   labels = {},
+  disabledOptions = [],
   error,
   onChange,
 }: {
@@ -4575,6 +4833,7 @@ function SettingSelect({
   value: string;
   options: string[];
   labels?: Record<string, string>;
+  disabledOptions?: string[];
   error?: string;
   onChange: (value: string) => void;
 }) {
@@ -4583,7 +4842,7 @@ function SettingSelect({
       <span>{label}</span>
       <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
         {options.map((option) => (
-          <option value={option} key={option}>
+          <option value={option} key={option} disabled={disabledOptions.includes(option)}>
             {labels[option] ?? option}
           </option>
         ))}
@@ -5508,6 +5767,12 @@ function ChatWorkspace({
     (prompt) => prompt.id === settings.prompt.active_chat_prompt_id,
   );
   const chatDefaultModel = settings?.model.ollama_chat_model ?? "gemma3:4b";
+  const configuredEmbeddingModel = settings
+    ? `${settings.embedding.provider} / ${shortModelName(settings.embedding.model)}`
+    : "embedding unavailable";
+  const latestVectorModel = readiness?.vector.model
+    ? shortModelName(readiness.vector.model)
+    : "no vector index model yet";
 
   useEffect(() => {
     const thread = threadRef.current;
@@ -5654,6 +5919,11 @@ function ChatWorkspace({
               <ReadinessPill label="Vector" item={readiness?.vector ?? null} />
               <ReadinessPill label="Local model" item={readiness?.local_model ?? null} />
             </div>
+            <div className="chat-defaults-note chat-embedding-note">
+              <strong>Embedding for retrieval</strong>
+              <small>Configured: {configuredEmbeddingModel}</small>
+              <small>Latest vector index: {latestVectorModel}</small>
+            </div>
             <div className="row chat-index-actions">
               <button
                 className="btn btn-sm"
@@ -5671,15 +5941,17 @@ function ChatWorkspace({
               >
                 {rebuildBusy === "vector" ? "Rebuilding vector" : "Rebuild vector"}
               </button>
-              <span className="muted">
-                {activeSession?.model ?? chatDefaultModel} · settings are saved on send
-              </span>
+              <span className="muted">Chat model: {activeSession?.model ?? chatDefaultModel}</span>
             </div>
             <div className="chat-defaults-note">
               <strong>New chat default</strong>
               <small>
                 {chatDefaultModel} · {activePrompt?.name ?? settings?.prompt.active_chat_prompt_id ?? "active prompt"}
               </small>
+              <small>
+                Normal chat searches local repository context first with these chat-owned retrieval settings.
+              </small>
+              <small>Retrieval embedding: {configuredEmbeddingModel}</small>
             </div>
           </div>
         </aside>
@@ -5700,7 +5972,7 @@ function ChatWorkspace({
             ) : (
               <div className="empty-inline">
                 <h3>Start a repository chat</h3>
-                <p>Questions use fresh hybrid retrieval and cite stored source chunks.</p>
+                <p>Questions search local repository context by default and cite stored source chunks.</p>
               </div>
             )}
             {busy && (
@@ -6710,6 +6982,10 @@ function chatModelRoleLabel(role: ChatModelInfo["role"]) {
   }
 }
 
+function modelSourceLabel(source: ModelCatalogSource) {
+  return source === "detected" ? "detected locally" : "project-known";
+}
+
 function settingsSummaryRows(settings: RepositorySettings | null) {
   if (!settings) {
     return [{ label: "settings", value: "unavailable" }];
@@ -6738,11 +7014,17 @@ type SettingsValidationIssue = {
   message: string;
 };
 
-function validateSettingsDraft(settings: RepositorySettings | null): SettingsValidationIssue[] {
+function validateSettingsDraft(
+  settings: RepositorySettings | null,
+  modelCatalog: RepositoryModelCatalog | null = null,
+): SettingsValidationIssue[] {
   if (!settings) {
     return [{ field: "settings", message: "Settings are unavailable." }];
   }
   const issues: SettingsValidationIssue[] = [];
+  const knownEmbeddingModel = modelCatalog?.embedding_models.find(
+    (model) => model.provider === settings.embedding.provider && model.model === settings.embedding.model,
+  );
   if (settings.chunking.chunk_size < 100 || settings.chunking.chunk_size > 8000) {
     issues.push({ field: "chunking.chunk_size", message: "Chunk size must be between 100 and 8000." });
   }
@@ -6767,7 +7049,19 @@ function validateSettingsDraft(settings: RepositorySettings | null): SettingsVal
   if (settings.vector.vector_size < 1) {
     issues.push({ field: "vector.vector_size", message: "Vector size must be at least 1." });
   }
-  if (settings.embedding.provider === "ollama" && settings.vector.distance === "dot") {
+  if (knownEmbeddingModel && settings.vector.vector_size !== knownEmbeddingModel.vector_size) {
+    issues.push({
+      field: "vector.vector_size",
+      message: `${knownEmbeddingModel.label} requires ${knownEmbeddingModel.vector_size} dimensions.`,
+    });
+  }
+  if (knownEmbeddingModel && !knownEmbeddingModel.supported_distances.includes(settings.vector.distance)) {
+    issues.push({
+      field: "vector.distance",
+      message: `${knownEmbeddingModel.label} supports ${knownEmbeddingModel.supported_distances.join(", ")} distance.`,
+    });
+  }
+  if (!knownEmbeddingModel && settings.embedding.provider === "ollama" && settings.vector.distance !== "cosine") {
     issues.push({ field: "vector.distance", message: "Ollama embeddings currently require cosine distance." });
   }
   if (settings.reranking.strategy === "cross_encoder" && !settings.reranking.model?.trim()) {
