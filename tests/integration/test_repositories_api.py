@@ -223,6 +223,9 @@ def test_repository_settings_model_catalog_returns_known_defaults() -> None:
         and entry["required"] is True
         for entry in payload["chat_models"]
     )
+    assert {"gemma4:e4b", "gemma4:12b", "qwen3.6", "qwen3.5:9b"} <= {
+        entry["name"] for entry in payload["chat_models"]
+    }
     assert {
         (entry["strategy"], entry["model"], entry["source"]) for entry in payload["reranker_models"]
     } >= {
@@ -274,6 +277,7 @@ class FakeSettingsReadinessChecker:
         provider: str,
         model: str,
         expected_vector_size: int,
+        ollama_base_url: str,
     ) -> RepositorySettingsReadinessItem:
         return RepositorySettingsReadinessItem(
             target="embedding",

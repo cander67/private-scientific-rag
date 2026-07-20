@@ -77,6 +77,7 @@ test("Settings / Models uses the PRD23 model catalog for chat and reranker choic
   assert.match(source, /modelSourceLabel/);
   assert.match(source, /detected locally/);
   assert.match(source, /Runtime model detection has not been run/);
+  assert.match(source, /Normal Chat Workspace sessions search local repository context by default/);
   assert.match(source, /settings-reranking-model-choice/);
   assert.match(source, /No reranking/);
   assert.match(source, /Custom cross-encoder/);

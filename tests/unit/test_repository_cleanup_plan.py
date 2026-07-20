@@ -65,6 +65,7 @@ class FakeCleanupChecker:
         provider: str,
         model: str,
         expected_vector_size: int,
+        ollama_base_url: str,
     ) -> RepositorySettingsReadinessItem:
         return RepositorySettingsReadinessItem(
             target="embedding",

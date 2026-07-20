@@ -30,7 +30,7 @@ class LocalEmbeddingProviderFactory:
     def __init__(
         self,
         *,
-        sentence_transformers_device: str | None = None,
+        sentence_transformers_device: str | None = "auto",
         ollama_base_url: str = "http://localhost:11434",
     ) -> None:
         self._sentence_transformers_device = sentence_transformers_device
@@ -68,7 +68,7 @@ def resolve_embedding_provider(
 
 
 class SentenceTransformersEmbeddingProvider:
-    def __init__(self, model_name: str, *, device: str | None = None) -> None:
+    def __init__(self, model_name: str, *, device: str | None = "auto") -> None:
         self._model_name = model_name
         self._device = device
         self._model: Any | None = None
@@ -106,14 +106,61 @@ class SentenceTransformersEmbeddingProvider:
                 "before rebuilding the vector index."
             ) from exc
 
-        model_kwargs = {"device": self._device} if self._device is not None else {}
-        model = SentenceTransformer(self._model_name, **model_kwargs)
+        model = self._load_sentence_transformer(SentenceTransformer)
         dimension = model.get_sentence_embedding_dimension()
         if dimension is None:
             raise RuntimeError(f"Embedding model has no known vector size: {self._model_name}")
         self._model = model
         self._vector_size = int(dimension)
         return model
+
+    def _load_sentence_transformer(self, sentence_transformer: Any) -> Any:
+        if self._device and self._device != "auto":
+            return sentence_transformer(self._model_name, device=self._device)
+
+        preferred_device = _preferred_sentence_transformers_device()
+        try:
+            return sentence_transformer(self._model_name, device=preferred_device)
+        except Exception:
+            if preferred_device == "cpu":
+                raise
+            return sentence_transformer(self._model_name, device="cpu")
+
+
+def _preferred_sentence_transformers_device() -> str:
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+
+    cuda = getattr(torch, "cuda", None)
+    if cuda is not None and callable(getattr(cuda, "is_available", None)):
+        try:
+            if cuda.is_available():
+                return "cuda"
+        except Exception:
+            pass
+
+    backends = getattr(torch, "backends", None)
+    mps = getattr(backends, "mps", None) if backends is not None else None
+    if mps is not None and callable(getattr(mps, "is_available", None)):
+        try:
+            if mps.is_available():
+                return "mps"
+        except Exception:
+            pass
+    return "cpu"
+
+
+class OllamaEmbeddingError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        readiness_status: str = "failed",
+    ) -> None:
+        super().__init__(message)
+        self.readiness_status = readiness_status
 
 
 class OllamaEmbeddingProvider:
@@ -185,10 +232,23 @@ class OllamaEmbeddingProvider:
             )
             response.raise_for_status()
             payload = response.json()
-        except httpx.HTTPError as exc:
-            raise RuntimeError(
-                f"Ollama is not reachable or embedding model '{self._model_name}' is unavailable. "
-                f"Start Ollama and run `ollama pull {self._model_name}`."
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 404:
+                raise OllamaEmbeddingError(
+                    f"Ollama embedding model '{self._model_name}' is not installed. "
+                    f"Run `ollama pull {self._model_name}`.",
+                    readiness_status="not_installed",
+                ) from exc
+            raise OllamaEmbeddingError(
+                f"Ollama embedding request failed for model '{self._model_name}'. "
+                "Check the local Ollama logs and rerun readiness.",
+                readiness_status="failed",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise OllamaEmbeddingError(
+                f"Ollama is not reachable at {self._base_url}. Start Ollama, then run "
+                f"`ollama pull {self._model_name}` if needed.",
+                readiness_status="unavailable_runtime",
             ) from exc
         except ValueError as exc:
             raise RuntimeError("Ollama returned an unexpected response body.") from exc

@@ -10,6 +10,7 @@ import pytest
 
 from private_rag.vector.embeddings import (
     LocalEmbeddingProviderFactory,
+    OllamaEmbeddingError,
     OllamaEmbeddingProvider,
     SentenceTransformersEmbeddingProvider,
 )
@@ -61,6 +62,38 @@ def test_sentence_transformers_provider_passes_configured_device(
 
     assert provider.embed(["query"]) == [[0.0, 1.0]]
     assert captured == {"model_name": "test-model", "kwargs": {"device": "cpu"}}
+
+
+def test_sentence_transformers_provider_auto_device_falls_back_to_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    devices: list[str] = []
+
+    class FakeSentenceTransformer:
+        def __init__(self, model_name: str, **kwargs: Any) -> None:
+            device = str(kwargs.get("device"))
+            devices.append(device)
+            if device == "mps":
+                raise RuntimeError("accelerator unavailable")
+
+        def get_sentence_embedding_dimension(self) -> int:
+            return 2
+
+        def encode(self, texts: list[str], *, normalize_embeddings: bool) -> list[list[float]]:
+            return [[0.0, 1.0] for _ in texts]
+
+    fake_module = types.SimpleNamespace(SentenceTransformer=FakeSentenceTransformer)
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(is_available=lambda: False),
+        backends=types.SimpleNamespace(mps=types.SimpleNamespace(is_available=lambda: True)),
+    )
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake_module)
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    provider = SentenceTransformersEmbeddingProvider("test-model")
+
+    assert provider.embed(["query"]) == [[0.0, 1.0]]
+    assert devices == ["mps", "cpu"]
 
 
 def test_local_embedding_provider_factory_uses_configured_sentence_transformers_model(
@@ -181,8 +214,9 @@ def test_ollama_embedding_provider_reports_missing_runtime_or_model_guidance() -
         client=client,
     )
 
-    with pytest.raises(RuntimeError, match="ollama pull embeddinggemma:300m"):
+    with pytest.raises(OllamaEmbeddingError, match="ollama pull embeddinggemma:300m") as exc_info:
         provider.embed(["alpha"])
+    assert exc_info.value.readiness_status == "not_installed"
 
 
 def test_ollama_embedding_provider_reports_connection_guidance() -> None:
@@ -196,8 +230,9 @@ def test_ollama_embedding_provider_reports_connection_guidance() -> None:
         client=client,
     )
 
-    with pytest.raises(RuntimeError, match="Start Ollama"):
+    with pytest.raises(OllamaEmbeddingError, match="Start Ollama") as exc_info:
         provider.embed(["alpha"])
+    assert exc_info.value.readiness_status == "unavailable_runtime"
 
 
 def test_ollama_embedding_provider_rejects_malformed_response() -> None:

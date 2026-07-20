@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine
@@ -188,6 +189,70 @@ def test_readiness_checker_reports_missing_chat_model_with_pull_guidance() -> No
     assert result.status == "not_installed"
     assert result.ready is False
     assert "ollama pull custom-local:latest" in result.message
+
+
+def test_readiness_checker_checks_ollama_embedding_with_configured_url() -> None:
+    captured: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        return httpx.Response(200, json={"embeddings": [[0.0, 1.0, 2.0]]})
+
+    checker = LocalSettingsReadinessChecker(
+        ollama_embedding_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = checker.check_embedding(
+        provider="ollama",
+        model="custom-embed:latest",
+        expected_vector_size=3,
+        ollama_base_url="http://configured-ollama.test",
+    )
+
+    assert captured["url"] == "http://configured-ollama.test/api/embed"
+    assert result.status == "ready"
+    assert result.ready is True
+    assert "/api/embed" in result.message
+
+
+def test_readiness_checker_reports_missing_ollama_embedding_model() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"error": "model not found"}, request=request)
+
+    checker = LocalSettingsReadinessChecker(
+        ollama_embedding_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = checker.check_embedding(
+        provider="ollama",
+        model="embeddinggemma:300m",
+        expected_vector_size=768,
+        ollama_base_url="http://ollama.test",
+    )
+
+    assert result.status == "not_installed"
+    assert result.ready is False
+    assert "ollama pull embeddinggemma:300m" in result.message
+
+
+def test_readiness_checker_reports_ollama_embedding_dimension_mismatch() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"embeddings": [[0.0, 1.0]]})
+
+    checker = LocalSettingsReadinessChecker(
+        ollama_embedding_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = checker.check_embedding(
+        provider="ollama",
+        model="custom-embed:latest",
+        expected_vector_size=3,
+        ollama_base_url="http://ollama.test",
+    )
+
+    assert result.status == "failed"
+    assert result.ready is False
+    assert "vector size is 2" in result.message
 
 
 def test_model_catalog_uses_known_metadata_without_runtime_detection() -> None:

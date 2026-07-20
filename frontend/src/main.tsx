@@ -4548,6 +4548,10 @@ function SettingsModels({
                 "Any local Ollama model can be used here when it supports the normal /api/chat contract."}
             </small>
             <small>
+              Normal Chat Workspace sessions search local repository context by default using chat-owned
+              retrieval settings, then send that context to this Ollama model.
+            </small>
+            <small>
               {selectedChatModelInfo?.setup_command ??
                 `Run ollama pull ${draft.model.ollama_chat_model || "<model>"} before checking readiness.`}
             </small>
@@ -5935,6 +5939,9 @@ function ChatWorkspace({
               <small>
                 {chatDefaultModel} · {activePrompt?.name ?? settings?.prompt.active_chat_prompt_id ?? "active prompt"}
               </small>
+              <small>
+                Normal chat searches local repository context first with these chat-owned retrieval settings.
+              </small>
             </div>
           </div>
         </aside>
@@ -5955,7 +5962,7 @@ function ChatWorkspace({
             ) : (
               <div className="empty-inline">
                 <h3>Start a repository chat</h3>
-                <p>Questions use fresh hybrid retrieval and cite stored source chunks.</p>
+                <p>Questions search local repository context by default and cite stored source chunks.</p>
               </div>
             )}
             {busy && (

@@ -55,6 +55,7 @@ test("Chat Workspace exposes retrieval readiness and explicit rebuild controls",
   assert.match(source, /chat-top-k/);
   assert.match(source, /Last checked/);
   assert.match(source, /Checking indexes and local model/);
+  assert.match(source, /searches local repository context first/);
 });
 
 test("Chat Workspace supports thinking state and session deletion", () => {
