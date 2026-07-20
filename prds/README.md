@@ -16,7 +16,7 @@ Current status:
 - Backlog: PRD10 structured scientific and multimodal parsing.
 - Backlog: PRD11 chemistry and patent extensions.
 - Backlog: PRD12 bulk patent data integration.
-- Backlog: PRD13 OCR and page-image text recovery.
+- Backlog: PRD13 parser selection, OCR, and page-image text recovery.
 - Backlog: PRD14 structured table extraction.
 - Complete: PRD15 additional embedding models.
 - Backlog: PRD16 immutable embedding indexes.
@@ -54,7 +54,7 @@ Shared decisions:
 - Ollama embedding scope: PRD15 should add one generic Ollama embedding provider plus registry metadata for known supported embedding models. New Ollama embedding models should usually be registry/settings additions when they support Ollama embeddings and pass readiness/vector-dimension checks; they should not require one-off provider code.
 - Ollama chat scope: ordinary Ollama chat models should flow through the existing generic chat provider by model name. PRD22 tracks registry/readiness/docs expansion for additional chat models; focused model-specific work is only expected for unusual prompting, context, multimodal, tool/function, or structured-output requirements.
 - Chat context inspection scope: PRD25 owns exposing the exact local LLM payload for normal chat. Prompt Sandbox remains the owner for side-by-side prompt/retrieval/model experiments.
-- Repository loading and parser controls scope: PRD26 owns visible repository-switch loading states and fixed parser-choice controls, including an `Auto` parser option.
+- Repository loading and parser controls scope: PRD26 owns visible repository-switch loading states and fixed parser-choice controls, including an `Auto` parser option. PRD13 owns making those parser choices operational during upload, reprocess, OCR, and index freshness checks.
 
 PRD files:
 
@@ -70,7 +70,7 @@ PRD files:
 10. [Structured scientific and multimodal parsing](10-structured-scientific-multimodal-parsing.md) - backlog
 11. [Chemistry and patent extensions](11-chemistry-patent-extensions.md) - backlog
 12. [Bulk patent data integration](12-bulk-patent-data-integration.md) - backlog
-13. [OCR and page-image text recovery](13-ocr-page-image-text-recovery.md) - backlog
+13. [Parser selection, OCR, and page-image text recovery](13-ocr-page-image-text-recovery.md) - backlog
 14. [Structured table extraction](14-structured-table-extraction.md) - backlog
 15. [Additional embedding models](15-additional-embedding-models.md) - complete
 16. [Immutable embedding indexes](16-immutable-embedding-indexes.md) - backlog
