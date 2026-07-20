@@ -48,6 +48,15 @@ class ChatLLM(Protocol):
 
 MODEL_REGISTRY: list[ChatModelInfo] = [
     ChatModelInfo(
+        name="qwen2.5:3b",
+        label="Qwen 2.5 3B",
+        role="balanced_local",
+        notes="Small Qwen 2.5 local chat option for lightweight repository-grounded answers.",
+        setup_command="ollama pull qwen2.5:3b",
+        local_resource_notes="Lower memory footprint than qwen2.5:7b; useful on smaller local hosts.",
+        context_window_notes="Uses the generic Ollama /api/chat path with chat-owned retrieval context.",
+    ),
+    ChatModelInfo(
         name="gemma3:4b",
         label="Gemma 3 4B",
         role="recommended_default",
