@@ -81,6 +81,17 @@ test("Dashboard quick actions and recent activity route to workflow owners", () 
 
 test("Dashboard supports repository switching and no-repository recovery", () => {
   assert.match(source, /repositories=\{repositories\}/);
+  assert.match(source, /type RepositoryLoadState =/);
+  assert.match(source, /const repositoryLoadCycle = useRef\(0\)/);
+  assert.match(source, /setRepositoryLoadState\(\{[\s\S]*?status: "loading"/);
+  assert.match(source, /loadRepositoryScopedData/);
+  assert.match(source, /Promise\.allSettled/);
+  assert.match(source, /repositoryLoadCycle\.current !== cycle/);
+  assert.match(source, /status: failed \? "failed" : "loaded"/);
+  assert.match(source, /repository-load-\$\{repositoryLoadState\.status\}/);
+  assert.match(source, /loadState=\{repositoryLoadState\}/);
+  assert.match(source, /Loading repository state\. Previous repository data has been cleared/);
+  assert.match(source, /Refreshing counts, settings, documents, chat sessions, and model catalog/);
   assert.match(source, /onSelectRepository=\{activateRepository\}/);
   assert.match(source, /onUseDefaultRepository=\{\(\) => void useDefaultRepository\(\)\}/);
   assert.match(source, /async function useDefaultRepository\(\)/);
@@ -94,6 +105,10 @@ test("Dashboard supports repository switching and no-repository recovery", () =>
   assert.match(source, /activateRepository\(recreatedRepository\)/);
   assert.match(styles, /\.dashboard-empty/);
   assert.match(styles, /\.dashboard-repository-picker/);
+  assert.match(styles, /\.dashboard-loading/);
+  assert.match(styles, /\.repository-load-loading/);
+  assert.match(styles, /\.repository-load-loaded/);
+  assert.match(styles, /\.repository-load-failed/);
 
   const dashboardComponent = source.match(/function RepositoryDashboard[\s\S]*?function DashboardIndexCard/)?.[0] ?? "";
   assert.doesNotMatch(dashboardComponent, /Delete all|reset/i);

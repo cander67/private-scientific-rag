@@ -517,6 +517,24 @@ td .name {
   color: var(--danger);
 }
 
+.repository-load-loading {
+  border-color: transparent;
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.repository-load-loaded {
+  border-color: transparent;
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.repository-load-failed {
+  border-color: transparent;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .status {
   display: inline-flex;
   align-items: center;
@@ -834,6 +852,15 @@ textarea {
 
 .dashboard-empty {
   max-width: 720px;
+}
+
+.dashboard-loading {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  padding: var(--s3);
 }
 
 .dashboard-repository-picker {
@@ -1325,6 +1352,13 @@ textarea {
   color: var(--danger);
   font-size: 0.76rem;
   font-weight: 650;
+}
+
+.settings-field-note {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: var(--s2) 0 0;
 }
 
 .settings-model-guidance {

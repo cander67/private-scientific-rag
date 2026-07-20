@@ -20,6 +20,7 @@ from private_rag.repositories.schemas import (
     ChatModelCatalogEntry,
     EmbeddingModelCatalogEntry,
     ModelCatalogRuntimeDetection,
+    ParserCatalogEntry,
     RecreateValidationIssue,
     RecreateValidationRequest,
     RecreateValidationResponse,
@@ -66,6 +67,87 @@ from private_rag.vector.store import VectorStore, VectorStoreError
 DEFAULT_REPOSITORY_NAME = "Default Repository"
 CLEAR_ALL_CONFIRMATION_VALUE = "DELETE ALL LOCAL REPOSITORIES"
 DashboardIndexStatus = Literal["ready", "missing", "partial", "stale"]
+
+PARSER_CATALOG: tuple[ParserCatalogEntry, ...] = (
+    ParserCatalogEntry(
+        id="auto",
+        label="Auto parser chain",
+        role="auto",
+        supported_as=["structured", "fallback"],
+        notes=(
+            "Use the project default local chain and keep future parser-selection improvements "
+            "behind the same saved setting."
+        ),
+    ),
+    ParserCatalogEntry(
+        id="pymupdf",
+        label="PyMuPDF",
+        role="structured",
+        supported_as=["structured", "fallback"],
+        notes="Fast local PDF text extraction with page-aware output for born-digital PDFs.",
+    ),
+    ParserCatalogEntry(
+        id="docling",
+        label="Docling",
+        role="structured",
+        supported_as=["structured", "fallback"],
+        notes="Structured scientific PDF parsing path for richer layout, table, and figure metadata.",
+        readiness_required=True,
+    ),
+    ParserCatalogEntry(
+        id="pdfplumber",
+        label="pdfplumber",
+        role="structured",
+        supported_as=["structured", "fallback"],
+        notes=(
+            "Backlog table/layout parser for born-digital PDFs; useful before OCR routing but "
+            "not a scanned-document OCR provider."
+        ),
+        readiness_required=True,
+    ),
+    ParserCatalogEntry(
+        id="pypdf",
+        label="pypdf",
+        role="fallback",
+        supported_as=["structured", "fallback"],
+        notes="Conservative local PDF text-layer parser and current fallback baseline.",
+    ),
+    ParserCatalogEntry(
+        id="built_in_fallback",
+        label="Built-in fallback",
+        role="fallback",
+        supported_as=["structured", "fallback"],
+        notes="Minimal built-in parser used when optional parser packages cannot recover text.",
+    ),
+    ParserCatalogEntry(
+        id="needs_ocr",
+        label="Needs OCR gate",
+        role="ocr_gate",
+        supported_as=["fallback"],
+        notes=(
+            "Marks image-only or very low-text PDFs for OCR inspection without running OCR "
+            "during ordinary ingestion."
+        ),
+    ),
+    ParserCatalogEntry(
+        id="ocrmypdf_tesseract",
+        label="OCRmyPDF + Tesseract",
+        role="ocr_provider",
+        supported_as=["fallback"],
+        notes="Planned PRD13 baseline local OCR provider for scanned/image-heavy PDF pages.",
+        setup_hint="Install OCRmyPDF and Tesseract in the local Python/runtime environment.",
+        readiness_required=True,
+    ),
+    ParserCatalogEntry(
+        id="rapidocr",
+        label="RapidOCR",
+        role="ocr_provider",
+        supported_as=["fallback"],
+        notes="Planned PRD13 optional OCR fallback when Tesseract confidence or text quality is poor.",
+        setup_hint="Install RapidOCR only when evaluating the optional OCR fallback path.",
+        readiness_required=True,
+    ),
+)
 
 
 class SettingsReadinessChecker(Protocol):
@@ -453,6 +535,7 @@ def repository_model_catalog(
                 readiness_required=True,
             ),
         ],
+        parser_choices=list(PARSER_CATALOG),
         runtime_detection=ModelCatalogRuntimeDetection(
             checked=False,
             provider="ollama",

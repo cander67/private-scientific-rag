@@ -67,6 +67,12 @@ type RepositorySettingsResponse = RepositoryResponse & {
   settings: RepositorySettings;
 };
 
+type RepositoryLoadState = {
+  repositoryId: string | null;
+  status: "empty" | "loading" | "loaded" | "failed";
+  message: string;
+};
+
 type SettingsImpact = {
   category:
     | "document_reprocessing"
@@ -142,11 +148,22 @@ type RerankerModelCatalogEntry = {
   readiness_required: boolean;
 };
 
+type ParserCatalogEntry = {
+  id: string;
+  label: string;
+  role: "auto" | "structured" | "fallback" | "ocr_gate" | "ocr_provider";
+  supported_as: Array<"structured" | "fallback">;
+  notes: string;
+  setup_hint: string | null;
+  readiness_required: boolean;
+};
+
 type RepositoryModelCatalog = {
   repository_id: string;
   embedding_models: EmbeddingModelCatalogEntry[];
   chat_models: ChatModelCatalogEntry[];
   reranker_models: RerankerModelCatalogEntry[];
+  parser_choices: ParserCatalogEntry[];
   runtime_detection: {
     checked: boolean;
     provider: "ollama";
@@ -894,6 +911,11 @@ function App() {
   const [exportSummary, setExportSummary] = useState<ExportManifestSummary | null>(null);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [dashboardMessage, setDashboardMessage] = useState("Loading repository summary");
+  const [repositoryLoadState, setRepositoryLoadState] = useState<RepositoryLoadState>({
+    repositoryId: null,
+    status: "empty",
+    message: "No active repository",
+  });
   const [adminInventory, setAdminInventory] = useState<RepositoryAdminInventory | null>(null);
   const [adminMessage, setAdminMessage] = useState("Loading local repository inventory");
   const [deletePreview, setDeletePreview] = useState<RepositoryDeletePreview | null>(null);
@@ -921,6 +943,7 @@ function App() {
     documentId: string;
     chunkId: string;
   } | null>(null);
+  const repositoryLoadCycle = useRef(0);
 
   useEffect(() => {
     const onHashChange = () => setActiveView(viewFromHash(window.location.hash));
@@ -938,14 +961,7 @@ function App() {
 
   useEffect(() => {
     if (repository) {
-      void loadDocuments(repository.id);
-      void loadRepositorySettings(repository.id);
-      void loadRepositoryModelCatalog(repository.id);
-      void loadChatModelRegistry(repository.id);
-      void loadDashboardSummary(repository.id);
-      void loadChatSessions(repository.id);
-      void loadChatReadiness(repository.id);
-      void loadSandboxPrompts(repository.id);
+      void loadRepositoryScopedData(repository);
     }
   }, [repository]);
 
@@ -1062,6 +1078,12 @@ function App() {
         null;
       if (selectedRepository) {
         activateRepository(selectedRepository);
+      } else {
+        setRepositoryLoadState({
+          repositoryId: null,
+          status: "empty",
+          message: "No local repository is active",
+        });
       }
       setMessage("Ready");
     } catch {
@@ -1072,6 +1094,11 @@ function App() {
         setRepositories([payload.repository]);
         setMessage("Ready");
       } catch {
+        setRepositoryLoadState({
+          repositoryId: null,
+          status: "failed",
+          message: "Backend unavailable",
+        });
         setMessage("Backend unavailable");
       }
     }
@@ -1096,7 +1123,13 @@ function App() {
   }
 
   function activateRepository(nextRepository: RepositoryRead) {
+    repositoryLoadCycle.current += 1;
     window.localStorage.setItem("activeRepositoryId", nextRepository.id);
+    setRepositoryLoadState({
+      repositoryId: nextRepository.id,
+      status: "loading",
+      message: `Loading ${nextRepository.name}`,
+    });
     setRepository(nextRepository);
     setDocuments([]);
     setSelectedDocumentId(null);
@@ -1129,6 +1162,31 @@ function App() {
     setSandboxMessage("Loading sandbox prompts");
   }
 
+  async function loadRepositoryScopedData(nextRepository: RepositoryRead) {
+    const cycle = repositoryLoadCycle.current;
+    const results = await Promise.allSettled([
+      loadDocuments(nextRepository.id),
+      loadRepositorySettings(nextRepository.id),
+      loadRepositoryModelCatalog(nextRepository.id),
+      loadChatModelRegistry(nextRepository.id),
+      loadDashboardSummary(nextRepository.id),
+      loadChatSessions(nextRepository.id),
+      loadChatReadiness(nextRepository.id),
+      loadSandboxPrompts(nextRepository.id),
+    ]);
+    if (repositoryLoadCycle.current !== cycle) {
+      return;
+    }
+    const failed = results.some((result) => result.status === "rejected" || result.value === false);
+    setRepositoryLoadState({
+      repositoryId: nextRepository.id,
+      status: failed ? "failed" : "loaded",
+      message: failed
+        ? `Some ${nextRepository.name} data could not load`
+        : `${nextRepository.name} loaded`,
+    });
+  }
+
   async function loadDocuments(repositoryId: string) {
     try {
       const response = await fetch(`${API_BASE}/repositories/${repositoryId}/documents`);
@@ -1139,8 +1197,10 @@ function App() {
           ? current
           : (payload[0]?.id ?? null),
       );
+      return true;
     } catch {
       setMessage("Could not load documents");
+      return false;
     }
   }
 
@@ -1153,9 +1213,11 @@ function App() {
       const payload = (await response.json()) as RepositorySettingsResponse;
       setRepositorySettings(payload.settings);
       setExportIncludeSources(payload.settings.export.include_sources);
+      return true;
     } catch {
       setRepositorySettings(null);
       setExportMessage("Could not load export defaults");
+      return false;
     }
   }
 
@@ -1168,8 +1230,10 @@ function App() {
       const payload = (await response.json()) as ChatModelRegistry;
       setChatModelRegistry(payload);
       setSandboxModel((current) => current || payload.default_model);
+      return true;
     } catch {
       setChatModelRegistry(null);
+      return false;
     }
   }
 
@@ -1180,8 +1244,10 @@ function App() {
         throw new Error("model catalog unavailable");
       }
       setModelCatalog((await response.json()) as RepositoryModelCatalog);
+      return true;
     } catch {
       setModelCatalog(null);
+      return false;
     }
   }
 
@@ -1193,9 +1259,11 @@ function App() {
       }
       setDashboardSummary((await response.json()) as DashboardSummary);
       setDashboardMessage("Repository summary loaded");
+      return true;
     } catch {
       setDashboardSummary(null);
       setDashboardMessage("Could not load repository summary");
+      return false;
     }
   }
 
@@ -1279,6 +1347,11 @@ function App() {
         setDocuments([]);
         setRepositorySettings(null);
         setDashboardSummary(null);
+        setRepositoryLoadState({
+          repositoryId: null,
+          status: "empty",
+          message: "No local repository is active",
+        });
       }
       void loadAdminInventory();
       setAdminMessage(`Deleted ${payload.repository.name}`);
@@ -1446,8 +1519,10 @@ function App() {
           : (payload[0]?.id ?? null),
       );
       setChatMessage(payload.length > 0 ? "Ready" : "No chat sessions yet");
+      return true;
     } catch {
       setChatMessage("Could not load chat sessions");
+      return false;
     }
   }
 
@@ -1482,11 +1557,13 @@ function App() {
       if (announce) {
         setChatMessage("Readiness check complete");
       }
+      return true;
     } catch {
       setChatReadiness(null);
       if (announce) {
         setChatMessage("Could not check chat readiness");
       }
+      return false;
     } finally {
       if (announce) {
         setChatReadinessBusy(false);
@@ -1511,8 +1588,10 @@ function App() {
       } else if (!selectedPromptStillExists) {
         setSelectedSandboxPromptId(null);
       }
+      return true;
     } catch {
       setSandboxMessage("Could not load sandbox prompts");
+      return false;
     }
   }
 
@@ -2266,6 +2345,11 @@ function App() {
                 ? "Recreate Repository"
           : "Document Manager";
   const subtitle =
+    repositoryLoadState.status === "loading"
+      ? repositoryLoadState.message
+      : repositoryLoadState.status === "failed"
+        ? repositoryLoadState.message
+        :
     activeView === "dashboard"
       ? `${repository?.name ?? "Default Repository"} · repository overview`
       : activeView === "search"
@@ -2401,6 +2485,16 @@ function App() {
               </div>
             </div>
             <div className="topbar-actions">
+              <span className={`badge repository-load-${repositoryLoadState.status}`}>
+                <span className="dot" />
+                {repositoryLoadState.status === "loading"
+                  ? "Loading"
+                  : repositoryLoadState.status === "loaded"
+                    ? "Loaded"
+                    : repositoryLoadState.status === "failed"
+                      ? "Load failed"
+                      : "No repository"}
+              </span>
               <label className="repository-picker" htmlFor="active-repository">
                 <span>Repository</span>
                 <select
@@ -2464,6 +2558,7 @@ function App() {
                 settings={repositorySettings}
                 summary={dashboardSummary}
                 message={dashboardMessage}
+                loadState={repositoryLoadState}
                 onSelectRepository={activateRepository}
                 onUseDefaultRepository={() => void useDefaultRepository()}
                 onNavigate={navigateTo}
@@ -2991,6 +3086,7 @@ function RepositoryDashboard({
   settings,
   summary,
   message,
+  loadState,
   onSelectRepository,
   onUseDefaultRepository,
   onNavigate,
@@ -3003,6 +3099,7 @@ function RepositoryDashboard({
   settings: RepositorySettings | null;
   summary: DashboardSummary | null;
   message: string;
+  loadState: RepositoryLoadState;
   onSelectRepository: (repository: RepositoryRead) => void;
   onUseDefaultRepository: () => void;
   onNavigate: (view: View) => void;
@@ -3039,6 +3136,15 @@ function RepositoryDashboard({
   const configRows = dashboardConfigRows(summary, settings);
   const warnings = summary?.warnings ?? [];
   const recentActivity = summary?.recent_activity ?? [];
+  const loadingCurrentRepository =
+    loadState.status === "loading" && loadState.repositoryId === repository.id;
+  const failedCurrentRepository =
+    loadState.status === "failed" && loadState.repositoryId === repository.id;
+  const dashboardStatusMessage = loadingCurrentRepository
+    ? "Loading repository state. Previous repository data has been cleared."
+    : failedCurrentRepository
+      ? loadState.message
+      : message;
 
   return (
     <div className="dashboard-layout">
@@ -3048,12 +3154,25 @@ function RepositoryDashboard({
             <div className="eyebrow">Repository dashboard</div>
             <h2>{repository?.name ?? "No active repository"}</h2>
           </div>
-          <span className={`badge ${repository ? "badge-ok" : "badge-warn"}`}>
+          <span
+            className={`badge ${
+              failedCurrentRepository ? "badge-danger" : loadingCurrentRepository ? "badge-warn" : "badge-ok"
+            }`}
+          >
             <span className="dot" />
-            {repository ? "Active repository" : "No repository selected"}
+            {failedCurrentRepository
+              ? "Load failed"
+              : loadingCurrentRepository
+                ? "Loading repository"
+                : "Active repository"}
           </span>
         </div>
-        <p className="hint">{message}</p>
+        <p className="hint">{dashboardStatusMessage}</p>
+        {loadingCurrentRepository && (
+          <div className="dashboard-loading" role="status">
+            Refreshing counts, settings, documents, chat sessions, and model catalog.
+          </div>
+        )}
         {repositories.length > 1 && (
           <label className="dashboard-repository-picker" htmlFor="dashboard-repository">
             <span>Repository</span>
@@ -4007,6 +4126,22 @@ function SettingsModels({
       : rerankerCatalog.find(
           (entry) => entry.strategy === draft?.reranking.strategy && entry.model === draft.reranking.model,
         )?.model ?? "__custom__";
+  const parserCatalog = modelCatalog?.parser_choices ?? defaultParserCatalog();
+  const structuredParserChoices = parserCatalog.filter((entry) =>
+    entry.supported_as.includes("structured"),
+  );
+  const fallbackParserChoices = parserCatalog.filter((entry) =>
+    entry.supported_as.includes("fallback"),
+  );
+  const parserLabels = Object.fromEntries(
+    parserCatalog.map((entry) => [entry.id, entry.label]),
+  );
+  const selectedStructuredParser = parserCatalog.find(
+    (entry) => entry.id === draft?.parser.structured_parser,
+  );
+  const selectedFallbackParser = parserCatalog.find(
+    (entry) => entry.id === draft?.parser.fallback_parser,
+  );
   const collectionChanged = Boolean(
     settings && draft && settings.vector.collection_name !== draft.vector.collection_name,
   );
@@ -4325,20 +4460,30 @@ function SettingsModels({
             error={validationByField.get("chunking.chunk_overlap")}
             onChange={(value) => updateDraft((next) => { next.chunking.chunk_overlap = value; })}
           />
-          <SettingText
+          <SettingSelect
             id="settings-structured-parser"
             label="Structured parser"
             value={draft.parser.structured_parser}
+            options={structuredParserChoices.map((entry) => entry.id)}
+            labels={parserLabels}
             error={validationByField.get("parser.structured_parser")}
             onChange={(value) => updateDraft((next) => { next.parser.structured_parser = value; })}
           />
-          <SettingText
+          {selectedStructuredParser && (
+            <p className="settings-field-note">{selectedStructuredParser.notes}</p>
+          )}
+          <SettingSelect
             id="settings-fallback-parser"
             label="Fallback parser"
             value={draft.parser.fallback_parser}
+            options={fallbackParserChoices.map((entry) => entry.id)}
+            labels={parserLabels}
             error={validationByField.get("parser.fallback_parser")}
             onChange={(value) => updateDraft((next) => { next.parser.fallback_parser = value; })}
           />
+          {selectedFallbackParser && (
+            <p className="settings-field-note">{selectedFallbackParser.notes}</p>
+          )}
         </section>
 
         <section className="card settings-section">
@@ -6986,6 +7131,92 @@ function modelSourceLabel(source: ModelCatalogSource) {
   return source === "detected" ? "detected locally" : "project-known";
 }
 
+function defaultParserCatalog(): ParserCatalogEntry[] {
+  return [
+    {
+      id: "auto",
+      label: "Auto parser chain",
+      role: "auto",
+      supported_as: ["structured", "fallback"],
+      notes: "Use the project default local parser chain.",
+      setup_hint: null,
+      readiness_required: false,
+    },
+    {
+      id: "pymupdf",
+      label: "PyMuPDF",
+      role: "structured",
+      supported_as: ["structured", "fallback"],
+      notes: "Fast local PDF text extraction with page-aware output.",
+      setup_hint: null,
+      readiness_required: false,
+    },
+    {
+      id: "docling",
+      label: "Docling",
+      role: "structured",
+      supported_as: ["structured", "fallback"],
+      notes: "Structured scientific PDF parsing for richer layout metadata.",
+      setup_hint: null,
+      readiness_required: true,
+    },
+    {
+      id: "pdfplumber",
+      label: "pdfplumber",
+      role: "structured",
+      supported_as: ["structured", "fallback"],
+      notes: "Backlog table/layout parser for born-digital PDFs.",
+      setup_hint: null,
+      readiness_required: true,
+    },
+    {
+      id: "pypdf",
+      label: "pypdf",
+      role: "fallback",
+      supported_as: ["structured", "fallback"],
+      notes: "Conservative local PDF text-layer parser.",
+      setup_hint: null,
+      readiness_required: false,
+    },
+    {
+      id: "built_in_fallback",
+      label: "Built-in fallback",
+      role: "fallback",
+      supported_as: ["structured", "fallback"],
+      notes: "Minimal built-in fallback when optional parsers cannot recover text.",
+      setup_hint: null,
+      readiness_required: false,
+    },
+    {
+      id: "needs_ocr",
+      label: "Needs OCR gate",
+      role: "ocr_gate",
+      supported_as: ["fallback"],
+      notes: "Marks image-only or low-text PDFs for OCR inspection.",
+      setup_hint: null,
+      readiness_required: false,
+    },
+    {
+      id: "ocrmypdf_tesseract",
+      label: "OCRmyPDF + Tesseract",
+      role: "ocr_provider",
+      supported_as: ["fallback"],
+      notes: "Planned local OCR provider for scanned/image-heavy PDF pages.",
+      setup_hint: "Install OCRmyPDF and Tesseract locally.",
+      readiness_required: true,
+    },
+    {
+      id: "rapidocr",
+      label: "RapidOCR",
+      role: "ocr_provider",
+      supported_as: ["fallback"],
+      notes: "Planned optional OCR fallback when baseline OCR quality is poor.",
+      setup_hint: "Install RapidOCR locally for OCR fallback evaluation.",
+      readiness_required: true,
+    },
+  ];
+}
+
 function settingsSummaryRows(settings: RepositorySettings | null) {
   if (!settings) {
     return [{ label: "settings", value: "unavailable" }];
@@ -7025,6 +7256,13 @@ function validateSettingsDraft(
   const knownEmbeddingModel = modelCatalog?.embedding_models.find(
     (model) => model.provider === settings.embedding.provider && model.model === settings.embedding.model,
   );
+  const parserCatalog = modelCatalog?.parser_choices ?? defaultParserCatalog();
+  const structuredParserChoices = parserCatalog.filter((entry) =>
+    entry.supported_as.includes("structured"),
+  );
+  const fallbackParserChoices = parserCatalog.filter((entry) =>
+    entry.supported_as.includes("fallback"),
+  );
   if (settings.chunking.chunk_size < 100 || settings.chunking.chunk_size > 8000) {
     issues.push({ field: "chunking.chunk_size", message: "Chunk size must be between 100 and 8000." });
   }
@@ -7036,9 +7274,13 @@ function validateSettingsDraft(
   }
   if (!settings.parser.structured_parser.trim()) {
     issues.push({ field: "parser.structured_parser", message: "Structured parser is required." });
+  } else if (!structuredParserChoices.some((entry) => entry.id === settings.parser.structured_parser)) {
+    issues.push({ field: "parser.structured_parser", message: "Choose a supported structured parser." });
   }
   if (!settings.parser.fallback_parser.trim()) {
     issues.push({ field: "parser.fallback_parser", message: "Fallback parser is required." });
+  } else if (!fallbackParserChoices.some((entry) => entry.id === settings.parser.fallback_parser)) {
+    issues.push({ field: "parser.fallback_parser", message: "Choose a supported fallback parser." });
   }
   if (!settings.embedding.model.trim()) {
     issues.push({ field: "embedding.model", message: "Embedding model is required." });
