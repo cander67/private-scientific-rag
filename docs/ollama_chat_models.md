@@ -2,6 +2,8 @@
 
 PRD22 keeps one generic Ollama chat provider for ordinary local text-chat models. The provider sends the selected repository or sandbox model name to Ollama's `/api/chat` endpoint, so most new chat models are settings and registry work rather than new adapter work.
 
+PRD23 user-testing remediation should add current local workstation choices to the known model catalog, including `gemma4:e4b`, `gemma4:12b`, `qwen3.6`, and `qwen3.5:9b`, with setup commands and resource notes. These remain optional local models; default CI and default setup should not require them.
+
 ## Generic Model Contract
 
 An Ollama chat model can use the existing RAG chat and Prompt Sandbox path when it:
@@ -12,6 +14,8 @@ An Ollama chat model can use the existing RAG chat and Prompt Sandbox path when 
 - fits the retrieved context selected by the user-facing top-k controls.
 
 Repository settings store the active chat model string in `model.ollama_chat_model`. New Chat Workspace sessions use that saved value by default, and Prompt Sandbox runs persist the model that produced each answer.
+
+Normal Chat Workspace sessions are repository-grounded by default. They use chat-owned retrieval settings, retrieve local repository context, and send that context to the selected Ollama chat model. Search Lab settings do not implicitly carry over to chat.
 
 ## Adding A Recommended Registry Entry
 
