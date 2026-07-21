@@ -69,6 +69,36 @@ class FakeOcrProvider:
         )
 
 
+class LowQualityOcrProvider:
+    provider_name = "ocrmypdf_tesseract"
+    provider_version = "test-low"
+
+    def recognize_page(self, image: OcrPageImage) -> NormalizedOcrPageResult:
+        return normalize_ocr_page_result(
+            page=image.page,
+            text="low",
+            confidence=0.2,
+            provider_name=self.provider_name,
+            provider_version=self.provider_version,
+            image=image,
+        )
+
+
+class FallbackOcrProvider:
+    provider_name = "rapidocr"
+    provider_version = "test-fallback"
+
+    def recognize_page(self, image: OcrPageImage) -> NormalizedOcrPageResult:
+        return normalize_ocr_page_result(
+            page=image.page,
+            text=f"RapidOCR fallback text for page {image.page}",
+            confidence=0.91,
+            provider_name=self.provider_name,
+            provider_version=self.provider_version,
+            image=image,
+        )
+
+
 def test_upload_returns_none_for_missing_repository(tmp_path: Path) -> None:
     session = next(_session())
 
@@ -305,7 +335,7 @@ def test_run_document_ocr_missing_provider_preserves_prior_state(
         "render_pages_for_ocr",
         lambda **kwargs: ([fake_image], []),
     )
-    monkeypatch.setattr(ingestion_service, "default_ocr_provider", lambda: None)
+    monkeypatch.setattr(ingestion_service, "default_ocr_provider", lambda *args, **kwargs: None)
     uploaded = upload_document(
         session,
         repository_id,
@@ -329,7 +359,247 @@ def test_run_document_ocr_missing_provider_preserves_prior_state(
     assert inspection.version.chunk_count == 0
     assert inspection.version.metadata["ocr_run"]["status"] == "missing_dependency"
     assert inspection.version.metadata["ocr_pages"][0]["provider"]["version"] == "not-installed"
-    assert "tesseract is not installed; OCR is pending for page 1." in inspection.version.warnings
+    assert (
+        "ocrmypdf_tesseract is not installed; OCR is pending for page 1."
+        in inspection.version.warnings
+    )
+
+
+def test_run_document_ocr_uses_fallback_when_quality_is_low(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    settings = Settings(data_dir=tmp_path)
+    monkeypatch.setattr(
+        ingestion_service,
+        "parse_source",
+        lambda *args, **kwargs: ParsedDocument(
+            source_type="pdf",
+            text="",
+            parser_name="pypdf",
+            parser_version="test-parser",
+            page_count=1,
+            ocr_required=True,
+            metadata={
+                "page_ocr_routes": [
+                    {
+                        "page": 1,
+                        "classification": "scanned",
+                        "text_length": 0,
+                        "word_count": 0,
+                        "image_count": 1,
+                        "quality_score": 0.1,
+                        "needs_ocr": True,
+                        "warnings": [],
+                    }
+                ]
+            },
+        ),
+    )
+    fake_image = OcrPageImage(
+        page=1,
+        path=str(tmp_path / "ocr-page-0001.png"),
+        mime_type="image/png",
+        width=100,
+        height=120,
+        byte_size=5,
+        sha256="image-hash",
+        renderer="pymupdf",
+        source_sha256="source-hash",
+    )
+    monkeypatch.setattr(
+        ingestion_service,
+        "render_pages_for_ocr",
+        lambda **kwargs: ([fake_image], []),
+    )
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "scan.pdf",
+        "application/pdf",
+        b"%PDF scan",
+        settings=settings,
+    )
+
+    assert uploaded is not None
+    inspection = run_document_ocr(
+        session,
+        repository_id,
+        uploaded.document.id,
+        provider=LowQualityOcrProvider(),
+        fallback_provider=FallbackOcrProvider(),
+        settings=settings,
+    )
+
+    assert inspection is not None
+    assert inspection.chunks[0].text == "RapidOCR fallback text for page 1"
+    assert inspection.chunks[0].metadata["ocr_provider"]["name"] == "rapidocr"
+    decision = inspection.version.metadata["ocr_run"]["fallback_decisions"][0]
+    assert decision["status"] == "used"
+    assert decision["reason"] == "min_text_length"
+    assert decision["fallback_provider"] == "rapidocr"
+
+
+def test_run_document_ocr_skips_fallback_when_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    repository = session.get(Repository, repository_id)
+    assert repository is not None
+    assert repository.settings is not None
+    repository_settings = RepositorySettings.model_validate(repository.settings.settings)
+    repository_settings.ocr.fallback_enabled = False
+    repository.settings.settings = repository_settings.model_dump(mode="json")
+    session.add(repository.settings)
+    session.commit()
+
+    settings = Settings(data_dir=tmp_path)
+    monkeypatch.setattr(
+        ingestion_service,
+        "parse_source",
+        lambda *args, **kwargs: ParsedDocument(
+            source_type="pdf",
+            text="",
+            parser_name="pypdf",
+            parser_version="test-parser",
+            page_count=1,
+            ocr_required=True,
+            metadata={
+                "page_ocr_routes": [
+                    {
+                        "page": 1,
+                        "classification": "scanned",
+                        "text_length": 0,
+                        "word_count": 0,
+                        "image_count": 1,
+                        "quality_score": 0.1,
+                        "needs_ocr": True,
+                        "warnings": [],
+                    }
+                ]
+            },
+        ),
+    )
+    fake_image = OcrPageImage(
+        page=1,
+        path=str(tmp_path / "ocr-page-0001.png"),
+        mime_type="image/png",
+        width=100,
+        height=120,
+        byte_size=5,
+        sha256="image-hash",
+        renderer="pymupdf",
+        source_sha256="source-hash",
+    )
+    monkeypatch.setattr(
+        ingestion_service,
+        "render_pages_for_ocr",
+        lambda **kwargs: ([fake_image], []),
+    )
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "scan.pdf",
+        "application/pdf",
+        b"%PDF scan",
+        settings=settings,
+    )
+
+    assert uploaded is not None
+    inspection = run_document_ocr(
+        session,
+        repository_id,
+        uploaded.document.id,
+        provider=LowQualityOcrProvider(),
+        fallback_provider=FallbackOcrProvider(),
+        settings=settings,
+    )
+
+    assert inspection is not None
+    assert inspection.chunks[0].text == "low"
+    assert inspection.chunks[0].metadata["ocr_provider"]["name"] == "ocrmypdf_tesseract"
+    assert inspection.version.metadata["ocr_run"]["fallback_decisions"] == []
+
+
+def test_run_document_ocr_records_missing_fallback_warning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    settings = Settings(data_dir=tmp_path)
+    monkeypatch.setattr(
+        ingestion_service,
+        "parse_source",
+        lambda *args, **kwargs: ParsedDocument(
+            source_type="pdf",
+            text="",
+            parser_name="pypdf",
+            parser_version="test-parser",
+            page_count=1,
+            ocr_required=True,
+            metadata={
+                "page_ocr_routes": [
+                    {
+                        "page": 1,
+                        "classification": "scanned",
+                        "text_length": 0,
+                        "word_count": 0,
+                        "image_count": 1,
+                        "quality_score": 0.1,
+                        "needs_ocr": True,
+                        "warnings": [],
+                    }
+                ]
+            },
+        ),
+    )
+    fake_image = OcrPageImage(
+        page=1,
+        path=str(tmp_path / "ocr-page-0001.png"),
+        mime_type="image/png",
+        width=100,
+        height=120,
+        byte_size=5,
+        sha256="image-hash",
+        renderer="pymupdf",
+        source_sha256="source-hash",
+    )
+    monkeypatch.setattr(
+        ingestion_service,
+        "render_pages_for_ocr",
+        lambda **kwargs: ([fake_image], []),
+    )
+    monkeypatch.setattr(ingestion_service, "default_ocr_provider", lambda *args, **kwargs: None)
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "scan.pdf",
+        "application/pdf",
+        b"%PDF scan",
+        settings=settings,
+    )
+
+    assert uploaded is not None
+    inspection = run_document_ocr(
+        session,
+        repository_id,
+        uploaded.document.id,
+        provider=LowQualityOcrProvider(),
+        settings=settings,
+    )
+
+    assert inspection is not None
+    assert inspection.chunks[0].text == "low"
+    decision = inspection.version.metadata["ocr_run"]["fallback_decisions"][0]
+    assert decision["status"] == "missing_dependency"
+    assert (
+        "rapidocr is not installed; OCR fallback skipped for page 1." in inspection.version.warnings
+    )
 
 
 def test_reprocess_document_reports_missing_source_file(tmp_path: Path) -> None:

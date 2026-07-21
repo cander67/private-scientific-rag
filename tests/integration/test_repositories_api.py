@@ -253,6 +253,16 @@ def test_repository_settings_model_catalog_returns_known_defaults() -> None:
         "structured_parser": "auto",
         "fallback_parser": "auto",
     }
+    assert created["settings"]["ocr"] == {
+        "provider": "ocrmypdf_tesseract",
+        "fallback_provider": "rapidocr",
+        "fallback_enabled": True,
+        "language": "eng",
+        "confidence_threshold": 0.65,
+        "min_text_length": 20,
+        "max_pages": 25,
+        "overwrite": False,
+    }
     assert {"auto", "pymupdf", "docling", "pdfplumber", "pypdf", "built_in_fallback"} <= {
         entry["id"] for entry in payload["parser_choices"] if "structured" in entry["supported_as"]
     }

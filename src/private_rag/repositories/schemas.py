@@ -69,6 +69,23 @@ class ParserSettings(BaseModel):
         return normalized
 
 
+class OcrSettings(BaseModel):
+    provider: Literal["ocrmypdf_tesseract", "rapidocr"] = "ocrmypdf_tesseract"
+    fallback_provider: Literal["none", "ocrmypdf_tesseract", "rapidocr"] = "rapidocr"
+    fallback_enabled: bool = True
+    language: str = Field(default="eng", min_length=1, max_length=32)
+    confidence_threshold: float = Field(default=0.65, ge=0.0, le=1.0)
+    min_text_length: int = Field(default=20, ge=0, le=10000)
+    max_pages: int = Field(default=25, ge=1, le=1000)
+    overwrite: bool = False
+
+    @model_validator(mode="after")
+    def validate_fallback_provider(self) -> OcrSettings:
+        if self.fallback_enabled and self.fallback_provider == self.provider:
+            raise ValueError("fallback_provider must differ from provider when fallback is enabled")
+        return self
+
+
 class FullTextSettings(BaseModel):
     tokenizer: Literal["unicode61", "porter"] = "unicode61"
     prefix_index: bool = True
@@ -146,6 +163,7 @@ class RepositorySettings(BaseModel):
 
     chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
     parser: ParserSettings = Field(default_factory=ParserSettings)
+    ocr: OcrSettings = Field(default_factory=OcrSettings)
     full_text: FullTextSettings = Field(default_factory=FullTextSettings)
     vector: VectorSettings = Field(default_factory=VectorSettings)
     embedding: EmbeddingSettings

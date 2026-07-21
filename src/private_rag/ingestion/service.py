@@ -15,6 +15,7 @@ from private_rag.core.settings import Settings, get_settings
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
 from private_rag.ingestion.ocr import (
     NormalizedOcrPageResult,
+    OcrPageImage,
     OcrProvider,
     PageOcrClassification,
     PageOcrRoute,
@@ -366,6 +367,7 @@ def run_document_ocr(
     repository_id: str,
     document_id: str,
     provider: OcrProvider | None = None,
+    fallback_provider: OcrProvider | None = None,
     settings: Settings | None = None,
 ) -> DocumentInspection | None:
     document = session.get(Document, document_id)
@@ -374,6 +376,11 @@ def run_document_ocr(
     version = _current_version(document)
     if version is None:
         return None
+    repository = session.get(Repository, repository_id)
+    if repository is None or repository.settings is None:
+        return None
+    repository_settings = RepositorySettings.model_validate(repository.settings.settings)
+    ocr_settings = repository_settings.ocr
     if version.source_type != "pdf":
         version.warnings = [*version.warnings, "OCR can only run for PDF documents."]
         session.add(version)
@@ -391,8 +398,19 @@ def run_document_ocr(
         return inspect_document(session, repository_id, document_id)
 
     data = source_path.read_bytes()
+    existing_ocr_pages = _ocr_pages_from_metadata(version.extra_metadata)
+    if existing_ocr_pages and not ocr_settings.overwrite:
+        _record_ocr_run(
+            version=version,
+            status="skipped_existing",
+            warnings=["OCR output already exists; enable overwrite to rerun OCR."],
+            results=existing_ocr_pages,
+        )
+        session.add(version)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
     routes, route_warnings = _ocr_routes_for_version(version, data)
-    pending_routes = [route for route in routes if route.needs_ocr]
+    pending_routes = [route for route in routes if route.needs_ocr][: ocr_settings.max_pages]
     if not pending_routes:
         _record_ocr_run(
             version=version,
@@ -426,13 +444,16 @@ def run_document_ocr(
         session.commit()
         return inspect_document(session, repository_id, document_id)
 
-    ocr_provider = provider or default_ocr_provider()
+    ocr_provider = provider or default_ocr_provider(
+        ocr_settings.provider,
+        language=ocr_settings.language,
+    )
     if ocr_provider is None:
         results = [
             missing_ocr_dependency_result(
                 page=image.page,
-                provider_name="ocrmypdf_tesseract",
-                dependency_name="tesseract",
+                provider_name=ocr_settings.provider,
+                dependency_name=ocr_settings.provider,
                 image=image,
             )
             for image in rendered
@@ -451,6 +472,13 @@ def run_document_ocr(
         return inspect_document(session, repository_id, document_id)
 
     results = [ocr_provider.recognize_page(image) for image in rendered]
+    results, fallback_decisions, fallback_warnings = _apply_ocr_fallbacks(
+        results=results,
+        rendered_images=rendered,
+        primary_provider=ocr_provider,
+        fallback_provider=fallback_provider,
+        repository_settings=repository_settings,
+    )
     ocr_chunks = _ocr_chunks_from_results(
         results=results,
         version=version,
@@ -460,7 +488,9 @@ def run_document_ocr(
     session.add_all(ocr_chunks)
     version.chunk_count = version.chunk_count + len(ocr_chunks)
     successful_pages = [result.page for result in results if result.text.strip()]
-    run_warnings = [warning for result in results for warning in result.warnings]
+    run_warnings = [
+        warning for result in results for warning in result.warnings
+    ] + fallback_warnings
     status = "completed" if successful_pages else "failed"
     _record_ocr_run(
         version=version,
@@ -468,6 +498,7 @@ def run_document_ocr(
         warnings=[*route_warnings, *run_warnings],
         results=results,
         rendered_images=[image.to_metadata() for image in rendered],
+        fallback_decisions=fallback_decisions,
     )
     version.warnings = [*version.warnings, *run_warnings]
     if successful_pages:
@@ -949,6 +980,7 @@ def _record_ocr_run(
     warnings: list[str],
     results: list[NormalizedOcrPageResult] | None = None,
     rendered_images: list[dict[str, object]] | None = None,
+    fallback_decisions: list[dict[str, object]] | None = None,
 ) -> None:
     metadata = dict(version.extra_metadata)
     result_metadata = [result.to_metadata() for result in results or []]
@@ -959,16 +991,132 @@ def _record_ocr_run(
         "pages_failed": [result.page for result in results or [] if not result.text.strip()],
         "warnings": warnings,
         "provider": _ocr_provider_metadata(results or []),
+        "fallback_decisions": fallback_decisions or [],
     }
     if rendered_images is not None:
         metadata["ocr_rendered_images"] = rendered_images
     version.extra_metadata = metadata
 
 
+def _ocr_pages_from_metadata(metadata: dict[str, object]) -> list[NormalizedOcrPageResult]:
+    raw_pages = metadata.get("ocr_pages")
+    if not isinstance(raw_pages, list):
+        return []
+    pages: list[NormalizedOcrPageResult] = []
+    for raw_page in raw_pages:
+        if not isinstance(raw_page, dict):
+            continue
+        try:
+            page = int(raw_page["page"])
+            text = str(raw_page.get("text") or "")
+            confidence_value = raw_page.get("confidence")
+            confidence = float(confidence_value) if confidence_value is not None else None
+            provider = _dict_or_empty(raw_page.get("provider"))
+            provenance = _dict_or_empty(raw_page.get("provenance"))
+            warnings = [
+                str(warning) for warning in raw_page.get("warnings", []) if isinstance(warning, str)
+            ]
+            pages.append(
+                NormalizedOcrPageResult(
+                    page=page,
+                    text=text,
+                    confidence=confidence,
+                    warnings=warnings,
+                    provider=provider,
+                    provenance=provenance,
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return pages
+
+
 def _ocr_provider_metadata(results: list[NormalizedOcrPageResult]) -> dict[str, object]:
     for result in results:
         return result.provider
     return {}
+
+
+def _apply_ocr_fallbacks(
+    *,
+    results: list[NormalizedOcrPageResult],
+    rendered_images: list[OcrPageImage],
+    primary_provider: OcrProvider,
+    fallback_provider: OcrProvider | None,
+    repository_settings: RepositorySettings,
+) -> tuple[list[NormalizedOcrPageResult], list[dict[str, object]], list[str]]:
+    ocr_settings = repository_settings.ocr
+    image_by_page = {image.page: image for image in rendered_images}
+    decisions: list[dict[str, object]] = []
+    warnings: list[str] = []
+    if not ocr_settings.fallback_enabled:
+        return results, decisions, warnings
+    selected_fallback = fallback_provider
+    next_results: list[NormalizedOcrPageResult] = []
+    for result in results:
+        reason = _ocr_fallback_reason(result, repository_settings)
+        if reason is None:
+            next_results.append(result)
+            continue
+        decision: dict[str, object] = {
+            "page": result.page,
+            "primary_provider": primary_provider.provider_name,
+            "fallback_provider": ocr_settings.fallback_provider,
+            "reason": reason,
+        }
+        if ocr_settings.fallback_provider == "none":
+            decision["status"] = "disabled"
+            decisions.append(decision)
+            next_results.append(result)
+            continue
+        if selected_fallback is None:
+            selected_fallback = default_ocr_provider(
+                ocr_settings.fallback_provider,
+                language=ocr_settings.language,
+            )
+        if selected_fallback is None:
+            warning = (
+                f"{ocr_settings.fallback_provider} is not installed; "
+                f"OCR fallback skipped for page {result.page}."
+            )
+            decision["status"] = "missing_dependency"
+            decisions.append(decision)
+            warnings.append(warning)
+            next_results.append(
+                NormalizedOcrPageResult(
+                    page=result.page,
+                    text=result.text,
+                    confidence=result.confidence,
+                    warnings=[*result.warnings, warning],
+                    provider=result.provider,
+                    provenance=result.provenance,
+                )
+            )
+            continue
+        image = image_by_page.get(result.page)
+        if image is None:
+            decision["status"] = "missing_image"
+            decisions.append(decision)
+            next_results.append(result)
+            continue
+        fallback_result = selected_fallback.recognize_page(image)
+        decision["status"] = "used"
+        decision["fallback_result_provider"] = fallback_result.provider
+        decisions.append(decision)
+        next_results.append(fallback_result)
+    return next_results, decisions, warnings
+
+
+def _ocr_fallback_reason(
+    result: NormalizedOcrPageResult,
+    repository_settings: RepositorySettings,
+) -> str | None:
+    ocr_settings = repository_settings.ocr
+    if len(result.text.strip()) < ocr_settings.min_text_length:
+        return "min_text_length"
+    if result.confidence is not None and result.confidence < ocr_settings.confidence_threshold:
+        return "confidence_threshold"
+    return None
 
 
 def _ocr_chunks_from_results(

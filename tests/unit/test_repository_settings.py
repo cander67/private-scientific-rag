@@ -53,6 +53,9 @@ def test_default_repository_settings_use_app_model_defaults() -> None:
     assert repository_settings.reranking.model == "cross-encoder/test-reranker"
     assert repository_settings.parser.structured_parser == "auto"
     assert repository_settings.parser.fallback_parser == "auto"
+    assert repository_settings.ocr.provider == "ocrmypdf_tesseract"
+    assert repository_settings.ocr.fallback_provider == "rapidocr"
+    assert repository_settings.ocr.fallback_enabled is True
 
 
 @pytest.mark.parametrize(
@@ -90,6 +93,15 @@ def test_repository_settings_reject_unsupported_parser_choices() -> None:
     }
 
     with pytest.raises(ValidationError, match="Unsupported structured parser"):
+        RepositorySettings.model_validate(payload)
+
+
+def test_repository_settings_validate_ocr_fallback_controls() -> None:
+    payload = RepositorySettings.from_app_settings(Settings()).model_dump(mode="json")
+    payload["ocr"]["provider"] = "rapidocr"
+    payload["ocr"]["fallback_provider"] = "rapidocr"
+
+    with pytest.raises(ValidationError, match="fallback_provider must differ"):
         RepositorySettings.model_validate(payload)
 
 

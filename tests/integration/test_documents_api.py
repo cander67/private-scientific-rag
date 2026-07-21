@@ -200,7 +200,11 @@ def test_run_ocr_action_adds_ocr_text_chunks(
     monkeypatch.setattr(
         ingestion_service, "render_pages_for_ocr", lambda **kwargs: ([fake_image], [])
     )
-    monkeypatch.setattr(ingestion_service, "default_ocr_provider", lambda: FakeOcrProvider())
+    monkeypatch.setattr(
+        ingestion_service,
+        "default_ocr_provider",
+        lambda *args, **kwargs: FakeOcrProvider(),
+    )
     client = _client_with_database()
     repository_id = client.get("/repositories/default").json()["repository"]["id"]
     upload_response = client.post(

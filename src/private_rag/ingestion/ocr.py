@@ -3,9 +3,10 @@ from __future__ import annotations
 import hashlib
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 PageOcrClassification = Literal["born_digital", "scanned", "mixed"]
 OcrStatus = Literal["not_required", "pending", "missing_dependency"]
@@ -75,12 +76,13 @@ class OcrProvider(Protocol):
 @dataclass(frozen=True)
 class TesseractCliOcrProvider(OcrProvider):
     executable: str
+    language: str = "eng"
     provider_name: str = "ocrmypdf_tesseract"
     provider_version: str = "tesseract-cli"
 
     def recognize_page(self, image: OcrPageImage) -> NormalizedOcrPageResult:
         completed = subprocess.run(
-            [self.executable, image.path, "stdout", "--psm", "6"],
+            [self.executable, image.path, "stdout", "--psm", "6", "-l", self.language],
             check=False,
             capture_output=True,
             text=True,
@@ -99,15 +101,92 @@ class TesseractCliOcrProvider(OcrProvider):
             provider_version=self.provider_version,
             image=image,
             warnings=warnings,
-            provider_metadata={"executable": self.executable},
+            provider_metadata={"executable": self.executable, "language": self.language},
         )
 
 
-def default_ocr_provider() -> OcrProvider | None:
+@dataclass(frozen=True)
+class RapidOcrProvider(OcrProvider):
+    engine: object
+    provider_name: str = "rapidocr"
+    provider_version: str = "rapidocr-runtime"
+
+    def recognize_page(self, image: OcrPageImage) -> NormalizedOcrPageResult:
+        if not callable(self.engine):
+            return normalize_ocr_page_result(
+                page=image.page,
+                text="",
+                confidence=None,
+                provider_name=self.provider_name,
+                provider_version=self.provider_version,
+                image=image,
+                warnings=["RapidOCR engine is not callable."],
+            )
+        output = cast(Callable[[str], object], self.engine)(image.path)
+        text, confidence = _rapidocr_output_to_text_confidence(output)
+        return normalize_ocr_page_result(
+            page=image.page,
+            text=text,
+            confidence=confidence,
+            provider_name=self.provider_name,
+            provider_version=self.provider_version,
+            image=image,
+        )
+
+
+def default_ocr_provider(
+    provider_name: str = "ocrmypdf_tesseract",
+    language: str = "eng",
+) -> OcrProvider | None:
+    if provider_name == "rapidocr":
+        return rapidocr_provider()
     executable = shutil.which("tesseract")
     if executable is None:
         return None
-    return TesseractCliOcrProvider(executable=executable)
+    return TesseractCliOcrProvider(executable=executable, language=language)
+
+
+def rapidocr_provider() -> OcrProvider | None:
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except Exception:
+        try:
+            from rapidocr import RapidOCR
+        except Exception:
+            return None
+    try:
+        return RapidOcrProvider(engine=RapidOCR())
+    except Exception:
+        return None
+
+
+def _rapidocr_output_to_text_confidence(output: object) -> tuple[str, float | None]:
+    if isinstance(output, tuple) and len(output) >= 2:
+        records = output[0]
+        if records is None:
+            return "", None
+        return _rapidocr_records_to_text_confidence(records)
+    return str(output or "").strip(), None
+
+
+def _rapidocr_records_to_text_confidence(records: object) -> tuple[str, float | None]:
+    if not isinstance(records, list):
+        return "", None
+    lines: list[str] = []
+    confidences: list[float] = []
+    for record in records:
+        if not isinstance(record, (list, tuple)) or len(record) < 2:
+            continue
+        text = str(record[1]).strip()
+        if text:
+            lines.append(text)
+        if len(record) >= 3:
+            try:
+                confidences.append(float(record[2]))
+            except (TypeError, ValueError):
+                pass
+    confidence = sum(confidences) / len(confidences) if confidences else None
+    return "\n".join(lines), confidence
 
 
 def classify_page_for_ocr(
