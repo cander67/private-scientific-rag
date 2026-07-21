@@ -2310,6 +2310,21 @@ textarea {
   text-align: center;
 }
 
+.ocr-page-text-panel {
+  display: grid;
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+
+.ocr-page-text {
+  border-left: 3px solid var(--warn);
+  padding-left: var(--s3);
+}
+
+.ocr-page-text p {
+  margin: var(--s1) 0 0;
+}
+
 .doc-text p {
   margin: 0 0 var(--s4);
   white-space: pre-wrap;

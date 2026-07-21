@@ -495,6 +495,15 @@ type PageOcrRoute = {
   warnings: string[];
 };
 
+type OcrPageResult = {
+  page: number;
+  text: string;
+  confidence: number | null;
+  warnings: string[];
+  provider: Record<string, unknown>;
+  provenance: Record<string, unknown>;
+};
+
 type DocumentSummary = {
   id: string;
   display_name: string;
@@ -2020,6 +2029,31 @@ function App() {
     }
   }
 
+  async function runOcrSelected() {
+    if (!repository || !selectedDocumentId) {
+      return;
+    }
+    setBusy(true);
+    setMessage("Running OCR");
+    try {
+      const response = await fetch(
+        `${API_BASE}/repositories/${repository.id}/documents/${selectedDocumentId}/ocr`,
+        { method: "POST" },
+      );
+      if (!response.ok) {
+        throw new Error("OCR failed");
+      }
+      setInspection((await response.json()) as Inspection);
+      await loadDocuments(repository.id);
+      await loadDashboardSummary(repository.id);
+      setMessage("OCR complete");
+    } catch {
+      setMessage("OCR failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteSelected() {
     if (!repository || !selectedDocumentId) {
       return;
@@ -2903,6 +2937,7 @@ function App() {
                         inspection={inspection}
                         busy={busy}
                         onReprocess={() => void reprocessSelected()}
+                        onRunOcr={() => void runOcrSelected()}
                         onDelete={() => void deleteSelected()}
                       />
                     </div>
@@ -2978,6 +3013,12 @@ function App() {
                         version={inspection.version}
                       />
                     )}
+                    {inspection.version.source_type === "pdf" && selectedPageImages.length > 0 && (
+                      <OcrPageTextPanel
+                        version={inspection.version}
+                        pages={selectedPageImages.map((image) => image.page)}
+                      />
+                    )}
                     {selectedChunk ? (
                       <>
                         <div className="page-break">
@@ -2989,6 +3030,7 @@ function App() {
                             <div className="chunk-mark" key={chunk.id}>
                               <div className="muted num chunk-label">
                                 chunk {chunk.chunk_index + 1} · {provenanceLabel(chunk)}
+                                {isOcrChunk(chunk) ? " · OCR text" : ""}
                                 {chunk.char_start !== null && chunk.char_end !== null
                                   ? ` · offsets ${chunk.char_start}-${chunk.char_end}`
                                   : ""}
@@ -6782,17 +6824,41 @@ function PageImageStrip({
   );
 }
 
+function OcrPageTextPanel({ version, pages }: { version: DocumentVersion; pages: number[] }) {
+  const pageResults = pages
+    .map((page) => getOcrPageResult(version, page))
+    .filter((result): result is OcrPageResult => result !== null && result.text.trim().length > 0);
+  if (pageResults.length === 0) {
+    return null;
+  }
+  return (
+    <div className="ocr-page-text-panel">
+      {pageResults.map((result) => (
+        <div className="ocr-page-text" key={result.page}>
+          <div className="muted num">
+            page {result.page} OCR
+            {result.confidence !== null ? ` · confidence ${Math.round(result.confidence * 100)}%` : ""}
+          </div>
+          <p>{result.text}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SelectedDocumentCard({
   selectedDocument,
   inspection,
   busy,
   onReprocess,
+  onRunOcr,
   onDelete,
 }: {
   selectedDocument: DocumentSummary | null;
   inspection: Inspection | null;
   busy: boolean;
   onReprocess: () => void;
+  onRunOcr: () => void;
   onDelete: () => void;
 }) {
   const version = selectedDocument?.current_version ?? null;
@@ -6839,6 +6905,14 @@ function SelectedDocumentCard({
         </a>
         <button className="btn" type="button" onClick={onReprocess} disabled={busy || !inspection}>
           Reprocess
+        </button>
+        <button
+          className="btn"
+          type="button"
+          onClick={onRunOcr}
+          disabled={busy || !inspection || version.source_type !== "pdf" || !version.ocr_required}
+        >
+          Run OCR
         </button>
         <button className="btn btn-ghost danger-action" type="button" onClick={onDelete} disabled={busy}>
           Delete
@@ -6955,6 +7029,42 @@ function ocrPageClassName(version: DocumentVersion, page: number) {
     return "page-ocr page-ocr-pending";
   }
   return "page-ocr";
+}
+
+function getOcrPageResults(version: DocumentVersion): OcrPageResult[] {
+  const pages = version.metadata.ocr_pages;
+  if (!Array.isArray(pages)) {
+    return [];
+  }
+  return pages.flatMap((page): OcrPageResult[] => {
+    if (!page || typeof page !== "object") {
+      return [];
+    }
+    const value = page as Partial<OcrPageResult>;
+    if (typeof value.page !== "number" || typeof value.text !== "string") {
+      return [];
+    }
+    return [
+      {
+        page: value.page,
+        text: value.text,
+        confidence: typeof value.confidence === "number" ? value.confidence : null,
+        warnings: Array.isArray(value.warnings)
+          ? value.warnings.filter((warning): warning is string => typeof warning === "string")
+          : [],
+        provider: value.provider && typeof value.provider === "object" ? value.provider : {},
+        provenance: value.provenance && typeof value.provenance === "object" ? value.provenance : {},
+      },
+    ];
+  });
+}
+
+function getOcrPageResult(version: DocumentVersion, page: number) {
+  return getOcrPageResults(version).find((result) => result.page === page) ?? null;
+}
+
+function isOcrChunk(chunk: Chunk) {
+  return chunk.metadata.ocr_derived === true;
 }
 
 function getReprocessStatus(version: DocumentVersion): ReprocessStatus | null {

@@ -47,6 +47,17 @@ test("Source Viewer displays PRD13 page OCR routing state", () => {
   assert.match(source, /className=\{ocrPageClassName\(version, image\.page\)\}/);
 });
 
+test("Source Viewer supports PRD13 local OCR recovery", () => {
+  assert.match(source, /type OcrPageResult =/);
+  assert.match(source, /function runOcrSelected/);
+  assert.match(source, /documents\/\$\{selectedDocumentId\}\/ocr/);
+  assert.match(source, /Run OCR/);
+  assert.match(source, /function OcrPageTextPanel/);
+  assert.match(source, /metadata\.ocr_pages/);
+  assert.match(source, /OCR text/);
+  assert.match(source, /function isOcrChunk/);
+});
+
 test("Document Manager and Source Viewer render as separate live views", () => {
   assert.match(source, /activeView === "documents"/);
   assert.match(source, /activeView === "source"/);
