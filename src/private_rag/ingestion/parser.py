@@ -7,6 +7,11 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
 
+from private_rag.ingestion.ocr import (
+    OCR_QUALITY_THRESHOLDS,
+    classify_pdf_pages,
+    ocr_status_from_routes,
+)
 from private_rag.ingestion.schemas import ParsedDocument, ParsedSegment, SourceType
 
 BUILT_IN_PARSER_NAME = "private-rag-built-in"
@@ -14,6 +19,7 @@ BUILT_IN_PARSER_VERSION = "prd3-v1"
 PDF_MIN_TEXT_LENGTH = 80
 PDF_QUALITY_THRESHOLDS = {
     "min_text_length": PDF_MIN_TEXT_LENGTH,
+    "ocr": OCR_QUALITY_THRESHOLDS,
 }
 
 _PATENT_SECTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -81,7 +87,14 @@ def _parse_pdf(data: bytes, parser_settings: ParserExecutionSettings) -> ParsedD
     sections = _unique_sections(segments)
     patent_sections = _detect_patent_sections(text)
     structure_hints = _detect_scientific_structure_hints(text)
+    page_ocr_routes, page_ocr_warnings = classify_pdf_pages(data)
+    if page_ocr_warnings:
+        warnings.extend(page_ocr_warnings)
+    if any(route.needs_ocr for route in page_ocr_routes):
+        ocr_required = True
     metadata: dict[str, object] = {
+        "ocr_status": ocr_status_from_routes(page_ocr_routes, page_ocr_warnings),
+        "page_ocr_routes": [route.to_metadata() for route in page_ocr_routes],
         "page_images_available": True,
         "patent_section_hints": patent_sections,
         "parser_chain": result.parser_chain,

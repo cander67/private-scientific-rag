@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from private_rag.ingestion import parser
+from private_rag.ingestion.ocr import PageOcrRoute
 from private_rag.ingestion.parser import ParserExecutionSettings, parse_source
 
 
@@ -59,6 +60,82 @@ def test_pdf_parser_records_scientific_structure_hints(
     parsed = parse_source("paper.pdf", "application/pdf", b"%PDF")
 
     assert parsed.metadata["structure_hints"] == ["tables", "figures", "captions"]
+
+
+def test_pdf_parser_records_page_ocr_routes_and_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        parser,
+        "_extract_with_pypdf",
+        lambda data: parser.PdfExtractionResult(
+            text="Abstract\nSearchable text from page one.",
+            parser_name="pypdf",
+            parser_version="test",
+            parser_chain=["pypdf"],
+            page_count=2,
+        ),
+    )
+    monkeypatch.setattr(
+        parser,
+        "classify_pdf_pages",
+        lambda data: (
+            [
+                PageOcrRoute(
+                    page=1,
+                    classification="born_digital",
+                    text_length=120,
+                    word_count=18,
+                    image_count=0,
+                    quality_score=1.0,
+                    needs_ocr=False,
+                ),
+                PageOcrRoute(
+                    page=2,
+                    classification="scanned",
+                    text_length=0,
+                    word_count=0,
+                    image_count=1,
+                    quality_score=0.1,
+                    needs_ocr=True,
+                    warnings=["Page appears image-only and is pending OCR."],
+                ),
+            ],
+            [],
+        ),
+    )
+
+    parsed = parse_source("mixed.pdf", "application/pdf", b"%PDF")
+
+    assert parsed.ocr_required is True
+    assert parsed.metadata["ocr_status"] == {
+        "status": "pending",
+        "pages_pending": [2],
+        "pages_routed": 2,
+        "warnings": [],
+    }
+    assert parsed.metadata["page_ocr_routes"] == [
+        {
+            "page": 1,
+            "classification": "born_digital",
+            "text_length": 120,
+            "word_count": 18,
+            "image_count": 0,
+            "quality_score": 1.0,
+            "needs_ocr": False,
+            "warnings": [],
+        },
+        {
+            "page": 2,
+            "classification": "scanned",
+            "text_length": 0,
+            "word_count": 0,
+            "image_count": 1,
+            "quality_score": 0.1,
+            "needs_ocr": True,
+            "warnings": ["Page appears image-only and is pending OCR."],
+        },
+    ]
 
 
 def test_pdf_fallback_marks_binary_only_pdf_as_needs_ocr_without_chunks() -> None:
@@ -131,9 +208,10 @@ def test_pdf_parser_chain_uses_pypdf_first_when_it_extracts_text(
     assert parsed.parser_name == "pypdf"
     assert parsed.parser_version == "test"
     assert parsed.page_count == 2
-    assert parsed.warnings == [
+    assert (
         "PDF has little extractable text and should be inspected with OCR/page images."
-    ]
+        in parsed.warnings
+    )
 
 
 def test_pdf_parser_chain_falls_through_to_pymupdf(
