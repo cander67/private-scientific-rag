@@ -12,9 +12,9 @@ Repository chunking settings control how parsed document text is split before fu
 
 ## Parser Relationship
 
-Parser settings decide what text and structure are available before chunking. Chunking settings decide how that parsed text becomes retrievable units. Changing either parser or chunking defaults should prompt document reprocessing, then full-text/vector rebuilds, before search and chat are considered fresh.
+Parser settings decide what text and structure are available before chunking. Chunking settings decide how that parsed text becomes retrievable units. Saved parser and chunking settings are applied during upload and explicit reprocess. Changing either parser or chunking defaults should prompt document reprocessing, then full-text/vector rebuilds, before search and chat are considered fresh.
 
-PRD26 will replace parser free-text fields with fixed choices plus `Auto`. `Auto` is intended to preserve a stable user-facing setting while allowing the app to improve parser-selection logic later.
+Parser settings use catalog-backed choices plus `Auto`. `Auto` preserves a stable user-facing setting while allowing the app to improve parser-selection logic later. Source Viewer shows parser names and routes first; raw package version numbers are dependency details.
 
 ## Tokenizers
 
