@@ -1,6 +1,6 @@
 # PRD 27: Retrieval Defaults Transparency and Controls
 
-**Status:** Backlog.
+**Status:** Ready for final review.
 
 ## Problem Statement
 

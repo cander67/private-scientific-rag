@@ -30,10 +30,10 @@ Current status:
 - Backlog: PRD24 local storage provenance and housekeeping.
 - Backlog: PRD25 chat context inspection.
 - Ready for review: PRD26 repository loading and parser controls.
-- Backlog: PRD27 retrieval defaults transparency and controls.
+- Ready for final review: PRD27 retrieval defaults transparency and controls.
 - Backlog: PRD28 document manager preview and batch actions.
 
-PRD23 is ready for final review after catalog guardrails and user-testing remediation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional live Ollama/Qdrant/GPU checks remain explicit manual checks. PRD26 is ready for review with repository-switch loading states and catalog-backed parser controls. PRD13 is now in progress, starting with operational parser routing during upload/reprocess and parser/chunk fingerprint metadata; OCR execution and stale index freshness remain later PRD13 phases. PRD25 remains backlog follow-up work.
+PRD23 is ready for final review after catalog guardrails and user-testing remediation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional live Ollama/Qdrant/GPU checks remain explicit manual checks. PRD26 is ready for review with repository-switch loading states and catalog-backed parser controls. PRD27 is ready for final review with repository retrieval defaults, effective-setting normalization, metadata boost `off`, and explicit Search Lab copy/promote actions. PRD13 is now in progress, starting with operational parser routing during upload/reprocess and parser/chunk fingerprint metadata; OCR execution and stale index freshness remain later PRD13 phases. PRD25 remains backlog follow-up work.
 
 The remaining backlog should be prioritized from hands-on use of the current app, adjusting order when a later PRD is needed to unblock an earlier one.
 
@@ -88,5 +88,5 @@ PRD files:
 24. [Local storage provenance and housekeeping](24-local-storage-housekeeping.md) - backlog
 25. [Chat context inspection](25-chat-context-inspection.md) - backlog
 26. [Repository loading and parser controls](26-repository-loading-and-parser-controls.md) - ready for review
-27. [Retrieval defaults transparency and controls](27-retrieval-defaults-transparency-controls.md) - backlog
+27. [Retrieval defaults transparency and controls](27-retrieval-defaults-transparency-controls.md) - ready for final review
 28. [Document manager preview and batch actions](28-document-manager-preview-batch-actions.md) - backlog
