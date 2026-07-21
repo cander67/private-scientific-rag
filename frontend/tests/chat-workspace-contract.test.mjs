@@ -48,6 +48,8 @@ test("Chat Workspace exposes retrieval readiness and explicit rebuild controls",
   assert.match(source, /data-readiness-status=\{status\}/);
   assert.match(source, /status === "partial"/);
   assert.match(source, /status === "stale"/);
+  assert.match(source, /apiErrorMessage\(response, "rebuild failed"\)/);
+  assert.match(source, /\$\{kind\} rebuild failed: \$\{errorMessage\(error\)\}/);
   assert.match(source, /Rebuild full-text/);
   assert.match(source, /Rebuild vector/);
   assert.match(source, /chat-mode/);

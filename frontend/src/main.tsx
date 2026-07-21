@@ -1947,14 +1947,14 @@ function App() {
         method: "POST",
       });
       if (!response.ok) {
-        throw new Error("rebuild failed");
+        throw new Error(await apiErrorMessage(response, "rebuild failed"));
       }
       const payload = (await response.json()) as SearchRebuildResponse;
       setChatMessage(`Indexed ${payload.indexed_chunks} ${kind} chunks`);
       await loadChatReadiness(repository.id);
       await loadDashboardSummary(repository.id);
-    } catch {
-      setChatMessage(`${kind} rebuild failed`);
+    } catch (error) {
+      setChatMessage(`${kind} rebuild failed: ${errorMessage(error)}`);
     } finally {
       setChatRebuildBusy(null);
     }
