@@ -27,6 +27,47 @@ test("Source Viewer keeps PRD3 document actions and provenance visible", () => {
   assert.match(source, /Source structure hints/);
 });
 
+test("Document Manager and Source Viewer expose parser reprocess status", () => {
+  assert.match(source, /type ReprocessStatus =/);
+  assert.match(source, /metadata\.reprocess_status/);
+  assert.match(source, /function getReprocessStatus/);
+  assert.match(source, /function reprocessStatusLabel/);
+  assert.match(source, /Stale: \$\{status\.changed_fields\.join/);
+  assert.match(source, /<dt>Reprocess<\/dt>/);
+  assert.match(source, /<dt>reprocess<\/dt>/);
+});
+
+test("Source Viewer displays PRD13 page OCR routing state", () => {
+  assert.match(source, /type PageOcrRoute =/);
+  assert.match(source, /metadata\.page_ocr_routes/);
+  assert.match(source, /function getPageOcrRoutes/);
+  assert.match(source, /function ocrPageLabel/);
+  assert.match(source, /OCR pending/);
+  assert.match(source, /Mixed · native text/);
+  assert.match(source, /className=\{ocrPageClassName\(version, image\.page\)\}/);
+});
+
+test("Source Viewer supports PRD13 local OCR recovery", () => {
+  assert.match(source, /type OcrPageResult =/);
+  assert.match(source, /function runOcrSelected/);
+  assert.match(source, /documents\/\$\{selectedDocumentId\}\/ocr/);
+  assert.match(source, /Run OCR/);
+  assert.match(source, /function OcrPageTextPanel/);
+  assert.match(source, /metadata\.ocr_pages/);
+  assert.match(source, /OCR text/);
+  assert.match(source, /function isOcrChunk/);
+});
+
+test("Source Viewer renders parser names before parser versions", () => {
+  assert.match(source, /function parserDisplayLabel/);
+  assert.match(source, /function parserNameLabel/);
+  assert.match(source, /function parserRouteLabel/);
+  assert.match(source, /parserDisplayLabel\(inspection\.version\)/);
+  assert.match(source, /<dt>parser version<\/dt>/);
+  assert.match(source, /<dt>Parser version<\/dt>/);
+  assert.match(source, /Built-in parser/);
+});
+
 test("Document Manager and Source Viewer render as separate live views", () => {
   assert.match(source, /activeView === "documents"/);
   assert.match(source, /activeView === "source"/);

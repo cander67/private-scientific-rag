@@ -26,6 +26,16 @@ type RepositorySettings = {
     structured_parser: string;
     fallback_parser: string;
   };
+  ocr: {
+    provider: "ocrmypdf_tesseract" | "rapidocr";
+    fallback_provider: "none" | "ocrmypdf_tesseract" | "rapidocr";
+    fallback_enabled: boolean;
+    language: string;
+    confidence_threshold: number;
+    min_text_length: number;
+    max_pages: number;
+    overwrite: boolean;
+  };
   full_text: {
     tokenizer: string;
     prefix_index: boolean;
@@ -477,6 +487,31 @@ type DocumentVersion = {
   warnings: string[];
   metadata: Record<string, unknown>;
   created_at: string;
+};
+
+type ReprocessStatus = {
+  status: "current" | "stale" | "source_missing" | "unknown";
+  stale: boolean;
+  reprocess_available: boolean;
+  message: string;
+  changed_fields: string[];
+};
+
+type PageOcrRoute = {
+  page: number;
+  classification: "born_digital" | "scanned" | "mixed";
+  quality_score: number;
+  needs_ocr: boolean;
+  warnings: string[];
+};
+
+type OcrPageResult = {
+  page: number;
+  text: string;
+  confidence: number | null;
+  warnings: string[];
+  provider: Record<string, unknown>;
+  provenance: Record<string, unknown>;
 };
 
 type DocumentSummary = {
@@ -1939,14 +1974,14 @@ function App() {
         method: "POST",
       });
       if (!response.ok) {
-        throw new Error("rebuild failed");
+        throw new Error(await apiErrorMessage(response, "rebuild failed"));
       }
       const payload = (await response.json()) as SearchRebuildResponse;
       setChatMessage(`Indexed ${payload.indexed_chunks} ${kind} chunks`);
       await loadChatReadiness(repository.id);
       await loadDashboardSummary(repository.id);
-    } catch {
-      setChatMessage(`${kind} rebuild failed`);
+    } catch (error) {
+      setChatMessage(`${kind} rebuild failed: ${errorMessage(error)}`);
     } finally {
       setChatRebuildBusy(null);
     }
@@ -1999,6 +2034,31 @@ function App() {
       setMessage("Reprocess complete");
     } catch {
       setMessage("Reprocess failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runOcrSelected() {
+    if (!repository || !selectedDocumentId) {
+      return;
+    }
+    setBusy(true);
+    setMessage("Running OCR");
+    try {
+      const response = await fetch(
+        `${API_BASE}/repositories/${repository.id}/documents/${selectedDocumentId}/ocr`,
+        { method: "POST" },
+      );
+      if (!response.ok) {
+        throw new Error("OCR failed");
+      }
+      setInspection((await response.json()) as Inspection);
+      await loadDocuments(repository.id);
+      await loadDashboardSummary(repository.id);
+      setMessage("OCR complete");
+    } catch {
+      setMessage("OCR failed");
     } finally {
       setBusy(false);
     }
@@ -2833,6 +2893,11 @@ function App() {
                                           )}`
                                         : "No parsed version"}
                                     </div>
+                                    {document.current_version && (
+                                      <div className="muted table-sub">
+                                        {reprocessStatusLabel(document.current_version)}
+                                      </div>
+                                    )}
                                   </td>
                                   <td>
                                     <StatusBadge status={document.current_version?.status ?? "failed"} />
@@ -2882,6 +2947,7 @@ function App() {
                         inspection={inspection}
                         busy={busy}
                         onReprocess={() => void reprocessSelected()}
+                        onRunOcr={() => void runOcrSelected()}
                         onDelete={() => void deleteSelected()}
                       />
                     </div>
@@ -2923,7 +2989,7 @@ function App() {
                       {inspection.page_images.length > 0 ? (
                         inspection.page_images.slice(0, 24).map((image) => (
                           <a className="leaf" key={image.page} href={absoluteApiUrl(image.url)}>
-                            page {image.page}
+                            page {image.page} · {ocrPageLabel(inspection.version, image.page)}
                           </a>
                         ))
                       ) : (
@@ -2954,6 +3020,13 @@ function App() {
                       <PageImageStrip
                         images={selectedPageImages}
                         pageCount={inspection.version.page_count ?? 0}
+                        version={inspection.version}
+                      />
+                    )}
+                    {inspection.version.source_type === "pdf" && selectedPageImages.length > 0 && (
+                      <OcrPageTextPanel
+                        version={inspection.version}
+                        pages={selectedPageImages.map((image) => image.page)}
                       />
                     )}
                     {selectedChunk ? (
@@ -2967,6 +3040,7 @@ function App() {
                             <div className="chunk-mark" key={chunk.id}>
                               <div className="muted num chunk-label">
                                 chunk {chunk.chunk_index + 1} · {provenanceLabel(chunk)}
+                                {isOcrChunk(chunk) ? " · OCR text" : ""}
                                 {chunk.char_start !== null && chunk.char_end !== null
                                   ? ` · offsets ${chunk.char_start}-${chunk.char_end}`
                                   : ""}
@@ -3019,7 +3093,11 @@ function App() {
                           {selectedChunk.chunk_index + 1} / {inspection.version.chunk_count}
                         </dd>
                         <dt>parser</dt>
+                        <dd>{parserDisplayLabel(inspection.version)}</dd>
+                        <dt>parser version</dt>
                         <dd>{inspection.version.parser_version}</dd>
+                        <dt>reprocess</dt>
+                        <dd>{reprocessStatusLabel(inspection.version)}</dd>
                         <dt>source hash</dt>
                         <dd>{shortHash(selectedChunk.source_hash)}</dd>
                         <dt>offsets</dt>
@@ -3038,7 +3116,11 @@ function App() {
                         <dt>status</dt>
                         <dd>{inspection.version.status}</dd>
                         <dt>parser</dt>
+                        <dd>{parserDisplayLabel(inspection.version)}</dd>
+                        <dt>parser version</dt>
                         <dd>{inspection.version.parser_version}</dd>
+                        <dt>reprocess</dt>
+                        <dd>{reprocessStatusLabel(inspection.version)}</dd>
                         <dt>source hash</dt>
                         <dd>{shortHash(inspection.version.sha256)}</dd>
                         <dt>source type</dt>
@@ -4484,6 +4566,68 @@ function SettingsModels({
           {selectedFallbackParser && (
             <p className="settings-field-note">{selectedFallbackParser.notes}</p>
           )}
+          <SettingSelect
+            id="settings-ocr-provider"
+            label="OCR provider"
+            value={draft.ocr.provider}
+            options={["ocrmypdf_tesseract", "rapidocr"]}
+            labels={{ ocrmypdf_tesseract: "OCRmyPDF + Tesseract", rapidocr: "RapidOCR" }}
+            error={validationByField.get("ocr.provider")}
+            onChange={(value) => updateDraft((next) => { next.ocr.provider = value as RepositorySettings["ocr"]["provider"]; })}
+          />
+          <SettingSelect
+            id="settings-ocr-fallback-provider"
+            label="OCR fallback"
+            value={draft.ocr.fallback_provider}
+            options={["none", "ocrmypdf_tesseract", "rapidocr"]}
+            labels={{ none: "None", ocrmypdf_tesseract: "OCRmyPDF + Tesseract", rapidocr: "RapidOCR" }}
+            error={validationByField.get("ocr.fallback_provider")}
+            onChange={(value) => updateDraft((next) => { next.ocr.fallback_provider = value as RepositorySettings["ocr"]["fallback_provider"]; })}
+          />
+          <SettingNumber
+            id="settings-ocr-confidence"
+            label="OCR confidence threshold"
+            value={draft.ocr.confidence_threshold}
+            error={validationByField.get("ocr.confidence_threshold")}
+            onChange={(value) => updateDraft((next) => { next.ocr.confidence_threshold = value; })}
+          />
+          <SettingNumber
+            id="settings-ocr-min-text"
+            label="OCR minimum text"
+            value={draft.ocr.min_text_length}
+            error={validationByField.get("ocr.min_text_length")}
+            onChange={(value) => updateDraft((next) => { next.ocr.min_text_length = value; })}
+          />
+          <SettingNumber
+            id="settings-ocr-max-pages"
+            label="OCR max pages"
+            value={draft.ocr.max_pages}
+            error={validationByField.get("ocr.max_pages")}
+            onChange={(value) => updateDraft((next) => { next.ocr.max_pages = value; })}
+          />
+          <SettingText
+            id="settings-ocr-language"
+            label="OCR language"
+            value={draft.ocr.language}
+            error={validationByField.get("ocr.language")}
+            onChange={(value) => updateDraft((next) => { next.ocr.language = value; })}
+          />
+          <label className="settings-checkbox">
+            <input
+              type="checkbox"
+              checked={draft.ocr.fallback_enabled}
+              onChange={(event) => updateDraft((next) => { next.ocr.fallback_enabled = event.target.checked; })}
+            />
+            <span>Use OCR fallback when quality is low</span>
+          </label>
+          <label className="settings-checkbox">
+            <input
+              type="checkbox"
+              checked={draft.ocr.overwrite}
+              onChange={(event) => updateDraft((next) => { next.ocr.overwrite = event.target.checked; })}
+            />
+            <span>Overwrite existing OCR artifacts</span>
+          </label>
         </section>
 
         <section className="card settings-section">
@@ -6720,7 +6864,15 @@ function SearchResultCard({
   );
 }
 
-function PageImageStrip({ images, pageCount }: { images: PageImage[]; pageCount: number }) {
+function PageImageStrip({
+  images,
+  pageCount,
+  version,
+}: {
+  images: PageImage[];
+  pageCount: number;
+  version: DocumentVersion;
+}) {
   if (images.length === 0) {
     return (
       <div className="page-image-empty">
@@ -6739,7 +6891,32 @@ function PageImageStrip({ images, pageCount }: { images: PageImage[]; pageCount:
         >
           <img src={absoluteApiUrl(image.url)} alt={`Page ${image.page}`} />
           <span>p. {image.page}</span>
+          <span className={ocrPageClassName(version, image.page)}>
+            {ocrPageLabel(version, image.page)}
+          </span>
         </a>
+      ))}
+    </div>
+  );
+}
+
+function OcrPageTextPanel({ version, pages }: { version: DocumentVersion; pages: number[] }) {
+  const pageResults = pages
+    .map((page) => getOcrPageResult(version, page))
+    .filter((result): result is OcrPageResult => result !== null && result.text.trim().length > 0);
+  if (pageResults.length === 0) {
+    return null;
+  }
+  return (
+    <div className="ocr-page-text-panel">
+      {pageResults.map((result) => (
+        <div className="ocr-page-text" key={result.page}>
+          <div className="muted num">
+            page {result.page} OCR
+            {result.confidence !== null ? ` · confidence ${Math.round(result.confidence * 100)}%` : ""}
+          </div>
+          <p>{result.text}</p>
+        </div>
       ))}
     </div>
   );
@@ -6750,12 +6927,14 @@ function SelectedDocumentCard({
   inspection,
   busy,
   onReprocess,
+  onRunOcr,
   onDelete,
 }: {
   selectedDocument: DocumentSummary | null;
   inspection: Inspection | null;
   busy: boolean;
   onReprocess: () => void;
+  onRunOcr: () => void;
   onDelete: () => void;
 }) {
   const version = selectedDocument?.current_version ?? null;
@@ -6782,7 +6961,11 @@ function SelectedDocumentCard({
         <dt>Chunks</dt>
         <dd>{version.chunk_count}</dd>
         <dt>Parser</dt>
+        <dd>{parserDisplayLabel(version)}</dd>
+        <dt>Parser version</dt>
         <dd>{version.parser_version}</dd>
+        <dt>Reprocess</dt>
+        <dd>{reprocessStatusLabel(version)}</dd>
         <dt>Hash</dt>
         <dd>{shortHash(version.sha256)}</dd>
       </dl>
@@ -6800,6 +6983,14 @@ function SelectedDocumentCard({
         </a>
         <button className="btn" type="button" onClick={onReprocess} disabled={busy || !inspection}>
           Reprocess
+        </button>
+        <button
+          className="btn"
+          type="button"
+          onClick={onRunOcr}
+          disabled={busy || !inspection || version.source_type !== "pdf" || !version.ocr_required}
+        >
+          Run OCR
         </button>
         <button className="btn btn-ghost danger-action" type="button" onClick={onDelete} disabled={busy}>
           Delete
@@ -6827,6 +7018,13 @@ function StatusBadge({ status }: { status: DocumentVersion["status"] }) {
 }
 
 function versionSummary(version: DocumentVersion) {
+  const reprocessStatus = getReprocessStatus(version);
+  if (reprocessStatus?.status === "stale") {
+    return reprocessStatus.message;
+  }
+  if (reprocessStatus?.status === "source_missing") {
+    return reprocessStatus.message;
+  }
   const hints = version.metadata.patent_section_hints;
   if (Array.isArray(hints) && hints.length > 0) {
     return `Patent PDF hints: ${hints.join(", ")}`;
@@ -6836,12 +7034,193 @@ function versionSummary(version: DocumentVersion) {
     return `Source structure hints: ${structureHints.join(", ")}`;
   }
   if (version.ocr_required) {
-    return "This document has little extractable text and should be inspected with OCR/page images.";
+    const pendingPages = ocrPendingPages(version);
+    return pendingPages.length > 0
+      ? `OCR pending for pages ${pendingPages.join(", ")}.`
+      : "This document has little extractable text and should be inspected with OCR/page images.";
   }
   if (version.warnings.length > 0) {
     return version.warnings.join(" ");
   }
-  return `${version.parser_version} produced inspectable source chunks.`;
+  return `${parserDisplayLabel(version)} produced inspectable source chunks.`;
+}
+
+function parserDisplayLabel(version: DocumentVersion) {
+  const parserName = parserNameLabel(version.parser_name);
+  const route = parserRouteLabel(version);
+  if (!route || route === parserName) {
+    return parserName;
+  }
+  return `${parserName} via ${route}`;
+}
+
+function parserNameLabel(name: string) {
+  const labels: Record<string, string> = {
+    "private-rag-built-in": "Built-in parser",
+    built_in_fallback: "Built-in fallback",
+    docling: "Docling",
+    pdfplumber: "pdfplumber",
+    pymupdf: "PyMuPDF",
+    pypdf: "pypdf",
+    rapidocr: "RapidOCR",
+    ocrmypdf_tesseract: "OCRmyPDF + Tesseract",
+  };
+  return labels[name] ?? name;
+}
+
+function parserRouteLabel(version: DocumentVersion) {
+  const route = version.metadata.parser_route ?? version.metadata.parser_chain;
+  if (!Array.isArray(route)) {
+    return "";
+  }
+  return route
+    .filter((item): item is string => typeof item === "string" && item.length > 0)
+    .map((item) => parserNameLabel(item))
+    .join(" -> ");
+}
+
+function getPageOcrRoutes(version: DocumentVersion): PageOcrRoute[] {
+  const routes = version.metadata.page_ocr_routes;
+  if (!Array.isArray(routes)) {
+    return [];
+  }
+  return routes.flatMap((route): PageOcrRoute[] => {
+    if (!route || typeof route !== "object") {
+      return [];
+    }
+    const value = route as Partial<PageOcrRoute>;
+    if (
+      typeof value.page !== "number" ||
+      (value.classification !== "born_digital" &&
+        value.classification !== "scanned" &&
+        value.classification !== "mixed")
+    ) {
+      return [];
+    }
+    return [
+      {
+        page: value.page,
+        classification: value.classification,
+        quality_score: typeof value.quality_score === "number" ? value.quality_score : 0,
+        needs_ocr: Boolean(value.needs_ocr),
+        warnings: Array.isArray(value.warnings)
+          ? value.warnings.filter((warning): warning is string => typeof warning === "string")
+          : [],
+      },
+    ];
+  });
+}
+
+function getPageOcrRoute(version: DocumentVersion, page: number) {
+  return getPageOcrRoutes(version).find((route) => route.page === page) ?? null;
+}
+
+function ocrPendingPages(version: DocumentVersion) {
+  return getPageOcrRoutes(version)
+    .filter((route) => route.needs_ocr)
+    .map((route) => route.page);
+}
+
+function ocrPageLabel(version: DocumentVersion, page: number) {
+  const route = getPageOcrRoute(version, page);
+  if (!route) {
+    return version.ocr_required ? "OCR state missing" : "Native text";
+  }
+  if (route.needs_ocr) {
+    return route.classification === "scanned" ? "OCR pending" : "Mixed · OCR pending";
+  }
+  if (route.classification === "mixed") {
+    return "Mixed · native text";
+  }
+  return "Native text";
+}
+
+function ocrPageClassName(version: DocumentVersion, page: number) {
+  const route = getPageOcrRoute(version, page);
+  if (route?.needs_ocr || (!route && version.ocr_required)) {
+    return "page-ocr page-ocr-pending";
+  }
+  return "page-ocr";
+}
+
+function getOcrPageResults(version: DocumentVersion): OcrPageResult[] {
+  const pages = version.metadata.ocr_pages;
+  if (!Array.isArray(pages)) {
+    return [];
+  }
+  return pages.flatMap((page): OcrPageResult[] => {
+    if (!page || typeof page !== "object") {
+      return [];
+    }
+    const value = page as Partial<OcrPageResult>;
+    if (typeof value.page !== "number" || typeof value.text !== "string") {
+      return [];
+    }
+    return [
+      {
+        page: value.page,
+        text: value.text,
+        confidence: typeof value.confidence === "number" ? value.confidence : null,
+        warnings: Array.isArray(value.warnings)
+          ? value.warnings.filter((warning): warning is string => typeof warning === "string")
+          : [],
+        provider: value.provider && typeof value.provider === "object" ? value.provider : {},
+        provenance: value.provenance && typeof value.provenance === "object" ? value.provenance : {},
+      },
+    ];
+  });
+}
+
+function getOcrPageResult(version: DocumentVersion, page: number) {
+  return getOcrPageResults(version).find((result) => result.page === page) ?? null;
+}
+
+function isOcrChunk(chunk: Chunk) {
+  return chunk.metadata.ocr_derived === true;
+}
+
+function getReprocessStatus(version: DocumentVersion): ReprocessStatus | null {
+  const status = version.metadata.reprocess_status;
+  if (!status || typeof status !== "object") {
+    return null;
+  }
+  const value = status as Partial<ReprocessStatus>;
+  if (
+    value.status !== "current" &&
+    value.status !== "stale" &&
+    value.status !== "source_missing" &&
+    value.status !== "unknown"
+  ) {
+    return null;
+  }
+  return {
+    status: value.status,
+    stale: Boolean(value.stale),
+    reprocess_available: Boolean(value.reprocess_available),
+    message: typeof value.message === "string" ? value.message : "",
+    changed_fields: Array.isArray(value.changed_fields)
+      ? value.changed_fields.filter((field): field is string => typeof field === "string")
+      : [],
+  };
+}
+
+function reprocessStatusLabel(version: DocumentVersion) {
+  const status = getReprocessStatus(version);
+  if (!status) {
+    return "Reprocess status unknown";
+  }
+  if (status.status === "stale") {
+    return status.changed_fields.length > 0
+      ? `Stale: ${status.changed_fields.join(", ")}`
+      : "Stale";
+  }
+  if (status.status === "source_missing") {
+    return "Source missing";
+  }
+  if (status.status === "unknown") {
+    return "Status unknown";
+  }
+  return "Current";
 }
 
 function absoluteApiUrl(path: string) {
@@ -7281,6 +7660,21 @@ function validateSettingsDraft(
     issues.push({ field: "parser.fallback_parser", message: "Fallback parser is required." });
   } else if (!fallbackParserChoices.some((entry) => entry.id === settings.parser.fallback_parser)) {
     issues.push({ field: "parser.fallback_parser", message: "Choose a supported fallback parser." });
+  }
+  if (settings.ocr.fallback_enabled && settings.ocr.fallback_provider === settings.ocr.provider) {
+    issues.push({ field: "ocr.fallback_provider", message: "OCR fallback must differ from primary provider." });
+  }
+  if (!settings.ocr.language.trim()) {
+    issues.push({ field: "ocr.language", message: "OCR language is required." });
+  }
+  if (settings.ocr.confidence_threshold < 0 || settings.ocr.confidence_threshold > 1) {
+    issues.push({ field: "ocr.confidence_threshold", message: "OCR confidence threshold must be between 0 and 1." });
+  }
+  if (settings.ocr.min_text_length < 0) {
+    issues.push({ field: "ocr.min_text_length", message: "OCR minimum text cannot be negative." });
+  }
+  if (settings.ocr.max_pages < 1) {
+    issues.push({ field: "ocr.max_pages", message: "OCR max pages must be at least 1." });
   }
   if (!settings.embedding.model.trim()) {
     issues.push({ field: "embedding.model", message: "Embedding model is required." });

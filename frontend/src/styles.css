@@ -2289,6 +2289,17 @@ textarea {
   object-fit: contain;
 }
 
+.page-ocr {
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.page-ocr-pending {
+  color: var(--warn);
+}
+
 .page-image-empty {
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);
@@ -2297,6 +2308,21 @@ textarea {
   margin-bottom: var(--s4);
   padding: var(--s3);
   text-align: center;
+}
+
+.ocr-page-text-panel {
+  display: grid;
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+
+.ocr-page-text {
+  border-left: 3px solid var(--warn);
+  padding-left: var(--s3);
+}
+
+.ocr-page-text p {
+  margin: var(--s1) 0 0;
 }
 
 .doc-text p {

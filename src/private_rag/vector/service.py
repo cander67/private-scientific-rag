@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
+from private_rag.ingestion.service import ParserChunkStaleError, stale_parser_chunk_documents
 from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
 from private_rag.search.service import _fields_for_chunk, _split_tags
@@ -35,6 +36,9 @@ def rebuild_vector_index(
     if repository is None or repository.settings is None:
         return None
     settings = RepositorySettings.model_validate(repository.settings.settings)
+    stale_documents = stale_parser_chunk_documents(session, repository_id, settings)
+    if stale_documents:
+        raise ParserChunkStaleError(stale_documents)
     collection_name = collection_name_for_repository(repository_id)
     resolved_embedder = resolve_embedding_provider(
         embedder,
@@ -59,7 +63,10 @@ def rebuild_vector_index(
         select(DocumentChunk, Document, DocumentVersion)
         .join(Document, Document.id == DocumentChunk.document_id)
         .join(DocumentVersion, DocumentVersion.id == DocumentChunk.document_version_id)
-        .where(DocumentChunk.repository_id == repository_id)
+        .where(
+            DocumentChunk.repository_id == repository_id,
+            Document.current_version_id == DocumentChunk.document_version_id,
+        )
         .order_by(Document.display_name, DocumentChunk.chunk_index)
     ).all()
 

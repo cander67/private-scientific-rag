@@ -19,7 +19,7 @@ from private_rag.chat.schemas import (
     ChatRetrievalSettings,
     ChatSessionRead,
 )
-from private_rag.ingestion.models import DocumentChunk
+from private_rag.ingestion.models import Document, DocumentChunk
 from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
 from private_rag.retrieval.rerankers import RerankerProvider
@@ -368,7 +368,11 @@ def _parsed_chunk_count(session: Session, repository_id: str) -> int:
     value = session.scalar(
         select(func.count())
         .select_from(DocumentChunk)
-        .where(DocumentChunk.repository_id == repository_id)
+        .join(Document, Document.id == DocumentChunk.document_id)
+        .where(
+            DocumentChunk.repository_id == repository_id,
+            Document.current_version_id == DocumentChunk.document_version_id,
+        )
     )
     return int(value or 0)
 

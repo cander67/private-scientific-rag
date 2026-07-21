@@ -1,18 +1,30 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
 from collections.abc import Iterable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from private_rag.core.settings import Settings, get_settings
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
-from private_rag.ingestion.parser import detect_source_type, parse_source
+from private_rag.ingestion.ocr import (
+    NormalizedOcrPageResult,
+    OcrPageImage,
+    OcrProvider,
+    PageOcrClassification,
+    PageOcrRoute,
+    classify_pdf_pages,
+    default_ocr_provider,
+    missing_ocr_dependency_result,
+    render_pages_for_ocr,
+)
+from private_rag.ingestion.parser import ParserExecutionSettings, detect_source_type, parse_source
 from private_rag.ingestion.schemas import (
     DocumentChunkRead,
     DocumentInspection,
@@ -29,6 +41,12 @@ from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
 
 
+class ParserChunkStaleError(RuntimeError):
+    def __init__(self, stale_documents: list[dict[str, object]]) -> None:
+        self.stale_documents = stale_documents
+        super().__init__(_stale_documents_message(stale_documents))
+
+
 def upload_document(
     session: Session,
     repository_id: str,
@@ -40,6 +58,7 @@ def upload_document(
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
         return None
+    repository_settings = RepositorySettings.model_validate(repository.settings.settings)
 
     digest = hashlib.sha256(data).hexdigest()
     existing_version = session.scalar(
@@ -50,13 +69,19 @@ def upload_document(
         )
     )
     if existing_version is not None:
-        return _upload_response(existing_version, skipped=True)
+        return _upload_response(
+            existing_version, skipped=True, repository_settings=repository_settings
+        )
 
     app_settings = settings or get_settings()
     storage_path = _write_source_file(repository_id, filename, digest, data, app_settings)
-    parsed = _parse_document_safely(filename, content_type, data)
+    parsed = _parse_document_safely(filename, content_type, data, repository_settings)
     _attach_annotation_pair_metadata(session, repository_id, filename, parsed)
-    repository_settings = RepositorySettings.model_validate(repository.settings.settings)
+    _attach_parser_fingerprint(
+        parsed=parsed,
+        repository_settings=repository_settings,
+        source_hash=digest,
+    )
 
     document = Document(repository_id=repository_id, display_name=filename)
     session.add(document)
@@ -98,6 +123,7 @@ def upload_document(
         repository_id=repository_id,
         document_id=document.id,
         document_version_id=version.id,
+        chunking_mode=repository_settings.chunking.mode,
         chunk_size=repository_settings.chunking.chunk_size,
         chunk_overlap=repository_settings.chunking.chunk_overlap,
         source_hash=digest,
@@ -110,18 +136,25 @@ def upload_document(
     session.commit()
     session.refresh(version)
     session.refresh(document)
-    return _upload_response(version)
+    return _upload_response(version, repository_settings=repository_settings)
 
 
 def list_documents(session: Session, repository_id: str) -> list[DocumentRead] | None:
-    if session.get(Repository, repository_id) is None:
+    repository = session.get(Repository, repository_id)
+    if repository is None or repository.settings is None:
         return None
+    repository_settings = RepositorySettings.model_validate(repository.settings.settings)
     documents = session.scalars(
         select(Document)
         .where(Document.repository_id == repository_id)
         .order_by(Document.created_at)
     ).all()
-    return [_document_read(document, _current_version(document)) for document in documents]
+    return [
+        _document_read(
+            document, _current_version(document), repository_settings=repository_settings
+        )
+        for document in documents
+    ]
 
 
 def inspect_document(
@@ -132,17 +165,88 @@ def inspect_document(
     document = session.get(Document, document_id)
     if document is None or document.repository_id != repository_id:
         return None
+    repository = session.get(Repository, repository_id)
+    if repository is None or repository.settings is None:
+        return None
+    repository_settings = RepositorySettings.model_validate(repository.settings.settings)
     version = _current_version(document)
     if version is None:
         return None
+    return _inspection_for_version(
+        session=session,
+        document=document,
+        version=version,
+        repository_settings=repository_settings,
+    )
+
+
+def inspect_document_version(
+    session: Session,
+    repository_id: str,
+    document_id: str,
+    version_id: str,
+) -> DocumentInspection | None:
+    document = session.get(Document, document_id)
+    if document is None or document.repository_id != repository_id:
+        return None
+    repository = session.get(Repository, repository_id)
+    if repository is None or repository.settings is None:
+        return None
+    version = next((item for item in document.versions if item.id == version_id), None)
+    if version is None:
+        return None
+    return _inspection_for_version(
+        session=session,
+        document=document,
+        version=version,
+        repository_settings=RepositorySettings.model_validate(repository.settings.settings),
+    )
+
+
+def stale_parser_chunk_documents(
+    session: Session,
+    repository_id: str,
+    repository_settings: RepositorySettings,
+) -> list[dict[str, object]]:
+    rows = session.execute(
+        select(Document, DocumentVersion)
+        .join(DocumentVersion, DocumentVersion.id == Document.current_version_id)
+        .where(Document.repository_id == repository_id)
+        .order_by(Document.display_name)
+    ).all()
+    stale_documents: list[dict[str, object]] = []
+    for document, version in rows:
+        status = _reprocess_status_metadata(version, repository_settings)
+        if status["status"] != "stale":
+            continue
+        stale_documents.append(
+            {
+                "document_id": document.id,
+                "document_version_id": version.id,
+                "document_title": document.display_name,
+                "changed_fields": status["changed_fields"],
+                "message": status["message"],
+            }
+        )
+    return stale_documents
+
+
+def _inspection_for_version(
+    session: Session,
+    document: Document,
+    version: DocumentVersion,
+    repository_settings: RepositorySettings,
+) -> DocumentInspection:
     chunks = session.scalars(
         select(DocumentChunk)
         .where(DocumentChunk.document_version_id == version.id)
         .order_by(DocumentChunk.chunk_index)
     ).all()
     return DocumentInspection(
-        document=_document_read(document, version),
-        version=_version_read(version),
+        document=_document_read(
+            document, _current_version(document), repository_settings=repository_settings
+        ),
+        version=_version_read(version, repository_settings=repository_settings),
         chunks=[_chunk_read(chunk) for chunk in chunks],
         page_images=_page_images_from_metadata(version.extra_metadata),
     )
@@ -161,51 +265,247 @@ def reprocess_document(
         return None
     source_path = Path(version.storage_path)
     if not source_path.exists():
-        version.status = "failed"
-        version.warnings = [*version.warnings, "Original source file is missing."]
+        missing_version = _new_reprocess_version(
+            source_version=version,
+            status="failed",
+            parser_name=version.parser_name,
+            parser_version=version.parser_version,
+            byte_size=version.byte_size,
+            sha256=version.sha256,
+            warnings=[*version.warnings, "Original source file is missing."],
+            metadata={
+                **version.extra_metadata,
+                "reprocess": {
+                    "source_version_id": version.id,
+                    "status": "failed",
+                    "message": "Original source file is missing.",
+                },
+            },
+        )
+        session.add(missing_version)
+        session.flush()
+        document.current_version_id = missing_version.id
+        session.add(document)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
+
+    data = source_path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    repository = session.get(Repository, repository_id)
+    if repository is None or repository.settings is None:
+        return None
+    repository_settings = RepositorySettings.model_validate(repository.settings.settings)
+    parsed = _parse_document_safely(
+        version.original_filename,
+        version.content_type,
+        data,
+        repository_settings,
+    )
+    _attach_annotation_pair_metadata(session, repository_id, version.original_filename, parsed)
+    _attach_parser_fingerprint(
+        parsed=parsed,
+        repository_settings=repository_settings,
+        source_hash=digest,
+    )
+    previous_fingerprint = str(version.extra_metadata.get("parser_fingerprint") or "")
+    next_fingerprint = str(parsed.metadata.get("parser_fingerprint") or "")
+    parsed.metadata["reprocess"] = {
+        "source_version_id": version.id,
+        "previous_parser_fingerprint": previous_fingerprint,
+        "new_parser_fingerprint": next_fingerprint,
+        "fingerprint_changed": previous_fingerprint != next_fingerprint,
+        "changed_fields": _parser_fingerprint_changed_fields(
+            _dict_or_empty(version.extra_metadata.get("parser_fingerprint_payload")),
+            _dict_or_empty(parsed.metadata.get("parser_fingerprint_payload")),
+        ),
+    }
+
+    new_version = _new_reprocess_version(
+        source_version=version,
+        status=_status_for_parsed_document(parsed),
+        parser_name=parsed.parser_name,
+        parser_version=parsed.parser_version,
+        byte_size=len(data),
+        sha256=digest,
+        source_type=parsed.source_type,
+        ocr_required=parsed.ocr_required,
+        page_count=parsed.page_count,
+        line_count=parsed.line_count,
+        section_count=len(parsed.sections),
+        warnings=parsed.warnings,
+        metadata=parsed.metadata,
+    )
+    session.add(new_version)
+    session.flush()
+    chunks = _chunk_parsed_document(
+        parsed=parsed,
+        repository_id=repository_id,
+        document_id=document.id,
+        document_version_id=new_version.id,
+        chunking_mode=repository_settings.chunking.mode,
+        chunk_size=repository_settings.chunking.chunk_size,
+        chunk_overlap=repository_settings.chunking.chunk_overlap,
+        source_hash=digest,
+        parser_version=parsed.parser_version,
+    )
+    session.add_all(chunks)
+    new_version.chunk_count = len(chunks)
+    document.current_version_id = new_version.id
+    session.add(document)
+    _attach_page_image_metadata(
+        data=data,
+        parsed=parsed,
+        version=new_version,
+        document_id=document.id,
+        settings=get_settings(),
+    )
+    session.add(new_version)
+    session.commit()
+    return inspect_document(session, repository_id, document_id)
+
+
+def run_document_ocr(
+    session: Session,
+    repository_id: str,
+    document_id: str,
+    provider: OcrProvider | None = None,
+    fallback_provider: OcrProvider | None = None,
+    settings: Settings | None = None,
+) -> DocumentInspection | None:
+    document = session.get(Document, document_id)
+    if document is None or document.repository_id != repository_id:
+        return None
+    version = _current_version(document)
+    if version is None:
+        return None
+    repository = session.get(Repository, repository_id)
+    if repository is None or repository.settings is None:
+        return None
+    repository_settings = RepositorySettings.model_validate(repository.settings.settings)
+    ocr_settings = repository_settings.ocr
+    if version.source_type != "pdf":
+        version.warnings = [*version.warnings, "OCR can only run for PDF documents."]
+        session.add(version)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
+    source_path = Path(version.storage_path)
+    if not source_path.exists():
+        _record_ocr_run(
+            version=version,
+            status="failed",
+            warnings=["Stored source file is missing; OCR cannot run."],
+        )
         session.add(version)
         session.commit()
         return inspect_document(session, repository_id, document_id)
 
     data = source_path.read_bytes()
-    parsed = _parse_document_safely(version.original_filename, version.content_type, data)
-    _attach_annotation_pair_metadata(session, repository_id, version.original_filename, parsed)
-    repository = session.get(Repository, repository_id)
-    if repository is None or repository.settings is None:
-        return None
-    repository_settings = RepositorySettings.model_validate(repository.settings.settings)
+    existing_ocr_pages = _ocr_pages_from_metadata(version.extra_metadata)
+    if existing_ocr_pages and not ocr_settings.overwrite:
+        _record_ocr_run(
+            version=version,
+            status="skipped_existing",
+            warnings=["OCR output already exists; enable overwrite to rerun OCR."],
+            results=existing_ocr_pages,
+        )
+        session.add(version)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
+    routes, route_warnings = _ocr_routes_for_version(version, data)
+    pending_routes = [route for route in routes if route.needs_ocr][: ocr_settings.max_pages]
+    if not pending_routes:
+        _record_ocr_run(
+            version=version,
+            status="not_required",
+            warnings=route_warnings,
+            results=[],
+        )
+        version.ocr_required = False
+        if version.status == "needs_ocr":
+            version.status = "parsed"
+        session.add(version)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
 
-    session.query(DocumentChunk).filter(DocumentChunk.document_version_id == version.id).delete(
-        synchronize_session=False
-    )
-    chunks = _chunk_parsed_document(
-        parsed=parsed,
-        repository_id=repository_id,
-        document_id=document.id,
-        document_version_id=version.id,
-        chunk_size=repository_settings.chunking.chunk_size,
-        chunk_overlap=repository_settings.chunking.chunk_overlap,
-        source_hash=version.sha256,
-        parser_version=parsed.parser_version,
-    )
-    session.add_all(chunks)
-    version.status = _status_for_parsed_document(parsed)
-    version.parser_name = parsed.parser_name
-    version.parser_version = parsed.parser_version
-    version.ocr_required = parsed.ocr_required
-    version.page_count = parsed.page_count
-    version.line_count = parsed.line_count
-    version.section_count = len(parsed.sections)
-    version.chunk_count = len(chunks)
-    version.warnings = parsed.warnings
-    version.extra_metadata = parsed.metadata
-    _attach_page_image_metadata(
+    app_settings = settings or get_settings()
+    rendered, render_warnings = render_pages_for_ocr(
         data=data,
-        parsed=parsed,
-        version=version,
-        document_id=document.id,
-        settings=get_settings(),
+        routes=pending_routes,
+        destination_dir=_ocr_image_dir(version, app_settings),
+        source_sha256=version.sha256,
     )
+    if render_warnings:
+        _record_ocr_run(
+            version=version,
+            status="failed",
+            warnings=[*route_warnings, *render_warnings],
+            rendered_images=[image.to_metadata() for image in rendered],
+        )
+        version.warnings = [*version.warnings, *render_warnings]
+        session.add(version)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
+
+    ocr_provider = provider or default_ocr_provider(
+        ocr_settings.provider,
+        language=ocr_settings.language,
+    )
+    if ocr_provider is None:
+        results = [
+            missing_ocr_dependency_result(
+                page=image.page,
+                provider_name=ocr_settings.provider,
+                dependency_name=ocr_settings.provider,
+                image=image,
+            )
+            for image in rendered
+        ]
+        warnings = [warning for result in results for warning in result.warnings]
+        _record_ocr_run(
+            version=version,
+            status="missing_dependency",
+            warnings=[*route_warnings, *warnings],
+            results=results,
+            rendered_images=[image.to_metadata() for image in rendered],
+        )
+        version.warnings = [*version.warnings, *warnings]
+        session.add(version)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
+
+    results = [ocr_provider.recognize_page(image) for image in rendered]
+    results, fallback_decisions, fallback_warnings = _apply_ocr_fallbacks(
+        results=results,
+        rendered_images=rendered,
+        primary_provider=ocr_provider,
+        fallback_provider=fallback_provider,
+        repository_settings=repository_settings,
+    )
+    ocr_chunks = _ocr_chunks_from_results(
+        results=results,
+        version=version,
+        document=document,
+        chunk_index_start=version.chunk_count,
+    )
+    session.add_all(ocr_chunks)
+    version.chunk_count = version.chunk_count + len(ocr_chunks)
+    successful_pages = [result.page for result in results if result.text.strip()]
+    run_warnings = [
+        warning for result in results for warning in result.warnings
+    ] + fallback_warnings
+    status = "completed" if successful_pages else "failed"
+    _record_ocr_run(
+        version=version,
+        status=status,
+        warnings=[*route_warnings, *run_warnings],
+        results=results,
+        rendered_images=[image.to_metadata() for image in rendered],
+        fallback_decisions=fallback_decisions,
+    )
+    version.warnings = [*version.warnings, *run_warnings]
+    if successful_pages:
+        version.ocr_required = False
+        version.status = "parsed"
     session.add(version)
     session.commit()
     return inspect_document(session, repository_id, document_id)
@@ -263,9 +563,16 @@ def _parse_document_safely(
     filename: str,
     content_type: str | None,
     data: bytes,
+    repository_settings: RepositorySettings | None = None,
 ) -> ParsedDocument:
     try:
-        return parse_source(filename, content_type, data)
+        parser_settings = None
+        if repository_settings is not None:
+            parser_settings = ParserExecutionSettings(
+                structured_parser=repository_settings.parser.structured_parser,
+                fallback_parser=repository_settings.parser.fallback_parser,
+            )
+        return parse_source(filename, content_type, data, parser_settings=parser_settings)
     except Exception as exc:
         return ParsedDocument(
             source_type=detect_source_type(filename, content_type),
@@ -275,6 +582,176 @@ def _parse_document_safely(
             warnings=[f"Parsing failed: {type(exc).__name__}: {exc}"],
             metadata={"parse_error": type(exc).__name__},
         )
+
+
+def _new_reprocess_version(
+    source_version: DocumentVersion,
+    status: DocumentStatus,
+    parser_name: str,
+    parser_version: str,
+    byte_size: int,
+    sha256: str,
+    source_type: SourceType | None = None,
+    ocr_required: bool | None = None,
+    page_count: int | None = None,
+    line_count: int | None = None,
+    section_count: int | None = None,
+    warnings: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> DocumentVersion:
+    return DocumentVersion(
+        document_id=source_version.document_id,
+        repository_id=source_version.repository_id,
+        original_filename=source_version.original_filename,
+        content_type=source_version.content_type,
+        source_type=source_type or cast(SourceType, source_version.source_type),
+        sha256=sha256,
+        byte_size=byte_size,
+        storage_path=source_version.storage_path,
+        status=status,
+        parser_name=parser_name,
+        parser_version=parser_version,
+        ocr_required=source_version.ocr_required if ocr_required is None else ocr_required,
+        page_count=source_version.page_count if page_count is None else page_count,
+        line_count=source_version.line_count if line_count is None else line_count,
+        section_count=source_version.section_count if section_count is None else section_count,
+        chunk_count=0,
+        warnings=warnings or [],
+        extra_metadata=metadata or {},
+    )
+
+
+def _attach_parser_fingerprint(
+    parsed: ParsedDocument,
+    repository_settings: RepositorySettings,
+    source_hash: str,
+) -> None:
+    payload = _parser_fingerprint_payload(
+        parsed=parsed,
+        repository_settings=repository_settings,
+        source_hash=source_hash,
+    )
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    parsed.metadata["parser_fingerprint"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    parsed.metadata["parser_fingerprint_payload"] = payload
+
+
+def _parser_fingerprint_payload(
+    parsed: ParsedDocument,
+    repository_settings: RepositorySettings,
+    source_hash: str,
+) -> dict[str, object]:
+    return {
+        "parser": repository_settings.parser.model_dump(mode="json"),
+        "parser_package_versions": parsed.metadata.get("parser_package_versions", {}),
+        "parser_quality_thresholds": parsed.metadata.get("parser_quality_thresholds", {}),
+        "source_hash": source_hash,
+        "chunking": repository_settings.chunking.model_dump(mode="json"),
+    }
+
+
+def _parser_fingerprint_changed_fields(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+) -> list[str]:
+    changed_fields: list[str] = []
+    for field in (
+        "parser.structured_parser",
+        "parser.fallback_parser",
+        "chunking.mode",
+        "chunking.chunk_size",
+        "chunking.chunk_overlap",
+        "source_hash",
+    ):
+        if _nested_value(previous, field) != _nested_value(current, field):
+            changed_fields.append(field)
+    return changed_fields
+
+
+def _nested_value(payload: dict[str, Any], dotted_path: str) -> Any:
+    value: Any = payload
+    for key in dotted_path.split("."):
+        if not isinstance(value, dict):
+            return None
+        value = value.get(key)
+    return value
+
+
+def _dict_or_empty(value: object) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _version_metadata(
+    version: DocumentVersion,
+    repository_settings: RepositorySettings | None,
+) -> dict[str, Any]:
+    metadata = dict(version.extra_metadata or {})
+    if repository_settings is not None:
+        metadata["reprocess_status"] = _reprocess_status_metadata(version, repository_settings)
+    return metadata
+
+
+def _reprocess_status_metadata(
+    version: DocumentVersion,
+    repository_settings: RepositorySettings,
+) -> dict[str, Any]:
+    payload = _dict_or_empty(version.extra_metadata.get("parser_fingerprint_payload"))
+    stored_fingerprint = str(version.extra_metadata.get("parser_fingerprint") or "")
+    if not payload or not stored_fingerprint:
+        return {
+            "status": "unknown",
+            "stale": False,
+            "reprocess_available": Path(version.storage_path).exists(),
+            "message": "Parser fingerprint metadata is not available for this version.",
+            "changed_fields": [],
+        }
+
+    current_payload = {
+        **payload,
+        "parser": repository_settings.parser.model_dump(mode="json"),
+        "chunking": repository_settings.chunking.model_dump(mode="json"),
+    }
+    encoded = json.dumps(current_payload, sort_keys=True, separators=(",", ":"))
+    current_fingerprint = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    changed_fields = _parser_fingerprint_changed_fields(payload, current_payload)
+    source_exists = Path(version.storage_path).exists()
+    if not source_exists:
+        status = "source_missing"
+        message = "Stored source file is missing; reprocess cannot run until it is restored."
+    elif current_fingerprint != stored_fingerprint:
+        status = "stale"
+        message = "Parser or chunking settings changed since this version was parsed."
+    else:
+        status = "current"
+        message = "Parser and chunking settings match this parsed version."
+    return {
+        "status": status,
+        "stale": status == "stale",
+        "reprocess_available": source_exists,
+        "stored_parser_fingerprint": stored_fingerprint,
+        "current_parser_fingerprint": current_fingerprint,
+        "changed_fields": changed_fields,
+        "message": message,
+    }
+
+
+def _stale_documents_message(stale_documents: list[dict[str, object]]) -> str:
+    if not stale_documents:
+        return "Parser or chunking settings changed; reprocess stale documents before rebuilding indexes."
+    previews = []
+    for document in stale_documents[:5]:
+        title = str(document.get("document_title") or document.get("document_id") or "document")
+        fields = document.get("changed_fields")
+        field_text = ", ".join(str(field) for field in fields) if isinstance(fields, list) else ""
+        previews.append(f"{title}{f' ({field_text})' if field_text else ''}")
+    suffix = ""
+    if len(stale_documents) > len(previews):
+        suffix = f" and {len(stale_documents) - len(previews)} more"
+    return (
+        "Parser/chunk settings are stale for "
+        f"{len(stale_documents)} document(s): {', '.join(previews)}{suffix}. "
+        "Reprocess stale documents before rebuilding indexes."
+    )
 
 
 def _status_for_parsed_document(parsed: ParsedDocument) -> DocumentStatus:
@@ -444,6 +921,251 @@ def _page_images_from_metadata(metadata: dict[str, object]) -> list[PageImageRea
     return parsed_images
 
 
+def _ocr_routes_for_version(
+    version: DocumentVersion,
+    data: bytes,
+) -> tuple[list[PageOcrRoute], list[str]]:
+    routes = _page_ocr_routes_from_metadata(version.extra_metadata)
+    if routes:
+        return routes, []
+    return classify_pdf_pages(data)
+
+
+def _page_ocr_routes_from_metadata(metadata: dict[str, object]) -> list[PageOcrRoute]:
+    raw_routes = metadata.get("page_ocr_routes")
+    if not isinstance(raw_routes, list):
+        return []
+    routes: list[PageOcrRoute] = []
+    for raw_route in raw_routes:
+        if not isinstance(raw_route, dict):
+            continue
+        try:
+            classification = str(raw_route["classification"])
+            if classification not in {"born_digital", "scanned", "mixed"}:
+                continue
+            routes.append(
+                PageOcrRoute(
+                    page=int(raw_route["page"]),
+                    classification=cast(PageOcrClassification, classification),
+                    text_length=int(raw_route.get("text_length") or 0),
+                    word_count=int(raw_route.get("word_count") or 0),
+                    image_count=int(raw_route.get("image_count") or 0),
+                    quality_score=float(raw_route.get("quality_score") or 0),
+                    needs_ocr=bool(raw_route.get("needs_ocr")),
+                    warnings=[
+                        str(warning)
+                        for warning in raw_route.get("warnings", [])
+                        if isinstance(warning, str)
+                    ],
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return routes
+
+
+def _ocr_image_dir(version: DocumentVersion, settings: Settings) -> Path:
+    return (
+        settings.data_dir
+        / "repositories"
+        / version.repository_id
+        / "derived"
+        / version.id
+        / "ocr-images"
+    )
+
+
+def _record_ocr_run(
+    *,
+    version: DocumentVersion,
+    status: str,
+    warnings: list[str],
+    results: list[NormalizedOcrPageResult] | None = None,
+    rendered_images: list[dict[str, object]] | None = None,
+    fallback_decisions: list[dict[str, object]] | None = None,
+) -> None:
+    metadata = dict(version.extra_metadata)
+    result_metadata = [result.to_metadata() for result in results or []]
+    metadata["ocr_pages"] = result_metadata
+    metadata["ocr_run"] = {
+        "status": status,
+        "pages_completed": [result.page for result in results or [] if result.text.strip()],
+        "pages_failed": [result.page for result in results or [] if not result.text.strip()],
+        "warnings": warnings,
+        "provider": _ocr_provider_metadata(results or []),
+        "fallback_decisions": fallback_decisions or [],
+    }
+    if rendered_images is not None:
+        metadata["ocr_rendered_images"] = rendered_images
+    version.extra_metadata = metadata
+
+
+def _ocr_pages_from_metadata(metadata: dict[str, object]) -> list[NormalizedOcrPageResult]:
+    raw_pages = metadata.get("ocr_pages")
+    if not isinstance(raw_pages, list):
+        return []
+    pages: list[NormalizedOcrPageResult] = []
+    for raw_page in raw_pages:
+        if not isinstance(raw_page, dict):
+            continue
+        try:
+            page = int(raw_page["page"])
+            text = str(raw_page.get("text") or "")
+            confidence_value = raw_page.get("confidence")
+            confidence = float(confidence_value) if confidence_value is not None else None
+            provider = _dict_or_empty(raw_page.get("provider"))
+            provenance = _dict_or_empty(raw_page.get("provenance"))
+            warnings = [
+                str(warning) for warning in raw_page.get("warnings", []) if isinstance(warning, str)
+            ]
+            pages.append(
+                NormalizedOcrPageResult(
+                    page=page,
+                    text=text,
+                    confidence=confidence,
+                    warnings=warnings,
+                    provider=provider,
+                    provenance=provenance,
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return pages
+
+
+def _ocr_provider_metadata(results: list[NormalizedOcrPageResult]) -> dict[str, object]:
+    for result in results:
+        return result.provider
+    return {}
+
+
+def _apply_ocr_fallbacks(
+    *,
+    results: list[NormalizedOcrPageResult],
+    rendered_images: list[OcrPageImage],
+    primary_provider: OcrProvider,
+    fallback_provider: OcrProvider | None,
+    repository_settings: RepositorySettings,
+) -> tuple[list[NormalizedOcrPageResult], list[dict[str, object]], list[str]]:
+    ocr_settings = repository_settings.ocr
+    image_by_page = {image.page: image for image in rendered_images}
+    decisions: list[dict[str, object]] = []
+    warnings: list[str] = []
+    if not ocr_settings.fallback_enabled:
+        return results, decisions, warnings
+    selected_fallback = fallback_provider
+    next_results: list[NormalizedOcrPageResult] = []
+    for result in results:
+        reason = _ocr_fallback_reason(result, repository_settings)
+        if reason is None:
+            next_results.append(result)
+            continue
+        decision: dict[str, object] = {
+            "page": result.page,
+            "primary_provider": primary_provider.provider_name,
+            "fallback_provider": ocr_settings.fallback_provider,
+            "reason": reason,
+        }
+        if ocr_settings.fallback_provider == "none":
+            decision["status"] = "disabled"
+            decisions.append(decision)
+            next_results.append(result)
+            continue
+        if selected_fallback is None:
+            selected_fallback = default_ocr_provider(
+                ocr_settings.fallback_provider,
+                language=ocr_settings.language,
+            )
+        if selected_fallback is None:
+            warning = (
+                f"{ocr_settings.fallback_provider} is not installed; "
+                f"OCR fallback skipped for page {result.page}."
+            )
+            decision["status"] = "missing_dependency"
+            decisions.append(decision)
+            warnings.append(warning)
+            next_results.append(
+                NormalizedOcrPageResult(
+                    page=result.page,
+                    text=result.text,
+                    confidence=result.confidence,
+                    warnings=[*result.warnings, warning],
+                    provider=result.provider,
+                    provenance=result.provenance,
+                )
+            )
+            continue
+        image = image_by_page.get(result.page)
+        if image is None:
+            decision["status"] = "missing_image"
+            decisions.append(decision)
+            next_results.append(result)
+            continue
+        fallback_result = selected_fallback.recognize_page(image)
+        decision["status"] = "used"
+        decision["fallback_result_provider"] = fallback_result.provider
+        decisions.append(decision)
+        next_results.append(fallback_result)
+    return next_results, decisions, warnings
+
+
+def _ocr_fallback_reason(
+    result: NormalizedOcrPageResult,
+    repository_settings: RepositorySettings,
+) -> str | None:
+    ocr_settings = repository_settings.ocr
+    if len(result.text.strip()) < ocr_settings.min_text_length:
+        return "min_text_length"
+    if result.confidence is not None and result.confidence < ocr_settings.confidence_threshold:
+        return "confidence_threshold"
+    return None
+
+
+def _ocr_chunks_from_results(
+    *,
+    results: list[NormalizedOcrPageResult],
+    version: DocumentVersion,
+    document: Document,
+    chunk_index_start: int,
+) -> list[DocumentChunk]:
+    chunks: list[DocumentChunk] = []
+    parser_fingerprint = str(version.extra_metadata.get("parser_fingerprint") or "")
+    parser_route = version.extra_metadata.get("parser_route") or version.extra_metadata.get(
+        "parser_chain", []
+    )
+    for result in results:
+        text = result.text.strip()
+        if not text:
+            continue
+        chunks.append(
+            DocumentChunk(
+                repository_id=version.repository_id,
+                document_id=document.id,
+                document_version_id=version.id,
+                chunk_index=chunk_index_start + len(chunks),
+                text=text,
+                section="ocr",
+                page_start=result.page,
+                page_end=result.page,
+                parser_version=f"{version.parser_version}+ocr",
+                extra_metadata={
+                    "source_hash": version.sha256,
+                    "source_type": version.source_type,
+                    "parser_name": version.parser_name,
+                    "parser_version": version.parser_version,
+                    "parser_route": parser_route,
+                    "parser_fingerprint": parser_fingerprint,
+                    "ocr_derived": True,
+                    "ocr_confidence": result.confidence,
+                    "ocr_provider": result.provider,
+                    "ocr_warnings": result.warnings,
+                    "page_provenance": result.provenance,
+                },
+            )
+        )
+    return chunks
+
+
 def _safe_filename(filename: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(filename).name).strip("-")
     return cleaned or "document"
@@ -454,13 +1176,23 @@ def _chunk_parsed_document(
     repository_id: str,
     document_id: str,
     document_version_id: str,
+    chunking_mode: str,
     chunk_size: int,
     chunk_overlap: int,
     source_hash: str,
     parser_version: str,
 ) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
-    for segment in _coalesce_segments(parsed.segments, chunk_size, chunk_overlap):
+    if chunking_mode == "fixed":
+        segments = _fixed_size_segments(parsed, chunk_size, chunk_overlap)
+    else:
+        segments = _coalesce_segments(parsed.segments, chunk_size, chunk_overlap)
+    chunking_metadata = {
+        "chunking_mode": chunking_mode,
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap,
+    }
+    for segment in segments:
         text = segment.text.strip()
         if not text:
             continue
@@ -481,11 +1213,52 @@ def _chunk_parsed_document(
                 parser_version=parser_version,
                 extra_metadata={
                     **segment.metadata,
+                    "chunking": chunking_metadata,
                     "source_hash": source_hash,
                     "source_type": parsed.source_type,
+                    "parser_name": parsed.parser_name,
+                    "parser_route": parsed.metadata.get("parser_route")
+                    or parsed.metadata.get("parser_chain", []),
+                    "parser_settings": parsed.metadata.get("parser_settings", {}),
+                    "parser_fingerprint": parsed.metadata.get("parser_fingerprint", ""),
                 },
             )
         )
+    return chunks
+
+
+def _fixed_size_segments(
+    parsed: ParsedDocument,
+    chunk_size: int,
+    chunk_overlap: int,
+) -> list[ParsedSegment]:
+    text = parsed.text or "\n".join(segment.text for segment in parsed.segments)
+    if not text.strip():
+        return []
+    step = max(1, chunk_size - chunk_overlap)
+    chunks: list[ParsedSegment] = []
+    start = 0
+    while start < len(text):
+        raw = text[start : start + chunk_size]
+        leading_trimmed = len(raw) - len(raw.lstrip())
+        trailing_trimmed = len(raw) - len(raw.rstrip())
+        char_start = start + leading_trimmed
+        char_end = start + len(raw) - trailing_trimmed
+        chunk_text = text[char_start:char_end]
+        if chunk_text:
+            chunks.append(
+                ParsedSegment(
+                    text=chunk_text,
+                    char_start=char_start,
+                    char_end=char_end,
+                    line_start=text.count("\n", 0, char_start) + 1,
+                    line_end=text.count("\n", 0, char_end) + 1,
+                    metadata={"fixed_window_start": start, "fixed_window_end": start + len(raw)},
+                )
+            )
+        if start + chunk_size >= len(text):
+            break
+        start += step
     return chunks
 
 
@@ -561,14 +1334,15 @@ def _last_value(values: Iterable[int | None]) -> int | None:
 def _upload_response(
     version: DocumentVersion,
     skipped: bool = False,
+    repository_settings: RepositorySettings | None = None,
 ) -> DocumentUploadResponse:
     if skipped:
         version.status = "skipped"
     document = version.document
     chunks_preview = version.chunks[:5]
     return DocumentUploadResponse(
-        document=_document_read(document, version),
-        version=_version_read(version),
+        document=_document_read(document, version, repository_settings=repository_settings),
+        version=_version_read(version, repository_settings=repository_settings),
         chunks_preview=[_chunk_read(chunk) for chunk in chunks_preview],
     )
 
@@ -582,7 +1356,11 @@ def _current_version(document: Document) -> DocumentVersion | None:
     )
 
 
-def _document_read(document: Document, version: DocumentVersion | None = None) -> DocumentRead:
+def _document_read(
+    document: Document,
+    version: DocumentVersion | None = None,
+    repository_settings: RepositorySettings | None = None,
+) -> DocumentRead:
     return DocumentRead(
         id=document.id,
         repository_id=document.repository_id,
@@ -590,11 +1368,18 @@ def _document_read(document: Document, version: DocumentVersion | None = None) -
         current_version_id=document.current_version_id,
         created_at=document.created_at,
         updated_at=document.updated_at,
-        current_version=_version_read(version) if version is not None else None,
+        current_version=(
+            _version_read(version, repository_settings=repository_settings)
+            if version is not None
+            else None
+        ),
     )
 
 
-def _version_read(version: DocumentVersion) -> DocumentVersionRead:
+def _version_read(
+    version: DocumentVersion,
+    repository_settings: RepositorySettings | None = None,
+) -> DocumentVersionRead:
     return DocumentVersionRead(
         id=version.id,
         document_id=version.document_id,
@@ -614,7 +1399,7 @@ def _version_read(version: DocumentVersion) -> DocumentVersionRead:
         section_count=version.section_count,
         chunk_count=version.chunk_count,
         warnings=version.warnings,
-        metadata=version.extra_metadata,
+        metadata=_version_metadata(version, repository_settings),
         created_at=version.created_at,
         updated_at=version.updated_at,
     )

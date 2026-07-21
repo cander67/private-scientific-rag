@@ -104,6 +104,17 @@ test("Settings / Models renders catalog-backed parser choices", () => {
   assert.match(styles, /\.settings-field-note/);
 });
 
+test("Settings / Models exposes PRD13 OCR quality controls", () => {
+  assert.match(source, /ocr: \{/);
+  assert.match(source, /id="settings-ocr-provider"/);
+  assert.match(source, /id="settings-ocr-fallback-provider"/);
+  assert.match(source, /id="settings-ocr-confidence"/);
+  assert.match(source, /id="settings-ocr-max-pages"/);
+  assert.match(source, /Use OCR fallback when quality is low/);
+  assert.match(source, /Overwrite existing OCR artifacts/);
+  assert.match(source, /OCR fallback must differ from primary provider/);
+});
+
 test("Settings / Models explains Qdrant collection state and workflow ownership", () => {
   assert.match(source, /settings-collection-info/);
   assert.match(source, /Collection state/);

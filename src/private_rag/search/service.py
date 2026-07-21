@@ -7,6 +7,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
+from private_rag.ingestion.service import ParserChunkStaleError, stale_parser_chunk_documents
 from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import FullTextSettings, RepositorySettings
 from private_rag.search.schemas import (
@@ -66,7 +67,11 @@ def rebuild_full_text_index(
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
         return None
-    full_text_settings = RepositorySettings.model_validate(repository.settings.settings).full_text
+    repository_settings = RepositorySettings.model_validate(repository.settings.settings)
+    full_text_settings = repository_settings.full_text
+    stale_documents = stale_parser_chunk_documents(session, repository_id, repository_settings)
+    if stale_documents:
+        raise ParserChunkStaleError(stale_documents)
     ensure_full_text_schema(session, full_text_settings)
     session.execute(
         text(f"DELETE FROM {FTS_TABLE} WHERE repository_id = :repository_id"),
@@ -77,7 +82,10 @@ def rebuild_full_text_index(
         select(DocumentChunk, Document, DocumentVersion)
         .join(Document, Document.id == DocumentChunk.document_id)
         .join(DocumentVersion, DocumentVersion.id == DocumentChunk.document_version_id)
-        .where(DocumentChunk.repository_id == repository_id)
+        .where(
+            DocumentChunk.repository_id == repository_id,
+            Document.current_version_id == DocumentChunk.document_version_id,
+        )
         .order_by(Document.display_name, DocumentChunk.chunk_index)
     ).all()
 

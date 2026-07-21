@@ -253,6 +253,16 @@ def test_repository_settings_model_catalog_returns_known_defaults() -> None:
         "structured_parser": "auto",
         "fallback_parser": "auto",
     }
+    assert created["settings"]["ocr"] == {
+        "provider": "ocrmypdf_tesseract",
+        "fallback_provider": "rapidocr",
+        "fallback_enabled": True,
+        "language": "eng",
+        "confidence_threshold": 0.65,
+        "min_text_length": 20,
+        "max_pages": 25,
+        "overwrite": False,
+    }
     assert {"auto", "pymupdf", "docling", "pdfplumber", "pypdf", "built_in_fallback"} <= {
         entry["id"] for entry in payload["parser_choices"] if "structured" in entry["supported_as"]
     }
@@ -1171,6 +1181,36 @@ def test_repository_summary_reports_partial_and_stale_indexes() -> None:
     assert "rebuild recommended" in stale["full_text"]["message"]
     assert stale["vector"]["status"] == "stale"
     assert "rebuild recommended" in stale["vector"]["message"]
+
+
+def test_repository_summary_counts_only_current_version_chunks_after_reprocess() -> None:
+    client = _client_with_database()
+    _install_readiness_fakes(client)
+    created = client.get("/repositories/default").json()
+    repository_id = created["repository"]["id"]
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("refresh-summary.txt", b"Abstract\nfirst summary text\n", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    Path(upload_response.json()["version"]["storage_path"]).write_bytes(
+        b"Abstract\nsecond summary text\n"
+    )
+    reprocess_response = client.post(
+        f"/repositories/{repository_id}/documents/{upload_response.json()['document']['id']}/reprocess"
+    )
+
+    summary_response = client.get(f"/repositories/{repository_id}/summary")
+
+    assert reprocess_response.status_code == 200
+    assert summary_response.status_code == 200
+    payload = summary_response.json()
+    assert payload["counts"]["documents"] == 1
+    assert payload["counts"]["chunks"] == reprocess_response.json()["version"]["chunk_count"]
+    assert (
+        payload["full_text"]["parsed_chunks"] == reprocess_response.json()["version"]["chunk_count"]
+    )
+    assert payload["vector"]["parsed_chunks"] == reprocess_response.json()["version"]["chunk_count"]
 
 
 def test_repository_summary_returns_404_for_missing_repository() -> None:

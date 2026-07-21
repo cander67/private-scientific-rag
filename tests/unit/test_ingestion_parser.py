@@ -3,7 +3,8 @@ from __future__ import annotations
 import pytest
 
 from private_rag.ingestion import parser
-from private_rag.ingestion.parser import parse_source
+from private_rag.ingestion.ocr import PageOcrRoute
+from private_rag.ingestion.parser import ParserExecutionSettings, parse_source
 
 
 def test_pdf_fallback_filters_container_syntax_and_stream_data_from_chunks() -> None:
@@ -59,6 +60,82 @@ def test_pdf_parser_records_scientific_structure_hints(
     parsed = parse_source("paper.pdf", "application/pdf", b"%PDF")
 
     assert parsed.metadata["structure_hints"] == ["tables", "figures", "captions"]
+
+
+def test_pdf_parser_records_page_ocr_routes_and_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        parser,
+        "_extract_with_pypdf",
+        lambda data: parser.PdfExtractionResult(
+            text="Abstract\nSearchable text from page one.",
+            parser_name="pypdf",
+            parser_version="test",
+            parser_chain=["pypdf"],
+            page_count=2,
+        ),
+    )
+    monkeypatch.setattr(
+        parser,
+        "classify_pdf_pages",
+        lambda data: (
+            [
+                PageOcrRoute(
+                    page=1,
+                    classification="born_digital",
+                    text_length=120,
+                    word_count=18,
+                    image_count=0,
+                    quality_score=1.0,
+                    needs_ocr=False,
+                ),
+                PageOcrRoute(
+                    page=2,
+                    classification="scanned",
+                    text_length=0,
+                    word_count=0,
+                    image_count=1,
+                    quality_score=0.1,
+                    needs_ocr=True,
+                    warnings=["Page appears image-only and is pending OCR."],
+                ),
+            ],
+            [],
+        ),
+    )
+
+    parsed = parse_source("mixed.pdf", "application/pdf", b"%PDF")
+
+    assert parsed.ocr_required is True
+    assert parsed.metadata["ocr_status"] == {
+        "status": "pending",
+        "pages_pending": [2],
+        "pages_routed": 2,
+        "warnings": [],
+    }
+    assert parsed.metadata["page_ocr_routes"] == [
+        {
+            "page": 1,
+            "classification": "born_digital",
+            "text_length": 120,
+            "word_count": 18,
+            "image_count": 0,
+            "quality_score": 1.0,
+            "needs_ocr": False,
+            "warnings": [],
+        },
+        {
+            "page": 2,
+            "classification": "scanned",
+            "text_length": 0,
+            "word_count": 0,
+            "image_count": 1,
+            "quality_score": 0.1,
+            "needs_ocr": True,
+            "warnings": ["Page appears image-only and is pending OCR."],
+        },
+    ]
 
 
 def test_pdf_fallback_marks_binary_only_pdf_as_needs_ocr_without_chunks() -> None:
@@ -131,9 +208,10 @@ def test_pdf_parser_chain_uses_pypdf_first_when_it_extracts_text(
     assert parsed.parser_name == "pypdf"
     assert parsed.parser_version == "test"
     assert parsed.page_count == 2
-    assert parsed.warnings == [
+    assert (
         "PDF has little extractable text and should be inspected with OCR/page images."
-    ]
+        in parsed.warnings
+    )
 
 
 def test_pdf_parser_chain_falls_through_to_pymupdf(
@@ -193,3 +271,171 @@ def test_pdf_parser_chain_falls_through_to_docling(
     assert parsed.parser_name == "docling"
     assert parsed.page_count == 3
     assert parsed.metadata["parser_chain"] == ["pypdf", "pymupdf", "docling"]
+
+
+def test_auto_parser_route_preserves_prd3_chain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def empty_pypdf(data: bytes) -> parser.PdfExtractionResult:
+        calls.append("pypdf")
+        return parser.PdfExtractionResult(
+            text="",
+            parser_name="pypdf",
+            parser_version="test",
+            parser_chain=["pypdf"],
+        )
+
+    def text_pymupdf(data: bytes) -> parser.PdfExtractionResult:
+        calls.append("pymupdf")
+        return parser.PdfExtractionResult(
+            text="Abstract\nPyMuPDF extracted enough text for the default auto route.",
+            parser_name="pymupdf",
+            parser_version="test",
+            parser_chain=["pypdf", "pymupdf"],
+            page_count=1,
+        )
+
+    monkeypatch.setattr(parser, "_extract_with_pypdf", empty_pypdf)
+    monkeypatch.setattr(parser, "_extract_with_pymupdf", text_pymupdf)
+
+    parsed = parse_source(
+        "paper.pdf",
+        "application/pdf",
+        b"%PDF",
+        parser_settings=ParserExecutionSettings(
+            structured_parser="auto", fallback_parser="docling"
+        ),
+    )
+
+    assert calls == ["pypdf", "pymupdf"]
+    assert parsed.parser_name == "pymupdf"
+    assert parsed.metadata["parser_route"] == ["pypdf", "pymupdf"]
+
+
+def test_explicit_parser_route_uses_selected_parser_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def text_pypdf(data: bytes) -> parser.PdfExtractionResult:
+        calls.append("pypdf")
+        return parser.PdfExtractionResult(
+            text="pypdf should not run before explicit PyMuPDF.",
+            parser_name="pypdf",
+            parser_version="test",
+            parser_chain=["pypdf"],
+        )
+
+    def text_pymupdf(data: bytes) -> parser.PdfExtractionResult:
+        calls.append("pymupdf")
+        return parser.PdfExtractionResult(
+            text="Abstract\nPyMuPDF was explicitly selected for this document.",
+            parser_name="pymupdf",
+            parser_version="test",
+            parser_chain=["pymupdf"],
+            page_count=2,
+        )
+
+    monkeypatch.setattr(parser, "_extract_with_pypdf", text_pypdf)
+    monkeypatch.setattr(parser, "_extract_with_pymupdf", text_pymupdf)
+
+    parsed = parse_source(
+        "paper.pdf",
+        "application/pdf",
+        b"%PDF",
+        parser_settings=ParserExecutionSettings(
+            structured_parser="pymupdf",
+            fallback_parser="pypdf",
+        ),
+    )
+
+    assert calls == ["pymupdf"]
+    assert parsed.parser_name == "pymupdf"
+    assert parsed.metadata["parser_route"] == ["pymupdf"]
+    assert parsed.metadata["parser_settings"] == {
+        "structured_parser": "pymupdf",
+        "fallback_parser": "pypdf",
+    }
+
+
+def test_explicit_parser_route_uses_configured_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        parser,
+        "_extract_with_pymupdf",
+        lambda data: parser.PdfExtractionResult(
+            text="",
+            parser_name="pymupdf",
+            parser_version="test",
+            parser_chain=["pymupdf"],
+            warnings=["pymupdf did not recover text."],
+        ),
+    )
+    monkeypatch.setattr(
+        parser,
+        "_extract_with_built_in_pdf_fallback",
+        lambda data: parser.PdfExtractionResult(
+            text="Abstract\nBuilt in fallback recovered enough metadata text.",
+            parser_name=parser.BUILT_IN_PARSER_NAME,
+            parser_version=parser.BUILT_IN_PARSER_VERSION,
+            parser_chain=["built_in_fallback"],
+        ),
+    )
+
+    parsed = parse_source(
+        "paper.pdf",
+        "application/pdf",
+        b"%PDF",
+        parser_settings=ParserExecutionSettings(
+            structured_parser="pymupdf",
+            fallback_parser="built_in_fallback",
+        ),
+    )
+
+    assert parsed.parser_name == parser.BUILT_IN_PARSER_NAME
+    assert parsed.metadata["parser_route"] == ["pymupdf", "built_in_fallback"]
+    assert "pymupdf did not recover text." in parsed.warnings
+
+
+def test_missing_optional_parser_dependency_warns_and_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        parser,
+        "_extract_with_docling",
+        lambda data: parser.PdfExtractionResult(
+            text="",
+            parser_name="docling",
+            parser_version="not-installed",
+            parser_chain=["docling"],
+            warnings=["docling unavailable or failed: ImportError"],
+        ),
+    )
+    monkeypatch.setattr(
+        parser,
+        "_extract_with_pypdf",
+        lambda data: parser.PdfExtractionResult(
+            text="Abstract\npypdf recovered enough readable fallback text.",
+            parser_name="pypdf",
+            parser_version="test",
+            parser_chain=["pypdf"],
+            page_count=1,
+        ),
+    )
+
+    parsed = parse_source(
+        "paper.pdf",
+        "application/pdf",
+        b"%PDF",
+        parser_settings=ParserExecutionSettings(
+            structured_parser="docling",
+            fallback_parser="pypdf",
+        ),
+    )
+
+    assert parsed.parser_name == "pypdf"
+    assert parsed.metadata["parser_route"] == ["docling", "pypdf"]
+    assert "docling unavailable or failed: ImportError" in parsed.warnings

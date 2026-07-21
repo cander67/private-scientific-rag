@@ -134,7 +134,7 @@ PARSER_CATALOG: tuple[ParserCatalogEntry, ...] = (
         label="OCRmyPDF + Tesseract",
         role="ocr_provider",
         supported_as=["fallback"],
-        notes="Planned PRD13 baseline local OCR provider for scanned/image-heavy PDF pages.",
+        notes="Baseline local OCR provider for scanned/image-heavy PDF pages.",
         setup_hint="Install OCRmyPDF and Tesseract in the local Python/runtime environment.",
         readiness_required=True,
     ),
@@ -143,7 +143,7 @@ PARSER_CATALOG: tuple[ParserCatalogEntry, ...] = (
         label="RapidOCR",
         role="ocr_provider",
         supported_as=["fallback"],
-        notes="Planned PRD13 optional OCR fallback when Tesseract confidence or text quality is poor.",
+        notes="Optional OCR fallback when confidence or recovered text quality is poor.",
         setup_hint="Install RapidOCR only when evaluating the optional OCR fallback path.",
         readiness_required=True,
     ),
@@ -1252,6 +1252,30 @@ def analyze_settings_impact(
             )
         )
 
+    ocr_fields = changed(
+        "ocr.provider",
+        "ocr.fallback_provider",
+        "ocr.fallback_enabled",
+        "ocr.language",
+        "ocr.confidence_threshold",
+        "ocr.min_text_length",
+        "ocr.max_pages",
+        "ocr.overwrite",
+    )
+    if ocr_fields:
+        impacts.append(
+            RepositorySettingsImpact(
+                category="document_reprocessing",
+                title="OCR rerun may be required",
+                message=(
+                    "OCR defaults changed. Existing OCR artifacts and OCR-derived chunks keep "
+                    "their recorded provider and quality metadata until OCR is run again."
+                ),
+                fields=ocr_fields,
+                actions=["Run OCR again for affected documents in Source Viewer."],
+            )
+        )
+
     full_text_fields = changed(
         "full_text.tokenizer",
         "full_text.prefix_index",
@@ -1476,13 +1500,8 @@ def _repository_counts(
 ) -> RepositoryDashboardCounts:
     return RepositoryDashboardCounts(
         documents=_count(session, Document, Document.repository_id == repository_id),
-        parsed_documents=_count(
-            session,
-            DocumentVersion,
-            DocumentVersion.repository_id == repository_id,
-            DocumentVersion.status == "parsed",
-        ),
-        chunks=_count(session, DocumentChunk, DocumentChunk.repository_id == repository_id),
+        parsed_documents=_current_parsed_document_count(session, repository_id),
+        chunks=_current_chunk_count(session, repository_id),
         chat_sessions=_count(
             session,
             ChatSession,
@@ -1510,6 +1529,32 @@ def _repository_counts(
             else 0
         ),
     )
+
+
+def _current_parsed_document_count(session: Session, repository_id: str) -> int:
+    value = session.scalar(
+        select(func.count())
+        .select_from(Document)
+        .join(DocumentVersion, DocumentVersion.id == Document.current_version_id)
+        .where(
+            Document.repository_id == repository_id,
+            DocumentVersion.status == "parsed",
+        )
+    )
+    return int(value or 0)
+
+
+def _current_chunk_count(session: Session, repository_id: str) -> int:
+    value = session.scalar(
+        select(func.count())
+        .select_from(DocumentChunk)
+        .join(Document, Document.id == DocumentChunk.document_id)
+        .where(
+            DocumentChunk.repository_id == repository_id,
+            Document.current_version_id == DocumentChunk.document_version_id,
+        )
+    )
+    return int(value or 0)
 
 
 def _repository_cleanup_database_counts(

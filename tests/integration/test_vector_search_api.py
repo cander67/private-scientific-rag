@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -213,6 +214,42 @@ def test_vector_search_requires_rebuilt_index() -> None:
 
     assert response.status_code == 409
     assert "Vector index has not been rebuilt" in response.json()["detail"]
+
+
+def test_vector_rebuild_blocks_stale_parser_chunks_until_reprocess() -> None:
+    client = _client_with_vector_fakes()
+    repository_id = _default_repository_id(client)
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("refresh-vector.txt", b"Abstract\nvector stale marker\n", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    Path(upload_response.json()["version"]["storage_path"]).write_bytes(
+        b"Abstract\nvector refreshed marker\n"
+    )
+    settings_response = client.get("/repositories/default")
+    settings = settings_response.json()["settings"]
+    settings["chunking"]["chunk_size"] = 400
+    update_response = client.put(
+        f"/repositories/{repository_id}/settings",
+        json={"settings": settings},
+    )
+
+    stale_rebuild = client.post(f"/repositories/{repository_id}/vector/rebuild")
+    reprocess_response = client.post(
+        f"/repositories/{repository_id}/documents/{upload_response.json()['document']['id']}/reprocess"
+    )
+    clean_rebuild = client.post(f"/repositories/{repository_id}/vector/rebuild")
+
+    assert update_response.status_code == 200
+    assert stale_rebuild.status_code == 409
+    assert "Reprocess stale documents before rebuilding indexes" in stale_rebuild.json()["detail"]
+    assert reprocess_response.status_code == 200
+    assert clean_rebuild.status_code == 200
+    assert (
+        clean_rebuild.json()["indexed_chunks"]
+        == reprocess_response.json()["version"]["chunk_count"]
+    )
 
 
 def test_vector_rebuild_uses_repository_embedding_settings() -> None:
