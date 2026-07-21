@@ -10,7 +10,13 @@ RetrievalMode = Literal["full_text", "vector", "hybrid"]
 RerankerStrategy = Literal[
     "none", "cross_encoder", "metadata_boost", "cross_encoder_metadata_boost"
 ]
-BoostLevel = Literal["low", "medium", "high"]
+BoostLevel = Literal["off", "low", "medium", "high"]
+RetrievalSettingsSource = Literal[
+    "fallback_defaults",
+    "repository_defaults",
+    "session_defaults",
+    "run_override",
+]
 
 
 class MetadataBoostSettings(BaseModel):
@@ -20,8 +26,7 @@ class MetadataBoostSettings(BaseModel):
     table_figure: BoostLevel = "low"
 
 
-class RetrievalSearchRequest(BaseModel):
-    query: str = Field(min_length=1)
+class RetrievalDefaults(BaseModel):
     mode: RetrievalMode = "full_text"
     top_k: int = Field(default=10, ge=1, le=50)
     candidate_pool_size: int | None = Field(default=None, ge=1, le=250)
@@ -29,6 +34,21 @@ class RetrievalSearchRequest(BaseModel):
     reranker_strategy: RerankerStrategy = "none"
     metadata_boosts: MetadataBoostSettings = Field(default_factory=MetadataBoostSettings)
     filters: FullTextSearchFilters = Field(default_factory=FullTextSearchFilters)
+
+
+class RepositoryRetrievalSettings(RetrievalDefaults):
+    mode: RetrievalMode = "hybrid"
+    top_k: int = Field(default=6, ge=1, le=50)
+    reranker_strategy: RerankerStrategy = "cross_encoder"
+
+
+class RetrievalSearchRequest(RetrievalDefaults):
+    query: str = Field(min_length=1)
+
+
+class EffectiveRetrievalSettings(BaseModel):
+    settings: RetrievalDefaults
+    sources: dict[str, RetrievalSettingsSource]
 
 
 class RetrievalSearchResult(BaseModel):

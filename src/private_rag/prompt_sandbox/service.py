@@ -22,6 +22,11 @@ from private_rag.prompt_sandbox.schemas import (
 )
 from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import PromptLibraryEntry, RepositorySettings
+from private_rag.retrieval.defaults import (
+    normalize_retrieval_defaults,
+    resolve_effective_retrieval_settings,
+    retrieval_request_payload,
+)
 from private_rag.retrieval.rerankers import RerankerProvider
 from private_rag.retrieval.schemas import RetrievalSearchRequest, RetrievalSearchResult
 from private_rag.retrieval.service import search_retrieval
@@ -159,11 +164,13 @@ def create_sandbox_run(
         return None
 
     started = perf_counter()
+    effective_retrieval = resolve_effective_retrieval_settings(
+        fallback_defaults=ChatRetrievalSettings(),
+        run_overrides=request.retrieval_settings,
+    )
     retrieval_request = RetrievalSearchRequest(
         query=request.query,
-        mode=request.retrieval_settings.mode,
-        top_k=request.retrieval_settings.top_k,
-        reranker_strategy=request.retrieval_settings.reranker_strategy,
+        **retrieval_request_payload(effective_retrieval.settings),
     )
     retrieval = search_retrieval(
         session=session,
@@ -195,7 +202,7 @@ def create_sandbox_run(
         label=label,
         query=request.query,
         model=completion.model,
-        retrieval_settings=retrieval_request.model_dump(mode="json"),
+        retrieval_settings=effective_retrieval.settings.model_dump(mode="json"),
         prompt_snapshot=_prompt_snapshot(prompt),
         context_entries=[result.model_dump(mode="json") for result in retrieval.results],
         retrieval_run_id=retrieval.run_id,
@@ -398,7 +405,10 @@ def _run_read(run: SandboxRun) -> SandboxRunRead:
         label=run.label,
         query=run.query,
         model=run.model,
-        retrieval_settings=ChatRetrievalSettings.model_validate(run.retrieval_settings),
+        retrieval_settings=normalize_retrieval_defaults(
+            run.retrieval_settings,
+            defaults_type=ChatRetrievalSettings,
+        ),
         prompt_snapshot=run.prompt_snapshot,
         context_entries=[
             RetrievalSearchResult.model_validate(result) for result in run.context_entries

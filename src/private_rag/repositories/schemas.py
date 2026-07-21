@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from private_rag.core.settings import Settings
+from private_rag.retrieval.schemas import RepositoryRetrievalSettings
 from private_rag.vector.model_registry import (
     EmbeddingModelCompatibilityError,
     lookup_embedding_model,
@@ -169,6 +170,7 @@ class RepositorySettings(BaseModel):
     embedding: EmbeddingSettings
     reranking: RerankingSettings
     model: ModelSettings
+    retrieval: RepositoryRetrievalSettings = Field(default_factory=RepositoryRetrievalSettings)
     prompt: PromptSettings = Field(default_factory=PromptSettings)
     export: ExportSettings = Field(default_factory=ExportSettings)
 

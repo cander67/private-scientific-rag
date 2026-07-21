@@ -204,11 +204,52 @@ def test_chat_question_updates_session_retrieval_settings() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["session"]["retrieval_settings"] == {
-        "mode": "hybrid",
-        "top_k": 5,
-        "reranker_strategy": "cross_encoder",
+    retrieval_settings = response.json()["session"]["retrieval_settings"]
+    assert retrieval_settings["mode"] == "hybrid"
+    assert retrieval_settings["top_k"] == 5
+    assert retrieval_settings["candidate_pool_size"] is None
+    assert retrieval_settings["rrf_constant"] == 60
+    assert retrieval_settings["reranker_strategy"] == "cross_encoder"
+    assert retrieval_settings["metadata_boosts"] == {
+        "section": "medium",
+        "patent_section": "medium",
+        "document_kind": "low",
+        "table_figure": "low",
     }
+    assert retrieval_settings["filters"]["document_kind"] is None
+
+
+def test_new_chat_session_inherits_repository_retrieval_defaults() -> None:
+    client, _ = _client_with_chat_fakes()
+    repository_response = client.get("/repositories/default")
+    repository_id = repository_response.json()["repository"]["id"]
+    settings = repository_response.json()["settings"]
+    settings["retrieval"]["mode"] = "hybrid"
+    settings["retrieval"]["top_k"] = 9
+    settings["retrieval"]["candidate_pool_size"] = 45
+    settings["retrieval"]["rrf_constant"] = 30
+    settings["retrieval"]["reranker_strategy"] = "metadata_boost"
+    settings["retrieval"]["metadata_boosts"]["section"] = "off"
+    settings["retrieval"]["filters"]["document_kind"] = "patent_pdf"
+    settings_response = client.put(
+        f"/repositories/{repository_id}/settings",
+        json={"settings": settings},
+    )
+
+    session_response = client.post(
+        f"/repositories/{repository_id}/chat/sessions",
+        json={"title": "Repository defaults"},
+    )
+
+    assert settings_response.status_code == 200
+    assert session_response.status_code == 200
+    retrieval_settings = session_response.json()["retrieval_settings"]
+    assert retrieval_settings["top_k"] == 9
+    assert retrieval_settings["candidate_pool_size"] == 45
+    assert retrieval_settings["rrf_constant"] == 30
+    assert retrieval_settings["reranker_strategy"] == "metadata_boost"
+    assert retrieval_settings["metadata_boosts"]["section"] == "off"
+    assert retrieval_settings["filters"]["document_kind"] == "patent_pdf"
 
 
 def test_chat_readiness_reports_index_and_model_state() -> None:

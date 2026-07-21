@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
-from private_rag.retrieval.schemas import MetadataBoostSettings, RetrievalSearchResult
+from private_rag.retrieval.schemas import (
+    MetadataBoostSettings,
+    RetrievalDefaults,
+    RetrievalSearchResult,
+)
 from private_rag.retrieval.service import apply_reranking, merge_rrf_results
 from private_rag.search.schemas import FullTextSearchResult
 from private_rag.vector.schemas import VectorSearchResult
@@ -78,6 +83,28 @@ def test_rrf_merge_honors_limit_and_adjustable_constant() -> None:
 
     assert len(default_results) == 1
     assert adjusted_results[0].score_breakdown["rrf"] > default_results[0].score_breakdown["rrf"]
+
+
+def test_retrieval_defaults_validate_shared_contract() -> None:
+    defaults = RetrievalDefaults(
+        mode="hybrid",
+        top_k=7,
+        candidate_pool_size=35,
+        rrf_constant=42,
+        reranker_strategy="metadata_boost",
+        metadata_boosts=MetadataBoostSettings(
+            section="off",
+            document_kind="low",
+            patent_section="medium",
+            table_figure="high",
+        ),
+    )
+
+    assert defaults.mode == "hybrid"
+    assert defaults.metadata_boosts.section == "off"
+
+    with pytest.raises(ValidationError):
+        RetrievalDefaults(top_k=0)
 
 
 class _FakeReranker:
@@ -161,6 +188,42 @@ def test_metadata_boost_reranking_changes_order_and_reports_boost() -> None:
 
     assert [result.chunk_id for result in reranked] == ["boosted", "unboosted"]
     assert reranked[0].score_breakdown["metadata_boost"] == pytest.approx(0.9)
+
+
+def test_metadata_boost_off_contributes_zero_and_reports_dimension() -> None:
+    unboosted = _full_text_result("unboosted", 1)
+    disabled = _full_text_result("disabled", 2)
+    disabled.section = "Claims"
+    disabled.metadata = {
+        "document_kind": "patent_pdf",
+        "patent_sections": ["claims"],
+        "has_table": True,
+    }
+    baseline = merge_rrf_results([unboosted, disabled], [], rrf_constant=60, limit=2)
+
+    reranked = apply_reranking(
+        query="adhesive cathode",
+        results=baseline,
+        strategy="metadata_boost",
+        metadata_boosts=MetadataBoostSettings(
+            section="off",
+            document_kind="off",
+            patent_section="off",
+            table_figure="off",
+        ),
+        reranker=_FakeReranker({}),
+        reranker_model=None,
+    )
+
+    assert [result.chunk_id for result in reranked] == ["unboosted", "disabled"]
+    breakdown = reranked[1].score_breakdown
+    assert breakdown["metadata_boost"] == pytest.approx(0.0)
+    assert breakdown["metadata_boost_dimensions"]["section"] == {
+        "level": "off",
+        "matched": True,
+        "score": 0.0,
+        "ranking_applied": False,
+    }
 
 
 def test_combined_reranking_applies_cross_encoder_then_metadata_boost() -> None:

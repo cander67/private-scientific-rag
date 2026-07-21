@@ -22,6 +22,11 @@ from private_rag.chat.schemas import (
 from private_rag.ingestion.models import Document, DocumentChunk
 from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
+from private_rag.retrieval.defaults import (
+    normalize_retrieval_defaults,
+    resolve_effective_retrieval_settings,
+    retrieval_request_payload,
+)
 from private_rag.retrieval.rerankers import RerankerProvider
 from private_rag.retrieval.schemas import RetrievalSearchRequest, RetrievalSearchResult
 from private_rag.retrieval.service import search_retrieval
@@ -50,11 +55,16 @@ def create_chat_session(
     if repository is None or repository.settings is None:
         return None
     settings = RepositorySettings.model_validate(repository.settings.settings)
+    effective_retrieval = resolve_effective_retrieval_settings(
+        fallback_defaults=ChatRetrievalSettings(),
+        repository_defaults=settings.retrieval,
+        run_overrides=retrieval_settings,
+    )
     chat_session = ChatSession(
         repository_id=repository_id,
         title=title or "New chat",
         model=model or settings.model.ollama_chat_model,
-        retrieval_settings=(retrieval_settings or ChatRetrievalSettings()).model_dump(mode="json"),
+        retrieval_settings=effective_retrieval.settings.model_dump(mode="json"),
         prompt_id=settings.prompt.active_chat_prompt_id,
     )
     session.add(chat_session)
@@ -141,10 +151,15 @@ def ask_chat_question(
         return None
 
     settings = RepositorySettings.model_validate(repository.settings.settings)
-    resolved_retrieval_settings = retrieval_settings or ChatRetrievalSettings.model_validate(
-        chat_session.retrieval_settings
+    effective_retrieval = resolve_effective_retrieval_settings(
+        fallback_defaults=ChatRetrievalSettings(),
+        session_defaults=normalize_retrieval_defaults(
+            chat_session.retrieval_settings,
+            defaults_type=ChatRetrievalSettings,
+        ),
+        run_overrides=retrieval_settings,
     )
-    chat_session.retrieval_settings = resolved_retrieval_settings.model_dump(mode="json")
+    chat_session.retrieval_settings = effective_retrieval.settings.model_dump(mode="json")
     session.add(chat_session)
     session.commit()
     session.refresh(chat_session)
@@ -162,9 +177,7 @@ def ask_chat_question(
         repository_id=repository_id,
         request=RetrievalSearchRequest(
             query=question,
-            mode=resolved_retrieval_settings.mode,
-            top_k=resolved_retrieval_settings.top_k,
-            reranker_strategy=resolved_retrieval_settings.reranker_strategy,
+            **retrieval_request_payload(effective_retrieval.settings),
         ),
         store=store,
         embedder=embedder,
@@ -430,7 +443,10 @@ def _session_read(
         repository_id=chat_session.repository_id,
         title=chat_session.title,
         model=chat_session.model,
-        retrieval_settings=ChatRetrievalSettings.model_validate(chat_session.retrieval_settings),
+        retrieval_settings=normalize_retrieval_defaults(
+            chat_session.retrieval_settings,
+            defaults_type=ChatRetrievalSettings,
+        ),
         prompt_id=chat_session.prompt_id,
         created_at=chat_session.created_at,
         updated_at=chat_session.updated_at,

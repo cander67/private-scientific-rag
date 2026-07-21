@@ -56,6 +56,10 @@ def test_default_repository_settings_use_app_model_defaults() -> None:
     assert repository_settings.ocr.provider == "ocrmypdf_tesseract"
     assert repository_settings.ocr.fallback_provider == "rapidocr"
     assert repository_settings.ocr.fallback_enabled is True
+    assert repository_settings.retrieval.mode == "hybrid"
+    assert repository_settings.retrieval.top_k == 6
+    assert repository_settings.retrieval.reranker_strategy == "cross_encoder"
+    assert repository_settings.retrieval.rrf_constant == 60
 
 
 @pytest.mark.parametrize(
@@ -216,7 +220,8 @@ def test_settings_impact_reports_parser_choice_changes() -> None:
 def test_settings_impact_reports_retrieval_chat_and_prompt_defaults() -> None:
     current = RepositorySettings.from_app_settings(Settings())
     draft_payload = current.model_dump(mode="json")
-    draft_payload["reranking"]["model"] = "cross-encoder/new"
+    draft_payload["retrieval"]["top_k"] = 10
+    draft_payload["retrieval"]["metadata_boosts"]["section"] = "off"
     draft_payload["model"]["ollama_chat_model"] = "llama3.2:latest"
     draft_payload["prompt"]["library"][0]["text"] = "Answer carefully from context."
     draft = RepositorySettings.model_validate(draft_payload)
@@ -228,6 +233,11 @@ def test_settings_impact_reports_retrieval_chat_and_prompt_defaults() -> None:
     assert "chat_defaults" in categories
     assert "prompt_defaults" in categories
     assert "evaluation_freshness" in categories
+    retrieval_impact = next(
+        impact for impact in result.impacts if impact.category == "retrieval_defaults"
+    )
+    assert "retrieval.top_k" in retrieval_impact.fields
+    assert "retrieval.metadata_boosts.section" in retrieval_impact.fields
 
 
 def test_settings_impact_reports_no_changes_for_same_settings() -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import TypedDict
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -24,6 +25,13 @@ from private_rag.vector.service import search_vector_index
 from private_rag.vector.store import VectorStore
 
 MAX_RETRIEVAL_HISTORIES_PER_REPOSITORY = 5
+
+
+class MetadataBoostDimension(TypedDict):
+    level: str
+    matched: bool
+    score: float
+    ranking_applied: bool
 
 
 def search_retrieval(
@@ -363,8 +371,13 @@ def _with_metadata_boost(
     result: RetrievalSearchResult,
     boosts: MetadataBoostSettings,
 ) -> RetrievalSearchResult:
-    boost = metadata_boost_score(result, boosts)
-    score_breakdown = {**result.score_breakdown, "metadata_boost": boost}
+    boost_dimensions = metadata_boost_dimensions(result, boosts)
+    boost = sum(dimension["score"] for dimension in boost_dimensions.values())
+    score_breakdown = {
+        **result.score_breakdown,
+        "metadata_boost": boost,
+        "metadata_boost_dimensions": boost_dimensions,
+    }
     return result.model_copy(
         update={
             "final_score": result.final_score + boost,
@@ -377,20 +390,47 @@ def metadata_boost_score(
     result: RetrievalSearchResult,
     boosts: MetadataBoostSettings,
 ) -> float:
-    score = 0.0
-    if result.section:
-        score += _boost_weight(boosts.section)
-    if result.metadata.get("document_kind"):
-        score += _boost_weight(boosts.document_kind)
-    if result.metadata.get("patent_sections"):
-        score += _boost_weight(boosts.patent_section)
-    if result.metadata.get("has_table") or result.metadata.get("has_figure"):
-        score += _boost_weight(boosts.table_figure)
-    return score
+    return sum(
+        dimension["score"] for dimension in metadata_boost_dimensions(result, boosts).values()
+    )
+
+
+def metadata_boost_dimensions(
+    result: RetrievalSearchResult,
+    boosts: MetadataBoostSettings,
+) -> dict[str, MetadataBoostDimension]:
+    return {
+        "section": _metadata_boost_dimension(
+            level=boosts.section,
+            matched=bool(result.section),
+        ),
+        "document_kind": _metadata_boost_dimension(
+            level=boosts.document_kind,
+            matched=bool(result.metadata.get("document_kind")),
+        ),
+        "patent_section": _metadata_boost_dimension(
+            level=boosts.patent_section,
+            matched=bool(result.metadata.get("patent_sections")),
+        ),
+        "table_figure": _metadata_boost_dimension(
+            level=boosts.table_figure,
+            matched=bool(result.metadata.get("has_table") or result.metadata.get("has_figure")),
+        ),
+    }
+
+
+def _metadata_boost_dimension(*, level: str, matched: bool) -> MetadataBoostDimension:
+    return {
+        "level": level,
+        "matched": matched,
+        "score": _boost_weight(level) if matched else 0.0,
+        "ranking_applied": matched and level != "off",
+    }
 
 
 def _boost_weight(level: str) -> float:
     return {
+        "off": 0.0,
         "low": 0.05,
         "medium": 0.15,
         "high": 0.3,

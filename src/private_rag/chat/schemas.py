@@ -6,7 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from private_rag.chat.llm import ChatModelInfo
-from private_rag.retrieval.schemas import RerankerStrategy, RetrievalMode
+from private_rag.retrieval.schemas import RerankerStrategy, RetrievalDefaults, RetrievalMode
 
 ChatRole = Literal["user", "assistant"]
 ChatReadinessStatus = Literal[
@@ -21,7 +21,7 @@ ChatReadinessStatus = Literal[
 ]
 
 
-class ChatRetrievalSettings(BaseModel):
+class ChatRetrievalSettings(RetrievalDefaults):
     mode: RetrievalMode = "hybrid"
     top_k: int = Field(default=6, ge=1, le=50)
     reranker_strategy: RerankerStrategy = "cross_encoder"

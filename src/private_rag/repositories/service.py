@@ -1318,15 +1318,35 @@ def analyze_settings_impact(
             )
         )
 
-    retrieval_fields = changed("reranking.strategy", "reranking.model")
+    retrieval_fields = changed(
+        "reranking.strategy",
+        "reranking.model",
+        "retrieval.mode",
+        "retrieval.top_k",
+        "retrieval.candidate_pool_size",
+        "retrieval.rrf_constant",
+        "retrieval.reranker_strategy",
+        "retrieval.metadata_boosts.section",
+        "retrieval.metadata_boosts.patent_section",
+        "retrieval.metadata_boosts.document_kind",
+        "retrieval.metadata_boosts.table_figure",
+        "retrieval.filters.document_id",
+        "retrieval.filters.section",
+        "retrieval.filters.source_type",
+        "retrieval.filters.document_kind",
+        "retrieval.filters.tag",
+        "retrieval.filters.has_table",
+        "retrieval.filters.has_figure",
+        "retrieval.filters.patent_section",
+    )
     if retrieval_fields:
         impacts.append(
             RepositorySettingsImpact(
                 category="retrieval_defaults",
                 title="Retrieval defaults changed",
                 message=(
-                    "Reranking defaults changed. New Search Lab, Chat Workspace, and Prompt "
-                    "Sandbox runs should be reviewed against the new retrieval behavior."
+                    "Saved retrieval defaults changed. New chat sessions and default-driven "
+                    "evaluation or sandbox runs should be reviewed against the new behavior."
                 ),
                 fields=retrieval_fields,
                 actions=["Revisit retrieval defaults in Search Lab and rerun important checks."],
