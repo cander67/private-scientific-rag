@@ -12,6 +12,11 @@ from private_rag.core.settings import Settings
 from private_rag.db.base import Base
 from private_rag.ingestion import service as ingestion_service
 from private_rag.ingestion.models import Document
+from private_rag.ingestion.ocr import (
+    NormalizedOcrPageResult,
+    OcrPageImage,
+    normalize_ocr_page_result,
+)
 from private_rag.ingestion.parser import ParserExecutionSettings
 from private_rag.ingestion.schemas import ParsedDocument, ParsedSegment
 from private_rag.ingestion.service import (
@@ -24,6 +29,7 @@ from private_rag.ingestion.service import (
     inspect_document_version,
     list_documents,
     reprocess_document,
+    run_document_ocr,
     upload_document,
 )
 from private_rag.repositories.models import Repository
@@ -46,6 +52,21 @@ def _session() -> Generator[Session, None, None]:
 def _repository_id(session: Session, tmp_path: Path) -> str:
     settings = Settings(data_dir=tmp_path, database_url="sqlite:///:memory:")
     return ensure_default_repository(session, settings=settings).repository.id
+
+
+class FakeOcrProvider:
+    provider_name = "synthetic_ocr"
+    provider_version = "test-v1"
+
+    def recognize_page(self, image: OcrPageImage) -> NormalizedOcrPageResult:
+        return normalize_ocr_page_result(
+            page=image.page,
+            text=f"OCR recovered text for page {image.page}",
+            confidence=0.93,
+            provider_name=self.provider_name,
+            provider_version=self.provider_version,
+            image=image,
+        )
 
 
 def test_upload_returns_none_for_missing_repository(tmp_path: Path) -> None:
@@ -147,6 +168,168 @@ def test_reprocess_document_updates_chunks_from_stored_source(tmp_path: Path) ->
     assert "second version" in inspection.chunks[0].text
     assert "first version" in prior_inspection.chunks[0].text
     assert inspection.version.metadata["reprocess"]["source_version_id"] == first_version_id
+
+
+def test_run_document_ocr_adds_page_artifacts_and_ocr_chunks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    settings = Settings(data_dir=tmp_path)
+    monkeypatch.setattr(
+        ingestion_service,
+        "parse_source",
+        lambda *args, **kwargs: ParsedDocument(
+            source_type="pdf",
+            text="",
+            parser_name="pypdf",
+            parser_version="test-parser",
+            page_count=1,
+            ocr_required=True,
+            metadata={
+                "page_ocr_routes": [
+                    {
+                        "page": 1,
+                        "classification": "scanned",
+                        "text_length": 0,
+                        "word_count": 0,
+                        "image_count": 1,
+                        "quality_score": 0.1,
+                        "needs_ocr": True,
+                        "warnings": ["Page appears image-only and is pending OCR."],
+                    }
+                ],
+                "ocr_status": {
+                    "status": "pending",
+                    "pages_pending": [1],
+                    "pages_routed": 1,
+                    "warnings": [],
+                },
+            },
+        ),
+    )
+    fake_image = OcrPageImage(
+        page=1,
+        path=str(tmp_path / "ocr-page-0001.png"),
+        mime_type="image/png",
+        width=100,
+        height=120,
+        byte_size=5,
+        sha256="image-hash",
+        renderer="pymupdf",
+        source_sha256="source-hash",
+    )
+    monkeypatch.setattr(
+        ingestion_service,
+        "render_pages_for_ocr",
+        lambda **kwargs: ([fake_image], []),
+    )
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "scan.pdf",
+        "application/pdf",
+        b"%PDF scan",
+        settings=settings,
+    )
+
+    assert uploaded is not None
+    inspection = run_document_ocr(
+        session,
+        repository_id,
+        uploaded.document.id,
+        provider=FakeOcrProvider(),
+        settings=settings,
+    )
+
+    assert inspection is not None
+    assert inspection.version.status == "parsed"
+    assert inspection.version.ocr_required is False
+    assert inspection.version.metadata["ocr_run"]["status"] == "completed"
+    assert inspection.version.metadata["ocr_pages"][0]["text"] == "OCR recovered text for page 1"
+    assert inspection.chunks[0].text == "OCR recovered text for page 1"
+    assert inspection.chunks[0].section == "ocr"
+    assert inspection.chunks[0].metadata["ocr_derived"] is True
+    assert inspection.chunks[0].metadata["ocr_provider"]["name"] == "synthetic_ocr"
+    assert inspection.chunks[0].metadata["ocr_confidence"] == 0.93
+    assert inspection.chunks[0].metadata["page_provenance"]["image_sha256"] == "image-hash"
+
+
+def test_run_document_ocr_missing_provider_preserves_prior_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    settings = Settings(data_dir=tmp_path)
+    monkeypatch.setattr(
+        ingestion_service,
+        "parse_source",
+        lambda *args, **kwargs: ParsedDocument(
+            source_type="pdf",
+            text="",
+            parser_name="pypdf",
+            parser_version="test-parser",
+            page_count=1,
+            ocr_required=True,
+            metadata={
+                "page_ocr_routes": [
+                    {
+                        "page": 1,
+                        "classification": "scanned",
+                        "text_length": 0,
+                        "word_count": 0,
+                        "image_count": 1,
+                        "quality_score": 0.1,
+                        "needs_ocr": True,
+                        "warnings": [],
+                    }
+                ]
+            },
+        ),
+    )
+    fake_image = OcrPageImage(
+        page=1,
+        path=str(tmp_path / "ocr-page-0001.png"),
+        mime_type="image/png",
+        width=100,
+        height=120,
+        byte_size=5,
+        sha256="image-hash",
+        renderer="pymupdf",
+        source_sha256="source-hash",
+    )
+    monkeypatch.setattr(
+        ingestion_service,
+        "render_pages_for_ocr",
+        lambda **kwargs: ([fake_image], []),
+    )
+    monkeypatch.setattr(ingestion_service, "default_ocr_provider", lambda: None)
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "scan.pdf",
+        "application/pdf",
+        b"%PDF scan",
+        settings=settings,
+    )
+
+    assert uploaded is not None
+    inspection = run_document_ocr(
+        session,
+        repository_id,
+        uploaded.document.id,
+        settings=settings,
+    )
+
+    assert inspection is not None
+    assert inspection.version.status == "needs_ocr"
+    assert inspection.version.ocr_required is True
+    assert inspection.version.chunk_count == 0
+    assert inspection.version.metadata["ocr_run"]["status"] == "missing_dependency"
+    assert inspection.version.metadata["ocr_pages"][0]["provider"]["version"] == "not-installed"
+    assert "tesseract is not installed; OCR is pending for page 1." in inspection.version.warnings
 
 
 def test_reprocess_document_reports_missing_source_file(tmp_path: Path) -> None:

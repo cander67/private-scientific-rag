@@ -13,6 +13,13 @@ from sqlalchemy.pool import StaticPool
 from private_rag.api.app import create_app
 from private_rag.api.routes.repositories import get_db_session
 from private_rag.db.base import Base
+from private_rag.ingestion import service as ingestion_service
+from private_rag.ingestion.ocr import (
+    NormalizedOcrPageResult,
+    OcrPageImage,
+    normalize_ocr_page_result,
+)
+from private_rag.ingestion.schemas import ParsedDocument
 
 
 def _client_with_database() -> TestClient:
@@ -41,6 +48,21 @@ def _pdf_bytes_with_text(text: str) -> bytes:
     data = BytesIO()
     document.save(data)
     return data.getvalue()
+
+
+class FakeOcrProvider:
+    provider_name = "synthetic_ocr"
+    provider_version = "test-v1"
+
+    def recognize_page(self, image: OcrPageImage) -> NormalizedOcrPageResult:
+        return normalize_ocr_page_result(
+            page=image.page,
+            text="Recovered API OCR text",
+            confidence=0.88,
+            provider_name=self.provider_name,
+            provider_version=self.provider_version,
+            image=image,
+        )
 
 
 def test_upload_text_document_chunks_with_line_provenance() -> None:
@@ -131,6 +153,71 @@ def test_upload_pdf_generates_and_serves_page_images(
     assert payload["version"]["metadata"]["page_images_available"] is True
     assert image_response.status_code == 200
     assert image_response.headers["content-type"] == "image/png"
+
+
+def test_run_ocr_action_adds_ocr_text_chunks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PRIVATE_RAG_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        ingestion_service,
+        "parse_source",
+        lambda *args, **kwargs: ParsedDocument(
+            source_type="pdf",
+            text="",
+            parser_name="pypdf",
+            parser_version="test-parser",
+            page_count=1,
+            ocr_required=True,
+            metadata={
+                "page_ocr_routes": [
+                    {
+                        "page": 1,
+                        "classification": "scanned",
+                        "text_length": 0,
+                        "word_count": 0,
+                        "image_count": 1,
+                        "quality_score": 0.1,
+                        "needs_ocr": True,
+                        "warnings": [],
+                    }
+                ]
+            },
+        ),
+    )
+    fake_image = OcrPageImage(
+        page=1,
+        path=str(tmp_path / "ocr-page-0001.png"),
+        mime_type="image/png",
+        width=100,
+        height=120,
+        byte_size=5,
+        sha256="image-hash",
+        renderer="pymupdf",
+        source_sha256="source-hash",
+    )
+    monkeypatch.setattr(
+        ingestion_service, "render_pages_for_ocr", lambda **kwargs: ([fake_image], [])
+    )
+    monkeypatch.setattr(ingestion_service, "default_ocr_provider", lambda: FakeOcrProvider())
+    client = _client_with_database()
+    repository_id = client.get("/repositories/default").json()["repository"]["id"]
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("scan.pdf", b"%PDF scan", "application/pdf")},
+    )
+    document_id = upload_response.json()["document"]["id"]
+
+    ocr_response = client.post(f"/repositories/{repository_id}/documents/{document_id}/ocr")
+    payload = ocr_response.json()
+
+    assert upload_response.status_code == 200
+    assert ocr_response.status_code == 200
+    assert payload["version"]["status"] == "parsed"
+    assert payload["version"]["metadata"]["ocr_run"]["status"] == "completed"
+    assert payload["chunks"][0]["text"] == "Recovered API OCR text"
+    assert payload["chunks"][0]["metadata"]["ocr_derived"] is True
 
 
 def test_upload_markdown_and_annotation_then_inspect_and_delete() -> None:

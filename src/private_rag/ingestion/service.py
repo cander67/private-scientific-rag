@@ -13,6 +13,16 @@ from sqlalchemy.orm import Session
 
 from private_rag.core.settings import Settings, get_settings
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
+from private_rag.ingestion.ocr import (
+    NormalizedOcrPageResult,
+    OcrProvider,
+    PageOcrClassification,
+    PageOcrRoute,
+    classify_pdf_pages,
+    default_ocr_provider,
+    missing_ocr_dependency_result,
+    render_pages_for_ocr,
+)
 from private_rag.ingestion.parser import ParserExecutionSettings, detect_source_type, parse_source
 from private_rag.ingestion.schemas import (
     DocumentChunkRead,
@@ -347,6 +357,123 @@ def reprocess_document(
         settings=get_settings(),
     )
     session.add(new_version)
+    session.commit()
+    return inspect_document(session, repository_id, document_id)
+
+
+def run_document_ocr(
+    session: Session,
+    repository_id: str,
+    document_id: str,
+    provider: OcrProvider | None = None,
+    settings: Settings | None = None,
+) -> DocumentInspection | None:
+    document = session.get(Document, document_id)
+    if document is None or document.repository_id != repository_id:
+        return None
+    version = _current_version(document)
+    if version is None:
+        return None
+    if version.source_type != "pdf":
+        version.warnings = [*version.warnings, "OCR can only run for PDF documents."]
+        session.add(version)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
+    source_path = Path(version.storage_path)
+    if not source_path.exists():
+        _record_ocr_run(
+            version=version,
+            status="failed",
+            warnings=["Stored source file is missing; OCR cannot run."],
+        )
+        session.add(version)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
+
+    data = source_path.read_bytes()
+    routes, route_warnings = _ocr_routes_for_version(version, data)
+    pending_routes = [route for route in routes if route.needs_ocr]
+    if not pending_routes:
+        _record_ocr_run(
+            version=version,
+            status="not_required",
+            warnings=route_warnings,
+            results=[],
+        )
+        version.ocr_required = False
+        if version.status == "needs_ocr":
+            version.status = "parsed"
+        session.add(version)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
+
+    app_settings = settings or get_settings()
+    rendered, render_warnings = render_pages_for_ocr(
+        data=data,
+        routes=pending_routes,
+        destination_dir=_ocr_image_dir(version, app_settings),
+        source_sha256=version.sha256,
+    )
+    if render_warnings:
+        _record_ocr_run(
+            version=version,
+            status="failed",
+            warnings=[*route_warnings, *render_warnings],
+            rendered_images=[image.to_metadata() for image in rendered],
+        )
+        version.warnings = [*version.warnings, *render_warnings]
+        session.add(version)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
+
+    ocr_provider = provider or default_ocr_provider()
+    if ocr_provider is None:
+        results = [
+            missing_ocr_dependency_result(
+                page=image.page,
+                provider_name="ocrmypdf_tesseract",
+                dependency_name="tesseract",
+                image=image,
+            )
+            for image in rendered
+        ]
+        warnings = [warning for result in results for warning in result.warnings]
+        _record_ocr_run(
+            version=version,
+            status="missing_dependency",
+            warnings=[*route_warnings, *warnings],
+            results=results,
+            rendered_images=[image.to_metadata() for image in rendered],
+        )
+        version.warnings = [*version.warnings, *warnings]
+        session.add(version)
+        session.commit()
+        return inspect_document(session, repository_id, document_id)
+
+    results = [ocr_provider.recognize_page(image) for image in rendered]
+    ocr_chunks = _ocr_chunks_from_results(
+        results=results,
+        version=version,
+        document=document,
+        chunk_index_start=version.chunk_count,
+    )
+    session.add_all(ocr_chunks)
+    version.chunk_count = version.chunk_count + len(ocr_chunks)
+    successful_pages = [result.page for result in results if result.text.strip()]
+    run_warnings = [warning for result in results for warning in result.warnings]
+    status = "completed" if successful_pages else "failed"
+    _record_ocr_run(
+        version=version,
+        status=status,
+        warnings=[*route_warnings, *run_warnings],
+        results=results,
+        rendered_images=[image.to_metadata() for image in rendered],
+    )
+    version.warnings = [*version.warnings, *run_warnings]
+    if successful_pages:
+        version.ocr_required = False
+        version.status = "parsed"
+    session.add(version)
     session.commit()
     return inspect_document(session, repository_id, document_id)
 
@@ -759,6 +886,134 @@ def _page_images_from_metadata(metadata: dict[str, object]) -> list[PageImageRea
         if isinstance(image, dict):
             parsed_images.append(PageImageRead.model_validate(image))
     return parsed_images
+
+
+def _ocr_routes_for_version(
+    version: DocumentVersion,
+    data: bytes,
+) -> tuple[list[PageOcrRoute], list[str]]:
+    routes = _page_ocr_routes_from_metadata(version.extra_metadata)
+    if routes:
+        return routes, []
+    return classify_pdf_pages(data)
+
+
+def _page_ocr_routes_from_metadata(metadata: dict[str, object]) -> list[PageOcrRoute]:
+    raw_routes = metadata.get("page_ocr_routes")
+    if not isinstance(raw_routes, list):
+        return []
+    routes: list[PageOcrRoute] = []
+    for raw_route in raw_routes:
+        if not isinstance(raw_route, dict):
+            continue
+        try:
+            classification = str(raw_route["classification"])
+            if classification not in {"born_digital", "scanned", "mixed"}:
+                continue
+            routes.append(
+                PageOcrRoute(
+                    page=int(raw_route["page"]),
+                    classification=cast(PageOcrClassification, classification),
+                    text_length=int(raw_route.get("text_length") or 0),
+                    word_count=int(raw_route.get("word_count") or 0),
+                    image_count=int(raw_route.get("image_count") or 0),
+                    quality_score=float(raw_route.get("quality_score") or 0),
+                    needs_ocr=bool(raw_route.get("needs_ocr")),
+                    warnings=[
+                        str(warning)
+                        for warning in raw_route.get("warnings", [])
+                        if isinstance(warning, str)
+                    ],
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return routes
+
+
+def _ocr_image_dir(version: DocumentVersion, settings: Settings) -> Path:
+    return (
+        settings.data_dir
+        / "repositories"
+        / version.repository_id
+        / "derived"
+        / version.id
+        / "ocr-images"
+    )
+
+
+def _record_ocr_run(
+    *,
+    version: DocumentVersion,
+    status: str,
+    warnings: list[str],
+    results: list[NormalizedOcrPageResult] | None = None,
+    rendered_images: list[dict[str, object]] | None = None,
+) -> None:
+    metadata = dict(version.extra_metadata)
+    result_metadata = [result.to_metadata() for result in results or []]
+    metadata["ocr_pages"] = result_metadata
+    metadata["ocr_run"] = {
+        "status": status,
+        "pages_completed": [result.page for result in results or [] if result.text.strip()],
+        "pages_failed": [result.page for result in results or [] if not result.text.strip()],
+        "warnings": warnings,
+        "provider": _ocr_provider_metadata(results or []),
+    }
+    if rendered_images is not None:
+        metadata["ocr_rendered_images"] = rendered_images
+    version.extra_metadata = metadata
+
+
+def _ocr_provider_metadata(results: list[NormalizedOcrPageResult]) -> dict[str, object]:
+    for result in results:
+        return result.provider
+    return {}
+
+
+def _ocr_chunks_from_results(
+    *,
+    results: list[NormalizedOcrPageResult],
+    version: DocumentVersion,
+    document: Document,
+    chunk_index_start: int,
+) -> list[DocumentChunk]:
+    chunks: list[DocumentChunk] = []
+    parser_fingerprint = str(version.extra_metadata.get("parser_fingerprint") or "")
+    parser_route = version.extra_metadata.get("parser_route") or version.extra_metadata.get(
+        "parser_chain", []
+    )
+    for result in results:
+        text = result.text.strip()
+        if not text:
+            continue
+        chunks.append(
+            DocumentChunk(
+                repository_id=version.repository_id,
+                document_id=document.id,
+                document_version_id=version.id,
+                chunk_index=chunk_index_start + len(chunks),
+                text=text,
+                section="ocr",
+                page_start=result.page,
+                page_end=result.page,
+                parser_version=f"{version.parser_version}+ocr",
+                extra_metadata={
+                    "source_hash": version.sha256,
+                    "source_type": version.source_type,
+                    "parser_name": version.parser_name,
+                    "parser_version": version.parser_version,
+                    "parser_route": parser_route,
+                    "parser_fingerprint": parser_fingerprint,
+                    "ocr_derived": True,
+                    "ocr_confidence": result.confidence,
+                    "ocr_provider": result.provider,
+                    "ocr_warnings": result.warnings,
+                    "page_provenance": result.provenance,
+                },
+            )
+        )
+    return chunks
 
 
 def _safe_filename(filename: str) -> str:

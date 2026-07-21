@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
+import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 PageOcrClassification = Literal["born_digital", "scanned", "mixed"]
 OcrStatus = Literal["not_required", "pending", "missing_dependency"]
@@ -61,6 +63,51 @@ class NormalizedOcrPageResult:
 
     def to_metadata(self) -> dict[str, object]:
         return asdict(self)
+
+
+class OcrProvider(Protocol):
+    provider_name: str
+    provider_version: str
+
+    def recognize_page(self, image: OcrPageImage) -> NormalizedOcrPageResult: ...
+
+
+@dataclass(frozen=True)
+class TesseractCliOcrProvider(OcrProvider):
+    executable: str
+    provider_name: str = "ocrmypdf_tesseract"
+    provider_version: str = "tesseract-cli"
+
+    def recognize_page(self, image: OcrPageImage) -> NormalizedOcrPageResult:
+        completed = subprocess.run(
+            [self.executable, image.path, "stdout", "--psm", "6"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        warnings: list[str] = []
+        if completed.stderr.strip():
+            warnings.append(completed.stderr.strip())
+        if completed.returncode != 0:
+            warnings.append(f"tesseract exited with status {completed.returncode}.")
+        return normalize_ocr_page_result(
+            page=image.page,
+            text=completed.stdout.strip(),
+            confidence=None,
+            provider_name=self.provider_name,
+            provider_version=self.provider_version,
+            image=image,
+            warnings=warnings,
+            provider_metadata={"executable": self.executable},
+        )
+
+
+def default_ocr_provider() -> OcrProvider | None:
+    executable = shutil.which("tesseract")
+    if executable is None:
+        return None
+    return TesseractCliOcrProvider(executable=executable)
 
 
 def classify_page_for_ocr(

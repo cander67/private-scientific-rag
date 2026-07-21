@@ -15,6 +15,7 @@ from private_rag.ingestion.service import (
     inspect_document_version,
     list_documents,
     reprocess_document,
+    run_document_ocr,
     upload_document,
 )
 
@@ -107,6 +108,18 @@ def reprocess_repository_document(
     session: DbSession,
 ) -> DocumentInspection:
     inspection = reprocess_document(session, repository_id, document_id)
+    if inspection is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return inspection
+
+
+@router.post("/{document_id}/ocr", response_model=DocumentInspection)
+def run_repository_document_ocr(
+    repository_id: str,
+    document_id: str,
+    session: DbSession,
+) -> DocumentInspection:
+    inspection = run_document_ocr(session, repository_id, document_id)
     if inspection is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return inspection
