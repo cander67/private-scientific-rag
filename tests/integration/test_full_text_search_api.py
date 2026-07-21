@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -114,6 +115,56 @@ def test_full_text_search_filters_by_available_metadata() -> None:
     assert result["metadata"]["has_table"] is True
     assert result["metadata"]["has_figure"] is True
     assert "claims" in result["metadata"]["patent_sections"]
+
+
+def test_full_text_rebuild_blocks_stale_parser_chunks_then_indexes_current_version() -> None:
+    client = _client_with_database()
+    created = client.get("/repositories/default").json()
+    repository_id = created["repository"]["id"]
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={"file": ("refresh.txt", b"Abstract\nfirst only marker\n", "text/plain")},
+    )
+    assert upload_response.status_code == 200
+    source_path = Path(upload_response.json()["version"]["storage_path"])
+    source_path.write_bytes(b"Abstract\nsecond only marker\n")
+    settings = created["settings"]
+    settings["chunking"]["chunk_size"] = 400
+    settings_response = client.put(
+        f"/repositories/{repository_id}/settings",
+        json={"settings": settings},
+    )
+
+    stale_rebuild = client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    reprocess_response = client.post(
+        f"/repositories/{repository_id}/documents/{upload_response.json()['document']['id']}/reprocess"
+    )
+    clean_rebuild = client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    old_search = client.post(
+        f"/repositories/{repository_id}/full-text/search",
+        json={"query": "first only marker"},
+    )
+    new_search = client.post(
+        f"/repositories/{repository_id}/full-text/search",
+        json={"query": "second only marker"},
+    )
+
+    assert settings_response.status_code == 200
+    assert stale_rebuild.status_code == 409
+    assert "Reprocess stale documents before rebuilding indexes" in stale_rebuild.json()["detail"]
+    assert reprocess_response.status_code == 200
+    assert clean_rebuild.status_code == 200
+    assert (
+        clean_rebuild.json()["indexed_chunks"]
+        == reprocess_response.json()["version"]["chunk_count"]
+    )
+    assert old_search.status_code == 200
+    assert old_search.json()["results"] == []
+    assert new_search.status_code == 200
+    assert (
+        new_search.json()["results"][0]["document_version_id"]
+        == reprocess_response.json()["version"]["id"]
+    )
 
 
 def test_full_text_search_returns_404_for_missing_repository() -> None:

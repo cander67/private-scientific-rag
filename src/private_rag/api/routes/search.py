@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from private_rag.api.routes.repositories import DbSession
+from private_rag.ingestion.service import ParserChunkStaleError
 from private_rag.search.schemas import (
     FullTextRebuildResponse,
     FullTextSearchRequest,
@@ -18,7 +19,10 @@ def rebuild_repository_full_text_index(
     repository_id: str,
     session: DbSession,
 ) -> FullTextRebuildResponse:
-    rebuilt = rebuild_full_text_index(session, repository_id)
+    try:
+        rebuilt = rebuild_full_text_index(session, repository_id)
+    except ParserChunkStaleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if rebuilt is None:
         raise HTTPException(status_code=404, detail="Repository not found")
     return rebuilt

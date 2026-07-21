@@ -30,6 +30,12 @@ from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
 
 
+class ParserChunkStaleError(RuntimeError):
+    def __init__(self, stale_documents: list[dict[str, object]]) -> None:
+        self.stale_documents = stale_documents
+        super().__init__(_stale_documents_message(stale_documents))
+
+
 def upload_document(
     session: Session,
     repository_id: str,
@@ -183,6 +189,34 @@ def inspect_document_version(
         version=version,
         repository_settings=RepositorySettings.model_validate(repository.settings.settings),
     )
+
+
+def stale_parser_chunk_documents(
+    session: Session,
+    repository_id: str,
+    repository_settings: RepositorySettings,
+) -> list[dict[str, object]]:
+    rows = session.execute(
+        select(Document, DocumentVersion)
+        .join(DocumentVersion, DocumentVersion.id == Document.current_version_id)
+        .where(Document.repository_id == repository_id)
+        .order_by(Document.display_name)
+    ).all()
+    stale_documents: list[dict[str, object]] = []
+    for document, version in rows:
+        status = _reprocess_status_metadata(version, repository_settings)
+        if status["status"] != "stale":
+            continue
+        stale_documents.append(
+            {
+                "document_id": document.id,
+                "document_version_id": version.id,
+                "document_title": document.display_name,
+                "changed_fields": status["changed_fields"],
+                "message": status["message"],
+            }
+        )
+    return stale_documents
 
 
 def _inspection_for_version(
@@ -539,6 +573,25 @@ def _reprocess_status_metadata(
         "changed_fields": changed_fields,
         "message": message,
     }
+
+
+def _stale_documents_message(stale_documents: list[dict[str, object]]) -> str:
+    if not stale_documents:
+        return "Parser or chunking settings changed; reprocess stale documents before rebuilding indexes."
+    previews = []
+    for document in stale_documents[:5]:
+        title = str(document.get("document_title") or document.get("document_id") or "document")
+        fields = document.get("changed_fields")
+        field_text = ", ".join(str(field) for field in fields) if isinstance(fields, list) else ""
+        previews.append(f"{title}{f' ({field_text})' if field_text else ''}")
+    suffix = ""
+    if len(stale_documents) > len(previews):
+        suffix = f" and {len(stale_documents) - len(previews)} more"
+    return (
+        "Parser/chunk settings are stale for "
+        f"{len(stale_documents)} document(s): {', '.join(previews)}{suffix}. "
+        "Reprocess stale documents before rebuilding indexes."
+    )
 
 
 def _status_for_parsed_document(parsed: ParsedDocument) -> DocumentStatus:

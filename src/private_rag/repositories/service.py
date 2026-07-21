@@ -1476,13 +1476,8 @@ def _repository_counts(
 ) -> RepositoryDashboardCounts:
     return RepositoryDashboardCounts(
         documents=_count(session, Document, Document.repository_id == repository_id),
-        parsed_documents=_count(
-            session,
-            DocumentVersion,
-            DocumentVersion.repository_id == repository_id,
-            DocumentVersion.status == "parsed",
-        ),
-        chunks=_count(session, DocumentChunk, DocumentChunk.repository_id == repository_id),
+        parsed_documents=_current_parsed_document_count(session, repository_id),
+        chunks=_current_chunk_count(session, repository_id),
         chat_sessions=_count(
             session,
             ChatSession,
@@ -1510,6 +1505,32 @@ def _repository_counts(
             else 0
         ),
     )
+
+
+def _current_parsed_document_count(session: Session, repository_id: str) -> int:
+    value = session.scalar(
+        select(func.count())
+        .select_from(Document)
+        .join(DocumentVersion, DocumentVersion.id == Document.current_version_id)
+        .where(
+            Document.repository_id == repository_id,
+            DocumentVersion.status == "parsed",
+        )
+    )
+    return int(value or 0)
+
+
+def _current_chunk_count(session: Session, repository_id: str) -> int:
+    value = session.scalar(
+        select(func.count())
+        .select_from(DocumentChunk)
+        .join(Document, Document.id == DocumentChunk.document_id)
+        .where(
+            DocumentChunk.repository_id == repository_id,
+            Document.current_version_id == DocumentChunk.document_version_id,
+        )
+    )
+    return int(value or 0)
 
 
 def _repository_cleanup_database_counts(

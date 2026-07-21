@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from private_rag.api.routes.repositories import DbSession
 from private_rag.core.settings import get_settings
+from private_rag.ingestion.service import ParserChunkStaleError
 from private_rag.vector.embeddings import EmbeddingProviderSource, LocalEmbeddingProviderFactory
 from private_rag.vector.schemas import (
     VectorRebuildResponse,
@@ -46,6 +47,8 @@ def rebuild_repository_vector_index(
 ) -> VectorRebuildResponse:
     try:
         rebuilt = rebuild_vector_index(session, repository_id, store, embedder)
+    except ParserChunkStaleError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (RuntimeError, ValueError, VectorStoreError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if rebuilt is None:
