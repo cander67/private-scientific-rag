@@ -30,6 +30,8 @@ Current status:
 - Backlog: PRD24 local storage provenance and housekeeping.
 - Backlog: PRD25 chat context inspection.
 - Ready for review: PRD26 repository loading and parser controls.
+- Backlog: PRD27 retrieval defaults transparency and controls.
+- Backlog: PRD28 document manager preview and batch actions.
 
 PRD23 is ready for final review after catalog guardrails and user-testing remediation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional live Ollama/Qdrant/GPU checks remain explicit manual checks. PRD26 is ready for review with repository-switch loading states and catalog-backed parser controls. PRD13 is now in progress, starting with operational parser routing during upload/reprocess and parser/chunk fingerprint metadata; OCR execution and stale index freshness remain later PRD13 phases. PRD25 remains backlog follow-up work.
 
@@ -55,6 +57,8 @@ Shared decisions:
 - Ollama chat scope: ordinary Ollama chat models should flow through the existing generic chat provider by model name. PRD22 tracks registry/readiness/docs expansion for additional chat models; focused model-specific work is only expected for unusual prompting, context, multimodal, tool/function, or structured-output requirements.
 - Chat context inspection scope: PRD25 owns exposing the exact local LLM payload for normal chat. Prompt Sandbox remains the owner for side-by-side prompt/retrieval/model experiments.
 - Repository loading and parser controls scope: PRD26 owns visible repository-switch loading states and fixed parser-choice controls, including an `Auto` parser option. PRD13 owns making those parser choices operational during upload, reprocess, OCR, and index freshness checks.
+- Retrieval defaults scope: PRD27 owns making effective retrieval defaults transparent across Search Lab, Chat Workspace, Prompt Sandbox, and evaluation, including explicit metadata boost `off` behavior and copy/promote paths that do not mutate defaults implicitly.
+- Document Manager batch scope: PRD28 owns row-click metadata preview and selected-document batch actions for reprocess, OCR, and delete as a follow-up to the completed PRD3 Document Manager.
 
 PRD files:
 
@@ -84,3 +88,5 @@ PRD files:
 24. [Local storage provenance and housekeeping](24-local-storage-housekeeping.md) - backlog
 25. [Chat context inspection](25-chat-context-inspection.md) - backlog
 26. [Repository loading and parser controls](26-repository-loading-and-parser-controls.md) - ready for review
+27. [Retrieval defaults transparency and controls](27-retrieval-defaults-transparency-controls.md) - backlog
+28. [Document manager preview and batch actions](28-document-manager-preview-batch-actions.md) - backlog
