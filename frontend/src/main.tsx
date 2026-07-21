@@ -3093,6 +3093,8 @@ function App() {
                           {selectedChunk.chunk_index + 1} / {inspection.version.chunk_count}
                         </dd>
                         <dt>parser</dt>
+                        <dd>{parserDisplayLabel(inspection.version)}</dd>
+                        <dt>parser version</dt>
                         <dd>{inspection.version.parser_version}</dd>
                         <dt>reprocess</dt>
                         <dd>{reprocessStatusLabel(inspection.version)}</dd>
@@ -3114,6 +3116,8 @@ function App() {
                         <dt>status</dt>
                         <dd>{inspection.version.status}</dd>
                         <dt>parser</dt>
+                        <dd>{parserDisplayLabel(inspection.version)}</dd>
+                        <dt>parser version</dt>
                         <dd>{inspection.version.parser_version}</dd>
                         <dt>reprocess</dt>
                         <dd>{reprocessStatusLabel(inspection.version)}</dd>
@@ -6957,6 +6961,8 @@ function SelectedDocumentCard({
         <dt>Chunks</dt>
         <dd>{version.chunk_count}</dd>
         <dt>Parser</dt>
+        <dd>{parserDisplayLabel(version)}</dd>
+        <dt>Parser version</dt>
         <dd>{version.parser_version}</dd>
         <dt>Reprocess</dt>
         <dd>{reprocessStatusLabel(version)}</dd>
@@ -7036,7 +7042,41 @@ function versionSummary(version: DocumentVersion) {
   if (version.warnings.length > 0) {
     return version.warnings.join(" ");
   }
-  return `${version.parser_version} produced inspectable source chunks.`;
+  return `${parserDisplayLabel(version)} produced inspectable source chunks.`;
+}
+
+function parserDisplayLabel(version: DocumentVersion) {
+  const parserName = parserNameLabel(version.parser_name);
+  const route = parserRouteLabel(version);
+  if (!route || route === parserName) {
+    return parserName;
+  }
+  return `${parserName} via ${route}`;
+}
+
+function parserNameLabel(name: string) {
+  const labels: Record<string, string> = {
+    "private-rag-built-in": "Built-in parser",
+    built_in_fallback: "Built-in fallback",
+    docling: "Docling",
+    pdfplumber: "pdfplumber",
+    pymupdf: "PyMuPDF",
+    pypdf: "pypdf",
+    rapidocr: "RapidOCR",
+    ocrmypdf_tesseract: "OCRmyPDF + Tesseract",
+  };
+  return labels[name] ?? name;
+}
+
+function parserRouteLabel(version: DocumentVersion) {
+  const route = version.metadata.parser_route ?? version.metadata.parser_chain;
+  if (!Array.isArray(route)) {
+    return "";
+  }
+  return route
+    .filter((item): item is string => typeof item === "string" && item.length > 0)
+    .map((item) => parserNameLabel(item))
+    .join(" -> ");
 }
 
 function getPageOcrRoutes(version: DocumentVersion): PageOcrRoute[] {

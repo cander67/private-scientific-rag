@@ -58,6 +58,16 @@ test("Source Viewer supports PRD13 local OCR recovery", () => {
   assert.match(source, /function isOcrChunk/);
 });
 
+test("Source Viewer renders parser names before parser versions", () => {
+  assert.match(source, /function parserDisplayLabel/);
+  assert.match(source, /function parserNameLabel/);
+  assert.match(source, /function parserRouteLabel/);
+  assert.match(source, /parserDisplayLabel\(inspection\.version\)/);
+  assert.match(source, /<dt>parser version<\/dt>/);
+  assert.match(source, /<dt>Parser version<\/dt>/);
+  assert.match(source, /Built-in parser/);
+});
+
 test("Document Manager and Source Viewer render as separate live views", () => {
   assert.match(source, /activeView === "documents"/);
   assert.match(source, /activeView === "source"/);
