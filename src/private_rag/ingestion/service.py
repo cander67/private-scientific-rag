@@ -123,6 +123,7 @@ def upload_document(
         repository_id=repository_id,
         document_id=document.id,
         document_version_id=version.id,
+        chunking_mode=repository_settings.chunking.mode,
         chunk_size=repository_settings.chunking.chunk_size,
         chunk_overlap=repository_settings.chunking.chunk_overlap,
         source_hash=digest,
@@ -341,6 +342,7 @@ def reprocess_document(
         repository_id=repository_id,
         document_id=document.id,
         document_version_id=new_version.id,
+        chunking_mode=repository_settings.chunking.mode,
         chunk_size=repository_settings.chunking.chunk_size,
         chunk_overlap=repository_settings.chunking.chunk_overlap,
         source_hash=digest,
@@ -1174,13 +1176,23 @@ def _chunk_parsed_document(
     repository_id: str,
     document_id: str,
     document_version_id: str,
+    chunking_mode: str,
     chunk_size: int,
     chunk_overlap: int,
     source_hash: str,
     parser_version: str,
 ) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
-    for segment in _coalesce_segments(parsed.segments, chunk_size, chunk_overlap):
+    if chunking_mode == "fixed":
+        segments = _fixed_size_segments(parsed, chunk_size, chunk_overlap)
+    else:
+        segments = _coalesce_segments(parsed.segments, chunk_size, chunk_overlap)
+    chunking_metadata = {
+        "chunking_mode": chunking_mode,
+        "chunk_size": chunk_size,
+        "chunk_overlap": chunk_overlap,
+    }
+    for segment in segments:
         text = segment.text.strip()
         if not text:
             continue
@@ -1201,6 +1213,7 @@ def _chunk_parsed_document(
                 parser_version=parser_version,
                 extra_metadata={
                     **segment.metadata,
+                    "chunking": chunking_metadata,
                     "source_hash": source_hash,
                     "source_type": parsed.source_type,
                     "parser_name": parsed.parser_name,
@@ -1211,6 +1224,41 @@ def _chunk_parsed_document(
                 },
             )
         )
+    return chunks
+
+
+def _fixed_size_segments(
+    parsed: ParsedDocument,
+    chunk_size: int,
+    chunk_overlap: int,
+) -> list[ParsedSegment]:
+    text = parsed.text or "\n".join(segment.text for segment in parsed.segments)
+    if not text.strip():
+        return []
+    step = max(1, chunk_size - chunk_overlap)
+    chunks: list[ParsedSegment] = []
+    start = 0
+    while start < len(text):
+        raw = text[start : start + chunk_size]
+        leading_trimmed = len(raw) - len(raw.lstrip())
+        trailing_trimmed = len(raw) - len(raw.rstrip())
+        char_start = start + leading_trimmed
+        char_end = start + len(raw) - trailing_trimmed
+        chunk_text = text[char_start:char_end]
+        if chunk_text:
+            chunks.append(
+                ParsedSegment(
+                    text=chunk_text,
+                    char_start=char_start,
+                    char_end=char_end,
+                    line_start=text.count("\n", 0, char_start) + 1,
+                    line_end=text.count("\n", 0, char_end) + 1,
+                    metadata={"fixed_window_start": start, "fixed_window_end": start + len(raw)},
+                )
+            )
+        if start + chunk_size >= len(text):
+            break
+        start += step
     return chunks
 
 

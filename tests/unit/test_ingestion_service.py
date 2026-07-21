@@ -710,6 +710,7 @@ def test_helper_storage_and_chunk_edges(tmp_path: Path) -> None:
         repository_id="repo",
         document_id="doc",
         document_version_id="version",
+        chunking_mode="recursive",
         chunk_size=100,
         chunk_overlap=0,
         source_hash="hash",
@@ -731,6 +732,77 @@ def test_helper_storage_and_chunk_edges(tmp_path: Path) -> None:
     assert blank_chunks == []
     assert len(coalesced) >= 2
     assert coalesced[-1].metadata["sections"] == ["B"]
+
+
+def test_upload_uses_fixed_chunking_mode_for_fixed_size_windows(tmp_path: Path) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    repository = session.get(Repository, repository_id)
+    assert repository is not None
+    assert repository.settings is not None
+    settings = RepositorySettings.model_validate(repository.settings.settings)
+    settings.chunking.mode = "fixed"
+    settings.chunking.chunk_size = 100
+    settings.chunking.chunk_overlap = 10
+    repository.settings.settings = settings.model_dump(mode="json")
+    session.add(repository.settings)
+    session.commit()
+
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "fixed.txt",
+        "text/plain",
+        ("alpha " * 20 + "\n" + "beta " * 20).encode(),
+        settings=Settings(data_dir=tmp_path),
+    )
+
+    assert uploaded is not None
+    assert uploaded.version.chunk_count >= 2
+    first_chunk = uploaded.chunks_preview[0]
+    second_chunk = uploaded.chunks_preview[1]
+    assert len(first_chunk.text) <= 100
+    assert second_chunk.char_start == 90
+    assert first_chunk.metadata["chunking"] == {
+        "chunking_mode": "fixed",
+        "chunk_size": 100,
+        "chunk_overlap": 10,
+    }
+    assert "fixed_window_start" in first_chunk.metadata
+
+
+def test_upload_recursive_chunking_preserves_segment_coalescing(tmp_path: Path) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    repository = session.get(Repository, repository_id)
+    assert repository is not None
+    assert repository.settings is not None
+    settings = RepositorySettings.model_validate(repository.settings.settings)
+    settings.chunking.mode = "recursive"
+    settings.chunking.chunk_size = 100
+    settings.chunking.chunk_overlap = 10
+    repository.settings.settings = settings.model_dump(mode="json")
+    session.add(repository.settings)
+    session.commit()
+
+    uploaded = upload_document(
+        session,
+        repository_id,
+        "recursive.txt",
+        "text/plain",
+        ("alpha " * 20 + "\n" + "beta " * 20).encode(),
+        settings=Settings(data_dir=tmp_path),
+    )
+
+    assert uploaded is not None
+    first_chunk = uploaded.chunks_preview[0]
+    assert first_chunk.char_start == 0
+    assert first_chunk.metadata["chunking"] == {
+        "chunking_mode": "recursive",
+        "chunk_size": 100,
+        "chunk_overlap": 10,
+    }
+    assert "fixed_window_start" not in first_chunk.metadata
 
 
 def test_upload_uses_repository_parser_settings_and_records_fingerprint(
