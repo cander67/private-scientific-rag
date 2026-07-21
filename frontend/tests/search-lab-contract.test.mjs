@@ -24,6 +24,8 @@ test("Search Lab renders retrieval score breakdown details", () => {
   assert.match(source, /Final/);
   assert.match(source, /source_ranks/);
   assert.match(source, /score_breakdown/);
+  assert.match(source, /metadata_boost_dimensions/);
+  assert.match(source, /metadata-boost-breakdown/);
   assert.match(source, /embedding_model/);
   assert.match(source, /embedding_provider/);
   assert.match(source, /embedding_run_id/);
@@ -64,5 +66,17 @@ test("PRD6 hybrid mode and reranking controls are enabled", () => {
   assert.match(source, /candidate-pool-size/);
   assert.match(source, /rrf-constant/);
   assert.match(source, /metadata-boost-level/);
+  assert.match(source, /<option value="off">Off<\/option>/);
   assert.match(source, /Diversity\/MMR - future/);
+});
+
+test("Search Lab shows effective settings and explicit copy or promote actions", () => {
+  assert.match(source, /function currentSearchRetrievalSettings/);
+  assert.match(source, /function copySearchSettingsToChat/);
+  assert.match(source, /function promoteSearchSettingsToRepositoryDefaults/);
+  assert.match(source, /Search Lab changes are experimental until copied to chat or promoted/);
+  assert.match(source, /Copy to chat/);
+  assert.match(source, /Promote defaults/);
+  assert.match(source, /nextSettings\.retrieval = currentSearchRetrievalSettings\(\)/);
+  assert.match(source, /setChatRetrievalSettings\(currentSearchRetrievalSettings\(\)\)/);
 });

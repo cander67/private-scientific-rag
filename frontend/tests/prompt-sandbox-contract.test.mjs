@@ -49,6 +49,10 @@ test("Prompt Sandbox renders side-by-side run cards with context links", () => {
   assert.match(source, /score_breakdown/);
   assert.match(source, /sandboxPromptSnapshotName/);
   assert.match(source, /<dt>prompt<\/dt>/);
+  assert.match(source, /<dt>pool<\/dt>/);
+  assert.match(source, /<dt>RRF<\/dt>/);
+  assert.match(source, /<dt>strategy<\/dt>/);
+  assert.match(source, /<dt>boosts<\/dt>/);
   assert.match(source, /<dt>context<\/dt>/);
   assert.match(source, /onOpenContext/);
   assert.match(source, /openSandboxContext/);

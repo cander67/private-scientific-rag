@@ -55,6 +55,12 @@ test("Chat Workspace exposes retrieval readiness and explicit rebuild controls",
   assert.match(source, /chat-mode/);
   assert.match(source, /chat-reranker/);
   assert.match(source, /chat-top-k/);
+  assert.match(source, /chat-candidate-pool/);
+  assert.match(source, /chat-rrf/);
+  assert.match(source, /chat-filter-document-kind/);
+  assert.match(source, /chat-boost-\$\{key\}/);
+  assert.match(source, /Effective retrieval/);
+  assert.match(source, /Metadata badges may be shown even when their boost is off/);
   assert.match(source, /Last checked/);
   assert.match(source, /Checking indexes and local model/);
   assert.match(source, /searches local repository context first/);

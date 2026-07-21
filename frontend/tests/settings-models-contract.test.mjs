@@ -86,6 +86,24 @@ test("Settings / Models uses the PRD23 model catalog for chat and reranker choic
   assert.match(source, /Custom reranker model/);
 });
 
+test("Settings / Models exposes PRD27 retrieval defaults and metadata boost off", () => {
+  assert.match(source, /retrieval: RetrievalDefaults/);
+  assert.match(source, /Repository defaults/);
+  assert.match(source, /Retrieval defaults/);
+  assert.match(source, /id="settings-retrieval-mode"/);
+  assert.match(source, /id="settings-retrieval-top-k"/);
+  assert.match(source, /id="settings-retrieval-candidate-auto"/);
+  assert.match(source, /id="settings-retrieval-candidate-pool"/);
+  assert.match(source, /id="settings-retrieval-rrf"/);
+  assert.match(source, /id="settings-retrieval-reranker-strategy"/);
+  assert.match(source, /metadataBoostLabel/);
+  assert.match(source, /options=\{\["off", "low", "medium", "high"\]\}/);
+  assert.match(source, /Metadata display is separate from ranking boost/);
+  assert.match(source, /settings\.retrieval\.top_k < 1/);
+  assert.match(source, /payload\.settings\.retrieval/);
+  assert.match(source, /repositorySettings\?\.retrieval \?\? defaultChatRetrievalSettings\(\)/);
+});
+
 test("Settings / Models renders catalog-backed parser choices", () => {
   assert.match(source, /type ParserCatalogEntry =/);
   assert.match(source, /parser_choices: ParserCatalogEntry\[\]/);

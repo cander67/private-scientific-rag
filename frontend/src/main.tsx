@@ -54,6 +54,7 @@ type RepositorySettings = {
     strategy: string;
     model: string | null;
   };
+  retrieval: RetrievalDefaults;
   model: {
     ollama_chat_model: string;
   };
@@ -578,7 +579,7 @@ type HybridRebuildResponse = {
 
 type SearchMode = "full-text" | "vector" | "hybrid";
 type RerankerStrategy = "none" | "cross_encoder" | "metadata_boost" | "cross_encoder_metadata_boost";
-type BoostLevel = "low" | "medium" | "high";
+type BoostLevel = "off" | "low" | "medium" | "high";
 type SearchRebuildResponse = FullTextRebuildResponse | VectorRebuildResponse | HybridRebuildResponse;
 
 type FullTextSearchResult = {
@@ -650,6 +651,15 @@ type RetrievalSearchResult = {
     rrf?: number | null;
     rerank?: number | null;
     metadata_boost?: number | null;
+    metadata_boost_dimensions?: Record<
+      string,
+      {
+        level: BoostLevel;
+        matched: boolean;
+        score: number;
+        ranking_applied: boolean;
+      }
+    >;
   };
   source_ranks: {
     full_text?: number | null;
@@ -717,6 +727,34 @@ type RetrievalSearchResponse = {
   results: RetrievalSearchResult[];
 };
 
+type RetrievalFilters = {
+  document_id?: string | null;
+  section?: string | null;
+  source_type?: string | null;
+  document_kind?: string | null;
+  tag?: string | null;
+  has_table?: boolean | null;
+  has_figure?: boolean | null;
+  patent_section?: string | null;
+};
+
+type MetadataBoostSettings = {
+  section: "off" | "low" | "medium" | "high";
+  patent_section: "off" | "low" | "medium" | "high";
+  document_kind: "off" | "low" | "medium" | "high";
+  table_figure: "off" | "low" | "medium" | "high";
+};
+
+type RetrievalDefaults = {
+  mode: "full_text" | "vector" | "hybrid";
+  top_k: number;
+  candidate_pool_size?: number | null;
+  rrf_constant: number;
+  reranker_strategy: RerankerStrategy;
+  metadata_boosts: MetadataBoostSettings;
+  filters: RetrievalFilters;
+};
+
 type ChatCitation = {
   citation_id: number;
   token: string;
@@ -743,11 +781,7 @@ type ChatCitation = {
   text_preview: string | null;
 };
 
-type ChatRetrievalSettings = {
-  mode: "full_text" | "vector" | "hybrid";
-  top_k: number;
-  reranker_strategy: RerankerStrategy;
-};
+type ChatRetrievalSettings = RetrievalDefaults;
 
 type ChatMessage = {
   id: string;
@@ -912,11 +946,9 @@ function App() {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatMessage, setChatMessage] = useState("Create a chat session or ask a question.");
   const [activeCitation, setActiveCitation] = useState<ChatCitation | null>(null);
-  const [chatRetrievalSettings, setChatRetrievalSettings] = useState<ChatRetrievalSettings>({
-    mode: "hybrid",
-    top_k: 6,
-    reranker_strategy: "cross_encoder",
-  });
+  const [chatRetrievalSettings, setChatRetrievalSettings] = useState<ChatRetrievalSettings>(
+    defaultChatRetrievalSettings,
+  );
   const [chatReadiness, setChatReadiness] = useState<ChatReadiness | null>(null);
   const [chatReadinessBusy, setChatReadinessBusy] = useState(false);
   const [chatReadinessCheckedAt, setChatReadinessCheckedAt] = useState<string | null>(null);
@@ -1149,6 +1181,9 @@ function App() {
       const payload = (await response.json()) as RepositorySettingsResponse;
       setRepositories((current) => mergeRepositories(current, payload.repository));
       setRepositorySettings(payload.settings);
+      if (!activeChatSessionId) {
+        setChatRetrievalSettings(normalizeChatRetrievalSettings(payload.settings.retrieval));
+      }
       activateRepository(payload.repository);
       setMessage("Ready");
     } catch {
@@ -1247,6 +1282,9 @@ function App() {
       }
       const payload = (await response.json()) as RepositorySettingsResponse;
       setRepositorySettings(payload.settings);
+      if (!activeChatSessionId) {
+        setChatRetrievalSettings(normalizeChatRetrievalSettings(payload.settings.retrieval));
+      }
       setExportIncludeSources(payload.settings.export.include_sources);
       return true;
     } catch {
@@ -1445,6 +1483,7 @@ function App() {
       activateRepository(payload.default_repository.repository);
       setClearAllResult(payload);
       setRepositorySettings(payload.default_repository.settings);
+      setChatRetrievalSettings(normalizeChatRetrievalSettings(payload.default_repository.settings.retrieval));
       void loadAdminInventory();
       setAdminMessage("Cleared all local repositories and recreated the default repository");
     } catch {
@@ -1497,6 +1536,9 @@ function App() {
     }
     const payload = (await response.json()) as RepositorySettingsResponse;
     setRepositorySettings(payload.settings);
+    if (!activeChatSessionId) {
+      setChatRetrievalSettings(normalizeChatRetrievalSettings(payload.settings.retrieval));
+    }
     setExportIncludeSources(payload.settings.export.include_sources);
     void loadDashboardSummary(repository.id);
     return payload.settings;
@@ -1846,7 +1888,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: "Repository chat",
-          retrieval_settings: chatRetrievalSettings,
+          retrieval_settings: repositorySettings?.retrieval ?? defaultChatRetrievalSettings(),
         }),
       });
       if (!response.ok) {
@@ -1855,6 +1897,7 @@ function App() {
       const payload = (await response.json()) as ChatSession;
       setChatSessions((current) => [payload, ...current]);
       setActiveChatSessionId(payload.id);
+      setChatRetrievalSettings(normalizeChatRetrievalSettings(payload.retrieval_settings));
       void loadDashboardSummary(repository.id);
       setChatMessage("Ready");
       return payload;
@@ -2197,26 +2240,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query: searchQuery,
-          mode: apiSearchMode(searchMode),
-          top_k: searchLimit,
-          candidate_pool_size: candidatePoolSize,
-          rrf_constant: rrfConstant,
-          reranker_strategy: rerankerStrategy,
-          metadata_boosts: {
-            section: metadataBoostLevel,
-            patent_section: metadataBoostLevel,
-            document_kind: metadataBoostLevel,
-            table_figure: metadataBoostLevel,
-          },
-          filters: {
-            document_id: searchDocumentId || null,
-            section: searchSection || null,
-            source_type: searchSourceType || null,
-            document_kind: searchDocumentKind || null,
-            has_table: searchHasTable ? true : null,
-            has_figure: searchHasFigure ? true : null,
-            patent_section: searchPatentSection || null,
-          },
+          ...currentSearchRetrievalSettings(),
         }),
       });
       if (!response.ok) {
@@ -2233,6 +2257,56 @@ function App() {
       setSearchResults([]);
     } finally {
       setSearchBusy(false);
+    }
+  }
+
+  function currentSearchRetrievalSettings(): RetrievalDefaults {
+    return normalizeChatRetrievalSettings({
+      mode: apiSearchMode(searchMode),
+      top_k: searchLimit,
+      candidate_pool_size: candidatePoolSize,
+      rrf_constant: rrfConstant,
+      reranker_strategy: rerankerStrategy,
+      metadata_boosts: {
+        section: metadataBoostLevel,
+        patent_section: metadataBoostLevel,
+        document_kind: metadataBoostLevel,
+        table_figure: metadataBoostLevel,
+      },
+      filters: {
+        document_id: searchDocumentId || null,
+        section: searchSection || null,
+        source_type: searchSourceType || null,
+        document_kind: searchDocumentKind || null,
+        has_table: searchHasTable ? true : null,
+        has_figure: searchHasFigure ? true : null,
+        patent_section: searchPatentSection || null,
+      },
+    });
+  }
+
+  function copySearchSettingsToChat() {
+    setChatRetrievalSettings(currentSearchRetrievalSettings());
+    setSearchMessage("Copied Search Lab retrieval settings to the Chat Workspace panel");
+  }
+
+  async function promoteSearchSettingsToRepositoryDefaults() {
+    if (!repositorySettings) {
+      setSearchMessage("Repository settings unavailable");
+      return;
+    }
+    const nextSettings = cloneSettings(repositorySettings);
+    if (!nextSettings) {
+      setSearchMessage("Repository settings unavailable");
+      return;
+    }
+    nextSettings.retrieval = currentSearchRetrievalSettings();
+    try {
+      const saved = await saveRepositorySettings(nextSettings);
+      setRepositorySettings(saved);
+      setSearchMessage("Promoted Search Lab retrieval settings to repository defaults");
+    } catch (error) {
+      setSearchMessage(`Could not promote retrieval defaults: ${errorMessage(error)}`);
     }
   }
 
@@ -2693,6 +2767,8 @@ function App() {
                 onPatentSectionChange={setSearchPatentSection}
                 onRebuild={() => void rebuildSearchIndex()}
                 onSearch={() => void runSearch()}
+                onCopyToChat={copySearchSettingsToChat}
+                onPromoteToDefaults={() => void promoteSearchSettingsToRepositoryDefaults()}
                 onOpenResult={openSearchResult}
               />
             ) : activeView === "chat" ? (
@@ -4801,6 +4877,107 @@ function SettingsModels({
         </section>
 
         <section className="card settings-section">
+          <div className="eyebrow">Repository defaults</div>
+          <h2>Retrieval defaults</h2>
+          <SettingSelect
+            id="settings-retrieval-mode"
+            label="Mode"
+            value={draft.retrieval.mode}
+            options={["full_text", "vector", "hybrid"]}
+            labels={{ full_text: "Full-text", vector: "Vector", hybrid: "Hybrid" }}
+            onChange={(value) => updateDraft((next) => { next.retrieval.mode = value as RetrievalDefaults["mode"]; })}
+          />
+          <SettingNumber
+            id="settings-retrieval-top-k"
+            label="Final top-k"
+            value={draft.retrieval.top_k}
+            error={validationByField.get("retrieval.top_k")}
+            onChange={(value) => updateDraft((next) => { next.retrieval.top_k = value; })}
+          />
+          <SettingCheckbox
+            id="settings-retrieval-candidate-auto"
+            label="Use automatic candidate pool"
+            checked={draft.retrieval.candidate_pool_size == null}
+            onChange={(value) => updateDraft((next) => {
+              next.retrieval.candidate_pool_size = value ? null : next.retrieval.top_k * 5;
+            })}
+          />
+          {draft.retrieval.candidate_pool_size != null && (
+            <SettingNumber
+              id="settings-retrieval-candidate-pool"
+              label="Candidate pool"
+              value={draft.retrieval.candidate_pool_size}
+              error={validationByField.get("retrieval.candidate_pool_size")}
+              onChange={(value) => updateDraft((next) => { next.retrieval.candidate_pool_size = value; })}
+            />
+          )}
+          <SettingNumber
+            id="settings-retrieval-rrf"
+            label="RRF constant"
+            value={draft.retrieval.rrf_constant}
+            error={validationByField.get("retrieval.rrf_constant")}
+            onChange={(value) => updateDraft((next) => { next.retrieval.rrf_constant = value; })}
+          />
+          <SettingSelect
+            id="settings-retrieval-reranker-strategy"
+            label="Ranking strategy"
+            value={draft.retrieval.reranker_strategy}
+            options={["none", "cross_encoder", "metadata_boost", "cross_encoder_metadata_boost"]}
+            labels={{
+              none: "No reranking",
+              cross_encoder: "Cross-encoder",
+              metadata_boost: "Metadata boost",
+              cross_encoder_metadata_boost: "Cross-encoder + metadata boost",
+            }}
+            onChange={(value) => updateDraft((next) => { next.retrieval.reranker_strategy = value as RerankerStrategy; })}
+          />
+          <div className="settings-model-guidance">
+            <strong>Metadata display is separate from ranking boost</strong>
+            <small>Result metadata can still be shown when a boost dimension is off.</small>
+            <small>New chat sessions snapshot these defaults. Existing sessions keep their saved settings.</small>
+          </div>
+          <div className="settings-subgrid">
+            {(["section", "patent_section", "document_kind", "table_figure"] as const).map((key) => (
+              <SettingSelect
+                id={`settings-retrieval-boost-${key}`}
+                key={key}
+                label={metadataBoostLabel(key)}
+                value={draft.retrieval.metadata_boosts[key]}
+                options={["off", "low", "medium", "high"]}
+                labels={{ off: "Off", low: "Low", medium: "Medium", high: "High" }}
+                onChange={(value) => updateDraft((next) => {
+                  next.retrieval.metadata_boosts[key] = value as MetadataBoostSettings[typeof key];
+                })}
+              />
+            ))}
+          </div>
+          <SettingText
+            id="settings-retrieval-filter-document-kind"
+            label="Default document kind filter"
+            value={draft.retrieval.filters.document_kind ?? ""}
+            onChange={(value) => updateDraft((next) => {
+              next.retrieval.filters.document_kind = value.trim() || null;
+            })}
+          />
+          <SettingText
+            id="settings-retrieval-filter-section"
+            label="Default section filter"
+            value={draft.retrieval.filters.section ?? ""}
+            onChange={(value) => updateDraft((next) => {
+              next.retrieval.filters.section = value.trim() || null;
+            })}
+          />
+          <SettingText
+            id="settings-retrieval-filter-patent-section"
+            label="Default patent section filter"
+            value={draft.retrieval.filters.patent_section ?? ""}
+            onChange={(value) => updateDraft((next) => {
+              next.retrieval.filters.patent_section = value.trim() || null;
+            })}
+          />
+        </section>
+
+        <section className="card settings-section">
           <div className="eyebrow">Defaults</div>
           <h2>Chat defaults</h2>
           {chatCatalog.length > 0 && (
@@ -5958,6 +6135,18 @@ function SandboxRunCard({
         <dd>{run ? sandboxPromptSnapshotName(run.prompt_snapshot) : "pending"}</dd>
         <dt>top-k</dt>
         <dd>{progressRun.retrieval_settings.top_k}</dd>
+        <dt>pool</dt>
+        <dd>{progressRun.retrieval_settings.candidate_pool_size ?? progressRun.retrieval_settings.top_k * 5}</dd>
+        <dt>RRF</dt>
+        <dd>{progressRun.retrieval_settings.rrf_constant}</dd>
+        <dt>strategy</dt>
+        <dd>{progressRun.retrieval_settings.reranker_strategy.replace(/_/g, " ")}</dd>
+        <dt>boosts</dt>
+        <dd>
+          {Object.values(progressRun.retrieval_settings.metadata_boosts).some((level) => level !== "off")
+            ? "some on"
+            : "off"}
+        </dd>
         <dt>context</dt>
         <dd>{run?.context_entries.length ?? "—"}</dd>
         <dt>citations</dt>
@@ -6203,6 +6392,106 @@ function ChatWorkspace({
                 </select>
               </div>
             </div>
+            <div className="grid grid-3 chat-settings-controls">
+              <div>
+                <label className="field" htmlFor="chat-candidate-pool">
+                  Candidate pool
+                </label>
+                <select
+                  id="chat-candidate-pool"
+                  value={retrievalSettings.candidate_pool_size ?? ""}
+                  onChange={(event) =>
+                    onRetrievalSettingsChange({
+                      ...retrievalSettings,
+                      candidate_pool_size: event.target.value ? Number(event.target.value) : null,
+                    })
+                  }
+                >
+                  <option value="">Auto</option>
+                  {[25, 50, 100, 150, 250].map((value) => (
+                    <option value={value} key={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="field" htmlFor="chat-rrf">
+                  RRF constant
+                </label>
+                <select
+                  id="chat-rrf"
+                  value={retrievalSettings.rrf_constant}
+                  onChange={(event) =>
+                    onRetrievalSettingsChange({
+                      ...retrievalSettings,
+                      rrf_constant: Number(event.target.value),
+                    })
+                  }
+                >
+                  {[10, 30, 60, 100].map((value) => (
+                    <option value={value} key={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="field" htmlFor="chat-filter-document-kind">
+                  Document kind
+                </label>
+                <input
+                  id="chat-filter-document-kind"
+                  value={retrievalSettings.filters.document_kind ?? ""}
+                  onChange={(event) =>
+                    onRetrievalSettingsChange({
+                      ...retrievalSettings,
+                      filters: {
+                        ...retrievalSettings.filters,
+                        document_kind: event.target.value.trim() || null,
+                      },
+                    })
+                  }
+                  placeholder="patent_pdf"
+                />
+              </div>
+            </div>
+            <div className="grid grid-4 chat-settings-controls">
+              {(["section", "patent_section", "document_kind", "table_figure"] as const).map((key) => (
+                <div key={key}>
+                  <label className="field" htmlFor={`chat-boost-${key}`}>
+                    {metadataBoostLabel(key)}
+                  </label>
+                  <select
+                    id={`chat-boost-${key}`}
+                    value={retrievalSettings.metadata_boosts[key]}
+                    onChange={(event) =>
+                      onRetrievalSettingsChange({
+                        ...retrievalSettings,
+                        metadata_boosts: {
+                          ...retrievalSettings.metadata_boosts,
+                          [key]: event.target.value as MetadataBoostSettings[typeof key],
+                        },
+                      })
+                    }
+                  >
+                    <option value="off">Off</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+            <div className="chat-defaults-note">
+              <strong>Effective retrieval</strong>
+              <small>
+                {retrievalSettings.mode} · top-{retrievalSettings.top_k} · pool{" "}
+                {retrievalSettings.candidate_pool_size ?? retrievalSettings.top_k * 5} · RRF{" "}
+                {retrievalSettings.rrf_constant} · {retrievalSettings.reranker_strategy.replace(/_/g, " ")}
+              </small>
+              <small>Metadata badges may be shown even when their boost is off.</small>
+            </div>
             <div className="readiness-grid" data-parsed-chunks={readiness?.parsed_chunks ?? 0}>
               <ReadinessPill label="Full-text" item={readiness?.full_text ?? null} />
               <ReadinessPill label="Vector" item={readiness?.vector ?? null} />
@@ -6443,6 +6732,8 @@ function SearchLab({
   onPatentSectionChange,
   onRebuild,
   onSearch,
+  onCopyToChat,
+  onPromoteToDefaults,
   onOpenResult,
 }: {
   documents: DocumentSummary[];
@@ -6481,6 +6772,8 @@ function SearchLab({
   onPatentSectionChange: (value: string) => void;
   onRebuild: () => void;
   onSearch: () => void;
+  onCopyToChat: () => void;
+  onPromoteToDefaults: () => void;
   onOpenResult: (result: SearchResult) => void;
 }) {
   const sections = Array.from(
@@ -6614,6 +6907,7 @@ function SearchLab({
               value={metadataBoostLevel}
               onChange={(event) => onMetadataBoostLevelChange(event.target.value as BoostLevel)}
             >
+              <option value="off">Off</option>
               <option value="low">Low</option>
               <option value="medium">Medium</option>
               <option value="high">High</option>
@@ -6711,6 +7005,26 @@ function SearchLab({
             />
             <span>Has figure hint</span>
           </label>
+        </div>
+        <div className="search-effective-settings">
+          <div>
+            <div className="eyebrow">Effective settings</div>
+            <p>
+              {apiSearchMode(mode)} · top-{limit} · pool {candidatePoolSize} · RRF {rrfConstant} ·{" "}
+              {rerankerStrategy.replace(/_/g, " ")} · boost {metadataBoostLevel}
+            </p>
+            <small>
+              Search Lab changes are experimental until copied to chat or promoted to repository defaults.
+            </small>
+          </div>
+          <div className="row">
+            <button className="btn btn-sm" type="button" onClick={onCopyToChat}>
+              Copy to chat
+            </button>
+            <button className="btn btn-sm btn-primary" type="button" onClick={onPromoteToDefaults}>
+              Promote defaults
+            </button>
+          </div>
         </div>
       </div>
 
@@ -6838,6 +7152,17 @@ function SearchResultCard({
           full-text rank {result.source_ranks.full_text ?? "—"} · vector rank{" "}
           {result.source_ranks.vector ?? "—"}
         </p>
+      )}
+      {result.score_breakdown.metadata_boost_dimensions && (
+        <div className="metadata-boost-breakdown">
+          {Object.entries(result.score_breakdown.metadata_boost_dimensions).map(([key, dimension]) => (
+            <span className="badge" key={key}>
+              {key.replace(/_/g, " ")} {dimension.level}
+              {dimension.matched ? ` +${dimension.score.toFixed(2)}` : " no match"}
+              {!dimension.ranking_applied ? " off" : ""}
+            </span>
+          ))}
+        </div>
       )}
       {result.embedding_model && result.embedding_run_id && (
         <p className="hint">
@@ -7361,11 +7686,36 @@ function shortModelName(model: string) {
   return parts[parts.length - 1] ?? model;
 }
 
-function normalizeChatRetrievalSettings(settings: Partial<ChatRetrievalSettings>): ChatRetrievalSettings {
+function defaultChatRetrievalSettings(): ChatRetrievalSettings {
   return {
-    mode: settings.mode ?? "hybrid",
-    top_k: settings.top_k ?? 6,
-    reranker_strategy: settings.reranker_strategy ?? "cross_encoder",
+    mode: "hybrid",
+    top_k: 6,
+    candidate_pool_size: null,
+    rrf_constant: 60,
+    reranker_strategy: "cross_encoder",
+    metadata_boosts: {
+      section: "medium",
+      patent_section: "medium",
+      document_kind: "low",
+      table_figure: "low",
+    },
+    filters: {},
+  };
+}
+
+function normalizeChatRetrievalSettings(settings: Partial<ChatRetrievalSettings>): ChatRetrievalSettings {
+  const defaults = defaultChatRetrievalSettings();
+  return {
+    ...defaults,
+    ...settings,
+    metadata_boosts: {
+      ...defaults.metadata_boosts,
+      ...(settings.metadata_boosts ?? {}),
+    },
+    filters: {
+      ...defaults.filters,
+      ...(settings.filters ?? {}),
+    },
   };
 }
 
@@ -7384,41 +7734,41 @@ function sandboxComparisonRunConfigs(
       label: "Full-text",
       prompt_version_id: promptVersionId,
       model,
-      retrieval_settings: {
+      retrieval_settings: normalizeChatRetrievalSettings({
         mode: "full_text",
         top_k: topK,
         reranker_strategy: "none",
-      },
+      }),
     },
     {
       label: "Vector",
       prompt_version_id: promptVersionId,
       model,
-      retrieval_settings: {
+      retrieval_settings: normalizeChatRetrievalSettings({
         mode: "vector",
         top_k: topK,
         reranker_strategy: "none",
-      },
+      }),
     },
     {
       label: "Hybrid",
       prompt_version_id: promptVersionId,
       model,
-      retrieval_settings: {
+      retrieval_settings: normalizeChatRetrievalSettings({
         mode: "hybrid",
         top_k: topK,
         reranker_strategy: "none",
-      },
+      }),
     },
     {
       label: "Reranked hybrid",
       prompt_version_id: promptVersionId,
       model,
-      retrieval_settings: {
+      retrieval_settings: normalizeChatRetrievalSettings({
         mode: "hybrid",
         top_k: topK,
         reranker_strategy: "cross_encoder",
-      },
+      }),
     },
   ];
 }
@@ -7508,6 +7858,16 @@ function chatModelRoleLabel(role: ChatModelInfo["role"]) {
 
 function modelSourceLabel(source: ModelCatalogSource) {
   return source === "detected" ? "detected locally" : "project-known";
+}
+
+function metadataBoostLabel(key: keyof MetadataBoostSettings) {
+  const labels: Record<keyof MetadataBoostSettings, string> = {
+    section: "Section boost",
+    patent_section: "Patent section boost",
+    document_kind: "Document kind boost",
+    table_figure: "Table/figure boost",
+  };
+  return labels[key];
 }
 
 function defaultParserCatalog(): ParserCatalogEntry[] {
@@ -7609,6 +7969,10 @@ function settingsSummaryRows(settings: RepositorySettings | null) {
         ? `${settings.reranking.strategy} / ${settings.reranking.model}`
         : settings.reranking.strategy,
     },
+    {
+      label: "retrieval",
+      value: `${settings.retrieval.mode} top-${settings.retrieval.top_k} / ${settings.retrieval.reranker_strategy}`,
+    },
     { label: "chunking", value: `${settings.chunking.mode} ${settings.chunking.chunk_size}/${settings.chunking.chunk_overlap}` },
     { label: "full-text", value: settings.full_text.tokenizer },
     { label: "parser", value: settings.parser.structured_parser },
@@ -7702,6 +8066,18 @@ function validateSettingsDraft(
   }
   if (settings.reranking.strategy === "cross_encoder" && !settings.reranking.model?.trim()) {
     issues.push({ field: "reranking.model", message: "Cross-encoder reranking requires a model." });
+  }
+  if (settings.retrieval.top_k < 1 || settings.retrieval.top_k > 50) {
+    issues.push({ field: "retrieval.top_k", message: "Retrieval top-k must be between 1 and 50." });
+  }
+  if (
+    settings.retrieval.candidate_pool_size != null &&
+    (settings.retrieval.candidate_pool_size < 1 || settings.retrieval.candidate_pool_size > 250)
+  ) {
+    issues.push({ field: "retrieval.candidate_pool_size", message: "Candidate pool must be between 1 and 250." });
+  }
+  if (settings.retrieval.rrf_constant < 1 || settings.retrieval.rrf_constant > 1000) {
+    issues.push({ field: "retrieval.rrf_constant", message: "RRF constant must be between 1 and 1000." });
   }
   if (!settings.model.ollama_chat_model.trim()) {
     issues.push({ field: "model.ollama_chat_model", message: "Chat model is required." });
