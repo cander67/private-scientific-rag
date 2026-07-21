@@ -487,6 +487,14 @@ type ReprocessStatus = {
   changed_fields: string[];
 };
 
+type PageOcrRoute = {
+  page: number;
+  classification: "born_digital" | "scanned" | "mixed";
+  quality_score: number;
+  needs_ocr: boolean;
+  warnings: string[];
+};
+
 type DocumentSummary = {
   id: string;
   display_name: string;
@@ -2936,7 +2944,7 @@ function App() {
                       {inspection.page_images.length > 0 ? (
                         inspection.page_images.slice(0, 24).map((image) => (
                           <a className="leaf" key={image.page} href={absoluteApiUrl(image.url)}>
-                            page {image.page}
+                            page {image.page} · {ocrPageLabel(inspection.version, image.page)}
                           </a>
                         ))
                       ) : (
@@ -2967,6 +2975,7 @@ function App() {
                       <PageImageStrip
                         images={selectedPageImages}
                         pageCount={inspection.version.page_count ?? 0}
+                        version={inspection.version}
                       />
                     )}
                     {selectedChunk ? (
@@ -6737,7 +6746,15 @@ function SearchResultCard({
   );
 }
 
-function PageImageStrip({ images, pageCount }: { images: PageImage[]; pageCount: number }) {
+function PageImageStrip({
+  images,
+  pageCount,
+  version,
+}: {
+  images: PageImage[];
+  pageCount: number;
+  version: DocumentVersion;
+}) {
   if (images.length === 0) {
     return (
       <div className="page-image-empty">
@@ -6756,6 +6773,9 @@ function PageImageStrip({ images, pageCount }: { images: PageImage[]; pageCount:
         >
           <img src={absoluteApiUrl(image.url)} alt={`Page ${image.page}`} />
           <span>p. {image.page}</span>
+          <span className={ocrPageClassName(version, image.page)}>
+            {ocrPageLabel(version, image.page)}
+          </span>
         </a>
       ))}
     </div>
@@ -6862,12 +6882,79 @@ function versionSummary(version: DocumentVersion) {
     return `Source structure hints: ${structureHints.join(", ")}`;
   }
   if (version.ocr_required) {
-    return "This document has little extractable text and should be inspected with OCR/page images.";
+    const pendingPages = ocrPendingPages(version);
+    return pendingPages.length > 0
+      ? `OCR pending for pages ${pendingPages.join(", ")}.`
+      : "This document has little extractable text and should be inspected with OCR/page images.";
   }
   if (version.warnings.length > 0) {
     return version.warnings.join(" ");
   }
   return `${version.parser_version} produced inspectable source chunks.`;
+}
+
+function getPageOcrRoutes(version: DocumentVersion): PageOcrRoute[] {
+  const routes = version.metadata.page_ocr_routes;
+  if (!Array.isArray(routes)) {
+    return [];
+  }
+  return routes.flatMap((route): PageOcrRoute[] => {
+    if (!route || typeof route !== "object") {
+      return [];
+    }
+    const value = route as Partial<PageOcrRoute>;
+    if (
+      typeof value.page !== "number" ||
+      (value.classification !== "born_digital" &&
+        value.classification !== "scanned" &&
+        value.classification !== "mixed")
+    ) {
+      return [];
+    }
+    return [
+      {
+        page: value.page,
+        classification: value.classification,
+        quality_score: typeof value.quality_score === "number" ? value.quality_score : 0,
+        needs_ocr: Boolean(value.needs_ocr),
+        warnings: Array.isArray(value.warnings)
+          ? value.warnings.filter((warning): warning is string => typeof warning === "string")
+          : [],
+      },
+    ];
+  });
+}
+
+function getPageOcrRoute(version: DocumentVersion, page: number) {
+  return getPageOcrRoutes(version).find((route) => route.page === page) ?? null;
+}
+
+function ocrPendingPages(version: DocumentVersion) {
+  return getPageOcrRoutes(version)
+    .filter((route) => route.needs_ocr)
+    .map((route) => route.page);
+}
+
+function ocrPageLabel(version: DocumentVersion, page: number) {
+  const route = getPageOcrRoute(version, page);
+  if (!route) {
+    return version.ocr_required ? "OCR state missing" : "Native text";
+  }
+  if (route.needs_ocr) {
+    return route.classification === "scanned" ? "OCR pending" : "Mixed · OCR pending";
+  }
+  if (route.classification === "mixed") {
+    return "Mixed · native text";
+  }
+  return "Native text";
+}
+
+function ocrPageClassName(version: DocumentVersion, page: number) {
+  const route = getPageOcrRoute(version, page);
+  if (route?.needs_ocr || (!route && version.ocr_required)) {
+    return "page-ocr page-ocr-pending";
+  }
+  return "page-ocr";
 }
 
 function getReprocessStatus(version: DocumentVersion): ReprocessStatus | null {

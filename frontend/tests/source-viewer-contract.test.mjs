@@ -37,6 +37,16 @@ test("Document Manager and Source Viewer expose parser reprocess status", () => 
   assert.match(source, /<dt>reprocess<\/dt>/);
 });
 
+test("Source Viewer displays PRD13 page OCR routing state", () => {
+  assert.match(source, /type PageOcrRoute =/);
+  assert.match(source, /metadata\.page_ocr_routes/);
+  assert.match(source, /function getPageOcrRoutes/);
+  assert.match(source, /function ocrPageLabel/);
+  assert.match(source, /OCR pending/);
+  assert.match(source, /Mixed · native text/);
+  assert.match(source, /className=\{ocrPageClassName\(version, image\.page\)\}/);
+});
+
 test("Document Manager and Source Viewer render as separate live views", () => {
   assert.match(source, /activeView === "documents"/);
   assert.match(source, /activeView === "source"/);
