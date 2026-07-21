@@ -26,6 +26,16 @@ type RepositorySettings = {
     structured_parser: string;
     fallback_parser: string;
   };
+  ocr: {
+    provider: "ocrmypdf_tesseract" | "rapidocr";
+    fallback_provider: "none" | "ocrmypdf_tesseract" | "rapidocr";
+    fallback_enabled: boolean;
+    language: string;
+    confidence_threshold: number;
+    min_text_length: number;
+    max_pages: number;
+    overwrite: boolean;
+  };
   full_text: {
     tokenizer: string;
     prefix_index: boolean;
@@ -4552,6 +4562,68 @@ function SettingsModels({
           {selectedFallbackParser && (
             <p className="settings-field-note">{selectedFallbackParser.notes}</p>
           )}
+          <SettingSelect
+            id="settings-ocr-provider"
+            label="OCR provider"
+            value={draft.ocr.provider}
+            options={["ocrmypdf_tesseract", "rapidocr"]}
+            labels={{ ocrmypdf_tesseract: "OCRmyPDF + Tesseract", rapidocr: "RapidOCR" }}
+            error={validationByField.get("ocr.provider")}
+            onChange={(value) => updateDraft((next) => { next.ocr.provider = value as RepositorySettings["ocr"]["provider"]; })}
+          />
+          <SettingSelect
+            id="settings-ocr-fallback-provider"
+            label="OCR fallback"
+            value={draft.ocr.fallback_provider}
+            options={["none", "ocrmypdf_tesseract", "rapidocr"]}
+            labels={{ none: "None", ocrmypdf_tesseract: "OCRmyPDF + Tesseract", rapidocr: "RapidOCR" }}
+            error={validationByField.get("ocr.fallback_provider")}
+            onChange={(value) => updateDraft((next) => { next.ocr.fallback_provider = value as RepositorySettings["ocr"]["fallback_provider"]; })}
+          />
+          <SettingNumber
+            id="settings-ocr-confidence"
+            label="OCR confidence threshold"
+            value={draft.ocr.confidence_threshold}
+            error={validationByField.get("ocr.confidence_threshold")}
+            onChange={(value) => updateDraft((next) => { next.ocr.confidence_threshold = value; })}
+          />
+          <SettingNumber
+            id="settings-ocr-min-text"
+            label="OCR minimum text"
+            value={draft.ocr.min_text_length}
+            error={validationByField.get("ocr.min_text_length")}
+            onChange={(value) => updateDraft((next) => { next.ocr.min_text_length = value; })}
+          />
+          <SettingNumber
+            id="settings-ocr-max-pages"
+            label="OCR max pages"
+            value={draft.ocr.max_pages}
+            error={validationByField.get("ocr.max_pages")}
+            onChange={(value) => updateDraft((next) => { next.ocr.max_pages = value; })}
+          />
+          <SettingText
+            id="settings-ocr-language"
+            label="OCR language"
+            value={draft.ocr.language}
+            error={validationByField.get("ocr.language")}
+            onChange={(value) => updateDraft((next) => { next.ocr.language = value; })}
+          />
+          <label className="settings-checkbox">
+            <input
+              type="checkbox"
+              checked={draft.ocr.fallback_enabled}
+              onChange={(event) => updateDraft((next) => { next.ocr.fallback_enabled = event.target.checked; })}
+            />
+            <span>Use OCR fallback when quality is low</span>
+          </label>
+          <label className="settings-checkbox">
+            <input
+              type="checkbox"
+              checked={draft.ocr.overwrite}
+              onChange={(event) => updateDraft((next) => { next.ocr.overwrite = event.target.checked; })}
+            />
+            <span>Overwrite existing OCR artifacts</span>
+          </label>
         </section>
 
         <section className="card settings-section">
@@ -7548,6 +7620,21 @@ function validateSettingsDraft(
     issues.push({ field: "parser.fallback_parser", message: "Fallback parser is required." });
   } else if (!fallbackParserChoices.some((entry) => entry.id === settings.parser.fallback_parser)) {
     issues.push({ field: "parser.fallback_parser", message: "Choose a supported fallback parser." });
+  }
+  if (settings.ocr.fallback_enabled && settings.ocr.fallback_provider === settings.ocr.provider) {
+    issues.push({ field: "ocr.fallback_provider", message: "OCR fallback must differ from primary provider." });
+  }
+  if (!settings.ocr.language.trim()) {
+    issues.push({ field: "ocr.language", message: "OCR language is required." });
+  }
+  if (settings.ocr.confidence_threshold < 0 || settings.ocr.confidence_threshold > 1) {
+    issues.push({ field: "ocr.confidence_threshold", message: "OCR confidence threshold must be between 0 and 1." });
+  }
+  if (settings.ocr.min_text_length < 0) {
+    issues.push({ field: "ocr.min_text_length", message: "OCR minimum text cannot be negative." });
+  }
+  if (settings.ocr.max_pages < 1) {
+    issues.push({ field: "ocr.max_pages", message: "OCR max pages must be at least 1." });
   }
   if (!settings.embedding.model.trim()) {
     issues.push({ field: "embedding.model", message: "Embedding model is required." });
