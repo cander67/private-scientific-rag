@@ -39,6 +39,25 @@ test("Chat Workspace renders citation cards and source navigation", () => {
   assert.match(source, /text_preview/);
 });
 
+test("Chat Workspace exposes draft and persisted context inspection", () => {
+  assert.match(source, /type ChatContextInspection =/);
+  assert.match(source, /context_inspection_available: boolean/);
+  assert.match(source, /contextInspector/);
+  assert.match(source, /previewChatContext/);
+  assert.match(source, /inspectChatMessage/);
+  assert.match(source, /chat\/sessions\/\$\{chatSession\.id\}\/context-preview/);
+  assert.match(source, /messages\/\$\{chatMessageId\}\/context/);
+  assert.match(source, /Inspect context/);
+  assert.match(source, /message\.context_inspection_available/);
+  assert.match(source, /Context inspector/);
+  assert.match(source, /Retrieved context/);
+  assert.match(source, /Assembled messages/);
+  assert.match(source, /No retrieved context entries were assembled for this turn/);
+  assert.match(source, /Open source/);
+  assert.match(source, /function openChatContextEntry/);
+  assert.match(source, /setPendingSourceTarget\(\{ documentId: result\.document_id, chunkId: result\.chunk_id \}\)/);
+});
+
 test("Chat Workspace exposes retrieval readiness and explicit rebuild controls", () => {
   assert.match(source, /chat\/readiness/);
   assert.match(source, /parsed_chunks/);

@@ -2069,6 +2069,12 @@ textarea {
   margin-top: var(--s3);
 }
 
+.chat-message-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: var(--s3);
+}
+
 .cite {
   border: 1px solid var(--border);
   border-radius: 999px;
@@ -2090,6 +2096,13 @@ textarea {
   grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--s3);
   align-items: end;
+}
+
+.chat-composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  justify-content: flex-end;
 }
 
 .chat-composer {
@@ -2131,6 +2144,175 @@ textarea {
   justify-content: space-between;
   gap: var(--s4);
   margin-bottom: var(--s4);
+}
+
+.context-inspector-modal {
+  width: min(980px, 100%);
+}
+
+.context-status {
+  display: flex;
+  gap: var(--s3);
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  margin-bottom: var(--s4);
+  padding: var(--s3);
+}
+
+.context-status.ready {
+  background: var(--ok-soft);
+}
+
+.context-status.empty,
+.context-status.unavailable {
+  background: var(--warn-soft);
+}
+
+.context-status strong {
+  text-transform: capitalize;
+}
+
+.context-status span {
+  color: var(--text-muted);
+}
+
+.context-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+
+.context-summary-grid > div {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--s3);
+}
+
+.context-summary-grid span,
+.context-summary-grid b {
+  display: block;
+}
+
+.context-summary-grid span {
+  color: var(--text-faint);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.context-summary-grid b {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.context-section {
+  border-top: 1px solid var(--border);
+  padding: var(--s4) 0;
+}
+
+.context-section:last-child {
+  padding-bottom: 0;
+}
+
+.context-section-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  align-items: baseline;
+  margin-bottom: var(--s3);
+}
+
+.context-section-head h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.context-section-head span {
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.context-section pre,
+.context-message pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  margin: 0;
+  padding: var(--s3);
+}
+
+.context-kv {
+  margin: 0;
+}
+
+.context-message-list,
+.context-entry-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.context-message {
+  display: grid;
+  gap: var(--s2);
+}
+
+.context-message strong {
+  color: var(--text-muted);
+  text-transform: capitalize;
+}
+
+.context-entry {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--s3);
+}
+
+.context-entry-head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  align-items: flex-start;
+}
+
+.context-entry-head strong,
+.context-entry-head span {
+  display: block;
+}
+
+.context-entry-head strong {
+  overflow-wrap: anywhere;
+}
+
+.context-entry-head span {
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  margin-top: 2px;
+}
+
+.context-entry p {
+  margin: var(--s3) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.context-warning-list {
+  margin: 0;
+  padding-left: var(--s5);
 }
 
 .modal-head h2 {
