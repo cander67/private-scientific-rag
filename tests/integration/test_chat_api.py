@@ -14,7 +14,6 @@ from private_rag.api.routes.retrieval import get_reranker_provider
 from private_rag.api.routes.vector import get_embedding_provider, get_vector_store
 from private_rag.chat.llm import ChatCompletion, ChatMessage
 from private_rag.db.base import Base
-from private_rag.retrieval.models import RetrievalRun
 from private_rag.retrieval.schemas import RetrievalSearchResult
 from private_rag.search.service import FTS_TABLE
 from private_rag.vector.embeddings import DeterministicEmbeddingProvider
@@ -162,131 +161,6 @@ def test_chat_session_persists_messages_and_mapped_citations() -> None:
         "user",
         "assistant",
     ]
-
-
-def test_chat_context_preview_matches_normal_prompt_without_persisting_messages() -> None:
-    client, llm, session_factory = _client_with_chat_fakes_and_database()
-    repository_id = _default_repository_id(client)
-    upload_response = client.post(
-        f"/repositories/{repository_id}/documents",
-        files={
-            "file": (
-                "chat-preview.txt",
-                b"Abstract\nLiFePO4 context inspection should show retrieved chunks.\n",
-                "text/plain",
-            )
-        },
-    )
-    client.post(f"/repositories/{repository_id}/full-text/rebuild")
-    client.post(f"/repositories/{repository_id}/vector/rebuild")
-    session_response = client.post(
-        f"/repositories/{repository_id}/chat/sessions",
-        json={"title": "Context preview"},
-    )
-    chat_session_id = session_response.json()["id"]
-
-    preview_response = client.post(
-        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}/context-preview",
-        json={
-            "content": "What context is available for LiFePO4?",
-            "retrieval_settings": {
-                "mode": "hybrid",
-                "top_k": 4,
-                "reranker_strategy": "cross_encoder",
-            },
-        },
-    )
-    after_preview_response = client.get(
-        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}",
-    )
-
-    assert upload_response.status_code == 200
-    assert preview_response.status_code == 200
-    preview = preview_response.json()
-    assert preview["repository"] == {
-        "id": repository_id,
-        "name": "Default Repository",
-    }
-    assert preview["session"]["id"] == chat_session_id
-    assert preview["model"] == "gemma3:4b"
-    assert preview["prompt"]["id"] == "rag-chat-default-v1"
-    assert preview["prompt"]["name"] == "Repository-grounded chat"
-    assert preview["retrieval_settings"]["top_k"] == 4
-    assert preview["retrieval_run_id"] is None
-    assert preview["context_status"]["status"] == "ready"
-    assert (
-        preview["context_entries"][0]["chunk_id"]
-        == upload_response.json()["chunks_preview"][0]["id"]
-    )
-    assert preview["history_messages"] == []
-    assert preview["llm_messages"][0]["role"] == "system"
-    assert "[1] chat-preview.txt" in preview["llm_messages"][0]["content"]
-    assert preview["llm_messages"][-1] == {
-        "role": "user",
-        "content": "What context is available for LiFePO4?",
-    }
-    assert after_preview_response.json()["messages"] == []
-    assert llm.calls == []
-    with session_factory() as session:
-        assert session.query(RetrievalRun).count() == 0
-
-    question_response = client.post(
-        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}/messages",
-        json={
-            "content": "What context is available for LiFePO4?",
-            "retrieval_settings": {
-                "mode": "hybrid",
-                "top_k": 4,
-                "reranker_strategy": "cross_encoder",
-            },
-        },
-    )
-
-    assert question_response.status_code == 200
-    assert question_response.json()["assistant_message"]["retrieval_run_id"]
-    assert [
-        {"role": message.role, "content": message.content} for message in llm.calls[0]
-    ] == preview["llm_messages"]
-    with session_factory() as session:
-        assert session.query(RetrievalRun).count() == 1
-
-
-def test_chat_context_preview_reports_empty_context() -> None:
-    client, _ = _client_with_chat_fakes()
-    repository_id = _default_repository_id(client)
-    session_response = client.post(
-        f"/repositories/{repository_id}/chat/sessions",
-        json={"title": "Empty context"},
-    )
-
-    response = client.post(
-        f"/repositories/{repository_id}/chat/sessions/{session_response.json()['id']}/context-preview",
-        json={
-            "content": "Is there any context?",
-            "retrieval_settings": {
-                "mode": "full_text",
-                "top_k": 3,
-                "reranker_strategy": "none",
-            },
-        },
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["context_status"] == {
-        "status": "empty",
-        "message": "No retrieved context entries were found for this question.",
-    }
-    assert payload["retrieval_run_id"] is None
-    assert payload["context_entries"] == []
-    assert "Repository context follows" in payload["llm_messages"][0]["content"]
-    assert payload["llm_messages"][-1]["content"] == "Is there any context?"
-    assert (
-        client.get(
-            f"/repositories/{repository_id}/chat/sessions/{session_response.json()['id']}",
-        ).json()["messages"]
-        == []
-    )
 
 
 def test_chat_question_updates_session_retrieval_settings() -> None:

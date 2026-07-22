@@ -6,12 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from private_rag.chat.llm import ChatModelInfo
-from private_rag.retrieval.schemas import (
-    RerankerStrategy,
-    RetrievalDefaults,
-    RetrievalMode,
-    RetrievalSearchResult,
-)
+from private_rag.retrieval.schemas import RerankerStrategy, RetrievalDefaults, RetrievalMode
 
 ChatRole = Literal["user", "assistant"]
 ChatReadinessStatus = Literal[
@@ -83,44 +78,6 @@ class ChatSessionCreate(BaseModel):
 class ChatQuestionRequest(BaseModel):
     content: str = Field(min_length=1)
     retrieval_settings: ChatRetrievalSettings | None = None
-
-
-class ChatContextPreviewRequest(ChatQuestionRequest):
-    pass
-
-
-class ChatPromptMetadata(BaseModel):
-    id: str
-    name: str
-    text: str
-
-
-class ChatContextRepository(BaseModel):
-    id: str
-    name: str
-
-
-class ChatContextMessage(BaseModel):
-    role: str
-    content: str
-
-
-class ChatContextStatus(BaseModel):
-    status: Literal["ready", "empty"]
-    message: str
-
-
-class ChatContextPreviewResponse(BaseModel):
-    repository: ChatContextRepository
-    session: ChatSessionRead
-    model: str
-    prompt: ChatPromptMetadata
-    retrieval_settings: ChatRetrievalSettings
-    retrieval_run_id: str | None = None
-    context_status: ChatContextStatus
-    context_entries: list[RetrievalSearchResult] = Field(default_factory=list)
-    history_messages: list[ChatContextMessage] = Field(default_factory=list)
-    llm_messages: list[ChatContextMessage] = Field(default_factory=list)
 
 
 class ChatQuestionResponse(BaseModel):
