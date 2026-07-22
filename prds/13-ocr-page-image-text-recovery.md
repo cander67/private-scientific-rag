@@ -1,5 +1,7 @@
 # PRD 13: Parser Selection, OCR, and Page-Image Text Recovery
 
+**Status:** Ready for final review. Parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and documentation preparation are implemented with deterministic checks passing; optional OCR dependency and golden-corpus checks remain opt-in. PRD13 is not marked complete until user acceptance.
+
 ## Problem Statement
 
 PRD3 can preserve page thumbnails and mark image-only or low-text PDFs as `needs_ocr`, but researchers still cannot recover searchable text from scanned patents, scanned scientific papers, page-image PDFs, or poorly encoded PDFs. Those documents remain inspectable but not meaningfully retrievable.
@@ -135,10 +137,16 @@ The roadmap should build on PRD3 page-thumbnail work and PRD26 parser controls:
 
 ## Out of Scope
 
-PRD13 does not implement full OCR quality evaluation, human correction workflows, model-based document understanding, or PRD14 table artifact extraction. It closes the PRD3 and PRD26 gaps where image-only documents are inspectable but not searchable, and parser settings are selectable but not yet operational.
+PRD13 does not implement full OCR quality evaluation, human correction workflows, model-based document understanding, or PRD14 table artifact extraction. It closes the PRD3 and PRD26 gaps where image-only documents were inspectable but not searchable, and parser settings were selectable but not yet operational.
 
 ## Further Notes
 
 Start with parser routing and settings fingerprints before OCR execution. A useful first milestone is: `Auto` keeps existing parser behavior, an explicit parser choice changes recorded parser-route metadata, and reprocess/index rebuild flows can identify stale parse settings without requiring OCR dependencies.
 
 Then add page routing, `pypdfium2` rendering, OCRmyPDF/Tesseract baseline OCR, and one end-to-end UI path for `needs_ocr` documents. Once that is stable, add RapidOCR fallback, language settings, larger golden corpus runs, and retrieval evaluation against scanned patent and scientific fixtures. Keep PaddleOCR, Marker, Surya, and olmOCR as benchmark/evaluation tools until the simple local stack is proven.
+
+## Final Review Summary
+
+PRD13 is ready for final review with the implementation plan fully checked off. The delivered scope includes repository parser and chunking settings applied during upload/reprocess, fixed and recursive chunk output with chunk metadata, versioned reprocess from stored sources, parser/chunk fingerprint stale detection before full-text/vector rebuilds, page OCR routing, explicit local OCR recovery, OCR-derived page artifacts/chunks, optional RapidOCR fallback, repository OCR quality controls, Source Viewer parser/OCR labels, and deterministic test coverage.
+
+Optional OCR dependency and golden-corpus smoke checks remain manual because they depend on local host binaries and corpus availability. PRD13 remains ready for review, not complete, until accepted by the user.

@@ -16,7 +16,7 @@ Current status:
 - Backlog: PRD10 structured scientific and multimodal parsing.
 - Backlog: PRD11 chemistry and patent extensions.
 - Backlog: PRD12 bulk patent data integration.
-- In progress: PRD13 parser selection, OCR, and page-image text recovery.
+- Ready for final review: PRD13 parser selection, OCR, and page-image text recovery, including parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and docs preparation. It is not marked complete until user acceptance.
 - Backlog: PRD14 structured table extraction.
 - Complete: PRD15 additional embedding models.
 - Backlog: PRD16 immutable embedding indexes.
@@ -33,7 +33,7 @@ Current status:
 - Ready for final review: PRD27 retrieval defaults transparency and controls.
 - Backlog: PRD28 document manager preview and batch actions.
 
-PRD23 is ready for final review after catalog guardrails and user-testing remediation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional live Ollama/Qdrant/GPU checks remain explicit manual checks. PRD26 is ready for review with repository-switch loading states and catalog-backed parser controls. PRD27 is ready for final review with repository retrieval defaults, effective-setting normalization, metadata boost `off`, and explicit Search Lab copy/promote actions. PRD13 is now in progress, starting with operational parser routing during upload/reprocess and parser/chunk fingerprint metadata; OCR execution and stale index freshness remain later PRD13 phases. PRD25 remains backlog follow-up work.
+PRD13 is ready for final review after parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and documentation preparation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional OCR dependency/golden-corpus checks remain explicit manual checks. PRD23 is ready for final review after catalog guardrails and user-testing remediation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional live Ollama/Qdrant/GPU checks remain explicit manual checks. PRD26 is ready for review with repository-switch loading states and catalog-backed parser controls. PRD27 is ready for final review with repository retrieval defaults, effective-setting normalization, metadata boost `off`, and explicit Search Lab copy/promote actions. PRD25 remains backlog follow-up work.
 
 The remaining backlog should be prioritized from hands-on use of the current app, adjusting order when a later PRD is needed to unblock an earlier one.
 
@@ -74,7 +74,7 @@ PRD files:
 10. [Structured scientific and multimodal parsing](10-structured-scientific-multimodal-parsing.md) - backlog
 11. [Chemistry and patent extensions](11-chemistry-patent-extensions.md) - backlog
 12. [Bulk patent data integration](12-bulk-patent-data-integration.md) - backlog
-13. [Parser selection, OCR, and page-image text recovery](13-ocr-page-image-text-recovery.md) - in progress
+13. [Parser selection, OCR, and page-image text recovery](13-ocr-page-image-text-recovery.md) - ready for final review
 14. [Structured table extraction](14-structured-table-extraction.md) - backlog
 15. [Additional embedding models](15-additional-embedding-models.md) - complete
 16. [Immutable embedding indexes](16-immutable-embedding-indexes.md) - backlog

@@ -8,7 +8,7 @@ PRD3 and PRD10 recognize that scientific PDFs often contain crucial data in tabl
 
 Add a structured table extraction layer for scientific PDFs and supporting-information documents. The system should detect table candidates, extract table text/cells where available, preserve table captions and page provenance, store table artifacts as derived inspection data, and create table-aware chunks that can participate in retrieval and citations. The first implementation should favor reliable extraction from parser-supported documents and graceful fallback to table hints when full structure is unavailable.
 
-pdfplumber should be included in the native/digital-PDF parsing layer for this PRD, especially while OCR is being prepared. It is local and open source, and it can extract text, words, characters, bounding boxes, lines, rectangles, images, annotations, hyperlinks, and tables from born-digital PDFs. It works best on machine-generated PDFs rather than scanned PDFs, so it should complement `pypdf`, Docling, and PyMuPDF for digital PDFs and defer image-only/scanned tables to PRD13 OCR plus later layout-aware table recognition.
+pdfplumber should be included in the native/digital-PDF parsing layer for this PRD. It is local and open source, and it can extract text, words, characters, bounding boxes, lines, rectangles, images, annotations, hyperlinks, and tables from born-digital PDFs. It works best on machine-generated PDFs rather than scanned PDFs, so it should complement `pypdf`, Docling, PyMuPDF, and the PRD13 OCR path for digital and scanned-table inputs before later layout-aware table recognition.
 
 Recommended staged roadmap:
 
@@ -18,7 +18,7 @@ Recommended staged roadmap:
 4. Record pdfplumber page objects, table candidates, bounding boxes, and extraction warnings as derived metadata.
 5. Compare pdfplumber table candidates with Docling table outputs where both exist, then normalize both into one table artifact model.
 6. Render table artifacts in Source Viewer with page-thumbnail context and parser provenance.
-7. After PRD13 OCR lands, add an OCR-table path for scanned tables and keep those artifacts clearly labeled as OCR-derived.
+7. Build on PRD13 OCR by adding an OCR-table path for scanned tables and keep those artifacts clearly labeled as OCR-derived.
 
 ## User Stories
 
