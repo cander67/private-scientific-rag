@@ -1,6 +1,6 @@
 # Embedding Models
 
-PRD15 expands vector search beyond the MiniLM baseline while keeping embeddings local-first. PRD23 is ready for final review and adds Settings / Models catalog guardrails around those choices: known embedding models derive vector size and compatible distance choices from registry metadata, while custom local models remain explicit advanced entries. Repository settings choose one active embedding provider/model at a time, and vector rebuilds replace the repository's latest Qdrant collection with vectors from that active model.
+PRD15 expands vector search beyond the MiniLM baseline while keeping embeddings local-first. PRD23 is complete and adds Settings / Models catalog guardrails around those choices: known embedding models derive vector size and compatible distance choices from registry metadata, while custom local models remain explicit advanced entries. Repository settings choose one active embedding provider/model at a time, and vector rebuilds replace the repository's latest Qdrant collection with vectors from that active model.
 
 ## Provider Tradeoffs
 

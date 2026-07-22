@@ -1,6 +1,6 @@
 # PRD 27: Retrieval Defaults Transparency and Controls
 
-**Status:** Ready for final review.
+**Status:** Complete and closed.
 
 ## Problem Statement
 
@@ -90,3 +90,7 @@ This PRD addresses shortcomings in completed PRDs rather than reopening them: PR
 - PRD17 should still fix whether metadata labels are trustworthy and scoped correctly. This PRD assumes the available metadata may be imperfect but gives users control over whether it affects ranking.
 - PRD25 should use the effective-settings resolver so chat context inspection matches actual chat execution.
 - PRD18 promotion can later add evidence requirements on top of the explicit copy/promote path introduced here.
+
+## Completion Summary
+
+PRD27 is complete and merged. The delivered scope includes shared retrieval-default normalization, metadata boost `off`, repository chat retrieval defaults, effective-settings transparency across Search Lab, Chat Workspace, Prompt Sandbox, and evaluation, explicit Search Lab copy/promote actions, and export/recreate compatibility.

@@ -14,7 +14,7 @@ Add a Document Manager interaction layer for lightweight document metadata previ
 
 Add explicit multi-document selection and batch action APIs for reprocess, OCR, and delete. Batch actions should return per-document outcomes so partial success, skipped items, missing OCR dependencies, missing source files, and wrong-repository protection are visible.
 
-This PRD is a follow-up to closed PRD3 and PRD13, which is ready for final review. It does not reopen PRD3 or PRD13; it addresses product friction discovered after the original Document Manager and Source Viewer behavior shipped.
+This PRD is a follow-up to closed PRD3 and review-ready PRD13. It does not reopen PRD3 or PRD13; it addresses product friction discovered after the original Document Manager and Source Viewer behavior shipped.
 
 ## User Stories
 

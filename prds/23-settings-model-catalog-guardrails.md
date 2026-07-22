@@ -1,6 +1,6 @@
 # PRD 23: Settings Model Catalog and Collection Guardrails
 
-**Status:** Ready for final review. Baseline catalog guardrails and all user-testing remediation phases are implemented with deterministic checks passing; optional live Ollama/Qdrant/GPU checks remain opt-in.
+**Status:** Complete and closed. Baseline catalog guardrails and all user-testing remediation phases are implemented and merged; optional live Ollama/Qdrant/GPU checks remain opt-in.
 
 ## Problem Statement
 
@@ -65,9 +65,9 @@ The page should also explain the Qdrant collection lifecycle in the setting itse
 - This PRD is a user-testing follow-up to PRD15 and PRD21. Those PRDs built the registry, validation, and Settings / Models page; this PRD makes those capabilities harder to misuse.
 - Qdrant collection management should be explained here but administered through Repository Administration and PRD16's future immutable index lifecycle.
 
-## Final Review Summary
+## Completion Summary
 
-PRD23 is ready for final review with the implementation plan fully checked off. The delivered scope includes:
+PRD23 is complete with the implementation plan fully checked off and merged. The delivered scope includes:
 
 - Catalog-backed Settings / Models choices for known embedding, chat, and reranker models, with detected/runtime entries separated from project-validated registry entries.
 - Derived vector dimensions and compatible distance guardrails for known embedding models, while preserving explicit advanced/custom local model paths.

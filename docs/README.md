@@ -8,9 +8,9 @@ Current documents:
 - `../documents/golden_corpus/golden_corpus_manifest.md`: current chemistry/materials golden corpus recipe and inventory.
 - `../documents/golden_corpus/golden_corpus_manifest_v1.md`: frozen historical copy.
 - `../scripts/prepare_golden_corpus.sh`: tracked Bash helper for recreating the local golden-corpus layout; Windows PowerShell setup commands are documented in `../documents/README.md`.
-- `embedding_models.md`: supported embedding model registry, provider tradeoffs, setup commands, custom Ollama model guidance, PRD23 readiness behavior, and PRD15/PRD16 index boundary.
+- `embedding_models.md`: supported embedding model registry, provider tradeoffs, setup commands, custom Ollama model guidance, completed PRD23 readiness behavior, and PRD15/PRD16 index boundary.
 - `chunking_modes.md`: repository chunking modes, current tokenizer choices, and how chunking changes affect reprocessing and rebuilds.
-- `ollama_chat_models.md`: supported Ollama chat registry guidance, PRD23 catalog additions, custom local chat model readiness, generic-provider contract, and model-specific follow-up thresholds.
+- `ollama_chat_models.md`: supported Ollama chat registry guidance, completed PRD23 catalog additions, custom local chat model readiness, generic-provider contract, and model-specific follow-up thresholds.
 - `export_recreate.md`: PRD9 portable ZIP export/recreate transfer guide and cross-platform checklist.
 - `public_repo_checklist.md`: first commit and public GitHub readiness.
 

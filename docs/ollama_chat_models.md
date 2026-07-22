@@ -2,7 +2,7 @@
 
 PRD22 keeps one generic Ollama chat provider for ordinary local text-chat models. The provider sends the selected repository or sandbox model name to Ollama's `/api/chat` endpoint, so most new chat models are settings and registry work rather than new adapter work.
 
-PRD23 is ready for final review. Its user-testing remediation adds current local workstation choices to the known model catalog, including `gemma4:e4b`, `gemma4:12b`, `qwen3.6`, and `qwen3.5:9b`, with setup commands and resource notes. These remain optional local models; default CI and default setup do not require them.
+PRD23 is complete. Its user-testing remediation adds current local workstation choices to the known model catalog, including `gemma4:e4b`, `gemma4:12b`, `qwen3.6`, and `qwen3.5:9b`, with setup commands and resource notes. These remain optional local models; default CI and default setup do not require them.
 
 ## Generic Model Contract
 
