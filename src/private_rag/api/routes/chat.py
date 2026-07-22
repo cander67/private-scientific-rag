@@ -10,6 +10,8 @@ from private_rag.api.routes.retrieval import RerankerProviderDependency
 from private_rag.api.routes.vector import EmbeddingProviderDependency, VectorStoreDependency
 from private_rag.chat.llm import ChatLLM, OllamaChatLLM, OllamaUnavailableError
 from private_rag.chat.schemas import (
+    ChatContextPreviewRequest,
+    ChatContextPreviewResponse,
     ChatModelRegistryResponse,
     ChatModelSmokeResponse,
     ChatQuestionRequest,
@@ -27,6 +29,7 @@ from private_rag.chat.service import (
     get_chat_session,
     list_chat_sessions,
     model_registry,
+    preview_chat_context,
 )
 from private_rag.core.settings import get_settings
 from private_rag.retrieval.rerankers import CrossEncoderModelMissingError
@@ -169,6 +172,41 @@ def ask_repository_chat_question(
     except VectorIndexMissingError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (OllamaUnavailableError, RuntimeError, VectorStoreError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if response is None:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return response
+
+
+@router.post(
+    "/sessions/{chat_session_id}/context-preview",
+    response_model=ChatContextPreviewResponse,
+)
+def preview_repository_chat_context(
+    repository_id: str,
+    chat_session_id: str,
+    request: ChatContextPreviewRequest,
+    session: DbSession,
+    store: VectorStoreDependency,
+    embedder: EmbeddingProviderDependency,
+    reranker: RerankerProviderDependency,
+) -> ChatContextPreviewResponse:
+    try:
+        response = preview_chat_context(
+            session,
+            repository_id=repository_id,
+            chat_session_id=chat_session_id,
+            question=request.content,
+            store=store,
+            embedder=embedder,
+            reranker=reranker,
+            retrieval_settings=request.retrieval_settings,
+        )
+    except CrossEncoderModelMissingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except VectorIndexMissingError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (RuntimeError, VectorStoreError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if response is None:
         raise HTTPException(status_code=404, detail="Chat session not found")
