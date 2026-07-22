@@ -58,6 +58,7 @@ class ChatMessageRead(BaseModel):
     role: ChatRole
     content: str
     retrieval_run_id: str | None = None
+    context_inspection_available: bool = False
     citations: list[ChatCitation] = Field(default_factory=list)
     created_at: datetime
 
@@ -106,8 +107,20 @@ class ChatContextMessage(BaseModel):
 
 
 class ChatContextStatus(BaseModel):
-    status: Literal["ready", "empty"]
+    status: Literal["ready", "empty", "unavailable"]
     message: str
+
+
+class ChatContextRetrievalRun(BaseModel):
+    id: str
+    query: str
+    mode: RetrievalMode
+    top_k: int
+    candidate_pool_size: int
+    rrf_constant: int
+    reranker_strategy: RerankerStrategy
+    filters: dict[str, Any] = Field(default_factory=dict)
+    metadata_boosts: dict[str, Any] = Field(default_factory=dict)
 
 
 class ChatContextPreviewResponse(BaseModel):
@@ -121,6 +134,13 @@ class ChatContextPreviewResponse(BaseModel):
     context_entries: list[RetrievalSearchResult] = Field(default_factory=list)
     history_messages: list[ChatContextMessage] = Field(default_factory=list)
     llm_messages: list[ChatContextMessage] = Field(default_factory=list)
+
+
+class ChatContextInspectionResponse(ChatContextPreviewResponse):
+    assistant_message: ChatMessageRead | None = None
+    question_message: ChatMessageRead | None = None
+    retrieval_run: ChatContextRetrievalRun | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ChatQuestionResponse(BaseModel):

@@ -10,6 +10,7 @@ from private_rag.api.routes.retrieval import RerankerProviderDependency
 from private_rag.api.routes.vector import EmbeddingProviderDependency, VectorStoreDependency
 from private_rag.chat.llm import ChatLLM, OllamaChatLLM, OllamaUnavailableError
 from private_rag.chat.schemas import (
+    ChatContextInspectionResponse,
     ChatContextPreviewRequest,
     ChatContextPreviewResponse,
     ChatModelRegistryResponse,
@@ -27,6 +28,7 @@ from private_rag.chat.service import (
     create_chat_session,
     delete_chat_session,
     get_chat_session,
+    inspect_chat_message_context,
     list_chat_sessions,
     model_registry,
     preview_chat_context,
@@ -75,6 +77,27 @@ def read_chat_readiness(
     )
     if response is None:
         raise HTTPException(status_code=404, detail="Repository not found")
+    return response
+
+
+@router.get(
+    "/sessions/{chat_session_id}/messages/{message_id}/context",
+    response_model=ChatContextInspectionResponse,
+)
+def inspect_repository_chat_message_context(
+    repository_id: str,
+    chat_session_id: str,
+    message_id: str,
+    session: DbSession,
+) -> ChatContextInspectionResponse:
+    response = inspect_chat_message_context(
+        session,
+        repository_id=repository_id,
+        chat_session_id=chat_session_id,
+        message_id=message_id,
+    )
+    if response is None:
+        raise HTTPException(status_code=404, detail="Chat message not found")
     return response
 
 

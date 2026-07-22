@@ -13,6 +13,7 @@ from private_rag.api.routes.repositories import get_db_session
 from private_rag.api.routes.retrieval import get_reranker_provider
 from private_rag.api.routes.vector import get_embedding_provider, get_vector_store
 from private_rag.chat.llm import ChatCompletion, ChatMessage
+from private_rag.chat.models import ChatMessageRow
 from private_rag.db.base import Base
 from private_rag.retrieval.models import RetrievalRun
 from private_rag.retrieval.schemas import RetrievalSearchResult
@@ -149,6 +150,7 @@ def test_chat_session_persists_messages_and_mapped_citations() -> None:
     assert payload["session"]["retrieval_settings"]["mode"] == "hybrid"
     assert payload["assistant_message"]["content"].endswith("[1].")
     assert payload["assistant_message"]["retrieval_run_id"]
+    assert payload["assistant_message"]["context_inspection_available"] is True
     citation = payload["assistant_message"]["citations"][0]
     assert citation["chunk_id"] == upload_response.json()["chunks_preview"][0]["id"]
     assert citation["document_title"] == "chat-materials.txt"
@@ -287,6 +289,121 @@ def test_chat_context_preview_reports_empty_context() -> None:
         ).json()["messages"]
         == []
     )
+
+
+def test_chat_message_context_inspection_reconstructs_persisted_answer() -> None:
+    client, llm = _client_with_chat_fakes()
+    repository_id = _default_repository_id(client)
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "chat-inspection.txt",
+                b"Abstract\nLiFePO4 persisted inspection should recover context.\n",
+                "text/plain",
+            )
+        },
+    )
+    client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    client.post(f"/repositories/{repository_id}/vector/rebuild")
+    session_response = client.post(
+        f"/repositories/{repository_id}/chat/sessions",
+        json={"title": "Persisted inspection"},
+    )
+    chat_session_id = session_response.json()["id"]
+    question_response = client.post(
+        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}/messages",
+        json={
+            "content": "What persisted context is available for LiFePO4?",
+            "retrieval_settings": {
+                "mode": "hybrid",
+                "top_k": 4,
+                "reranker_strategy": "cross_encoder",
+            },
+        },
+    )
+    answer = question_response.json()["assistant_message"]
+
+    response = client.get(
+        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}/messages/{answer['id']}/context",
+    )
+
+    assert upload_response.status_code == 200
+    assert question_response.status_code == 200
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["context_status"]["status"] == "ready"
+    assert payload["assistant_message"]["id"] == answer["id"]
+    assert payload["assistant_message"]["context_inspection_available"] is True
+    assert (
+        payload["question_message"]["content"] == "What persisted context is available for LiFePO4?"
+    )
+    assert payload["retrieval_run"]["id"] == answer["retrieval_run_id"]
+    assert payload["retrieval_run"]["query"] == "What persisted context is available for LiFePO4?"
+    assert payload["retrieval_settings"]["top_k"] == 4
+    assert (
+        payload["context_entries"][0]["chunk_id"]
+        == upload_response.json()["chunks_preview"][0]["id"]
+    )
+    assert payload["context_entries"][0]["document_title"] == "chat-inspection.txt"
+    assert payload["context_entries"][0]["text_preview"]
+    assert payload["llm_messages"] == [
+        {"role": message.role, "content": message.content} for message in llm.calls[0]
+    ]
+    assert payload["warnings"] == []
+
+
+def test_chat_message_context_inspection_reports_unavailable_history() -> None:
+    client, _, session_factory = _client_with_chat_fakes_and_database()
+    repository_id = _default_repository_id(client)
+    upload_response = client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "chat-unavailable-inspection.txt",
+                b"Abstract\nLiFePO4 unavailable inspection fallback.\n",
+                "text/plain",
+            )
+        },
+    )
+    client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    client.post(f"/repositories/{repository_id}/vector/rebuild")
+    session_response = client.post(
+        f"/repositories/{repository_id}/chat/sessions",
+        json={"title": "Unavailable inspection"},
+    )
+    chat_session_id = session_response.json()["id"]
+    question_response = client.post(
+        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}/messages",
+        json={"content": "What context exists?"},
+    )
+    answer = question_response.json()["assistant_message"]
+    with session_factory() as session:
+        assistant = session.get(ChatMessageRow, answer["id"])
+        assert assistant is not None
+        assistant.retrieval_run_id = None
+        assistant.extra_metadata = {}
+        session.add(assistant)
+        session.commit()
+
+    response = client.get(
+        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}/messages/{answer['id']}/context",
+    )
+
+    assert upload_response.status_code == 200
+    assert question_response.status_code == 200
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["context_status"] == {
+        "status": "unavailable",
+        "message": "This assistant message does not include a stored context snapshot.",
+    }
+    assert payload["assistant_message"]["id"] == answer["id"]
+    assert payload["assistant_message"]["context_inspection_available"] is False
+    assert payload["question_message"]["content"] == "What context exists?"
+    assert payload["retrieval_run"] is None
+    assert payload["context_entries"] == []
+    assert payload["llm_messages"] == []
 
 
 def test_chat_question_updates_session_retrieval_settings() -> None:
