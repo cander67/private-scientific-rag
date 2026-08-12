@@ -46,6 +46,9 @@ test("Recreate Repository displays validation groups and final report", () => {
   assert.match(source, /IssueGroup/);
   assert.match(source, /Missing model/);
   assert.match(source, /Parser\/settings fingerprint/);
+  assert.match(source, /Chunk tokenizer metadata/);
+  assert.match(source, /Chunk tokenizer fallback/);
+  assert.match(source, /Chunk tokenizer mismatch/);
   assert.match(source, /Count mismatch/);
   assert.match(source, /Final report/);
   assert.match(source, /full-text index/);

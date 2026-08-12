@@ -227,6 +227,7 @@ def validate_export_bundle_data(
             )
             _validate_counts(manifest, payloads, errors)
             _report_parser_fingerprints(payloads, informational)
+            _report_tokenizer_metadata(payloads, warnings, informational)
 
             return ExportBundleValidationResponse(
                 can_recreate=not errors,
@@ -1306,6 +1307,97 @@ def _report_parser_fingerprints(
                 f"Exported parser fingerprint: {parser_name} {parser_version}, {chunk_count} chunks.",
             )
         )
+
+
+def _report_tokenizer_metadata(
+    payloads: Mapping[str, Any],
+    warnings: list[ExportBundleValidationIssue],
+    informational: list[ExportBundleValidationIssue],
+) -> None:
+    versions = _payload_list(payloads, "documents", "versions")
+    expected_by_version: dict[str, dict[str, Any]] = {}
+    for version in versions:
+        if not isinstance(version, dict):
+            continue
+        metadata = version.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        fingerprint_payload = metadata.get("parser_fingerprint_payload")
+        if not isinstance(fingerprint_payload, dict):
+            continue
+        tokenizer = fingerprint_payload.get("tokenizer")
+        version_id = version.get("id")
+        if isinstance(version_id, str) and isinstance(tokenizer, dict):
+            expected_by_version[version_id] = tokenizer
+
+    seen: set[tuple[str, str, str, str]] = set()
+    for chunk in _payload_list(payloads, "chunks", "chunks"):
+        if not isinstance(chunk, dict):
+            continue
+        metadata = chunk.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        tokenizer = metadata.get("tokenizer")
+        if not isinstance(tokenizer, dict):
+            warnings.append(
+                _issue(
+                    "warning",
+                    "missing_chunk_tokenizer_metadata",
+                    "Exported chunk is missing tokenizer metadata.",
+                    path=CHUNKS_PAYLOAD_PATH,
+                    document_version_id=_string_or_none(chunk.get("document_version_id")),
+                )
+            )
+            continue
+
+        provider = str(tokenizer.get("provider") or "unknown")
+        name = str(tokenizer.get("tokenizer_name") or "unknown")
+        source = str(tokenizer.get("tokenizer_source") or "unknown")
+        precision = str(tokenizer.get("precision") or "unknown")
+        key = (provider, name, source, precision)
+        if key not in seen:
+            seen.add(key)
+            severity: Literal["warning", "info"] = "warning" if precision == "fallback" else "info"
+            informational_target = warnings if severity == "warning" else informational
+            informational_target.append(
+                _issue(
+                    severity,
+                    "chunk_tokenizer_fallback"
+                    if precision == "fallback"
+                    else "chunk_tokenizer_metadata",
+                    (f"Chunk tokenizer: {provider} / {name} ({source}, {precision} precision)."),
+                    path=CHUNKS_PAYLOAD_PATH,
+                )
+            )
+
+        version_id = _string_or_none(chunk.get("document_version_id"))
+        expected = expected_by_version.get(version_id or "")
+        if expected is not None and _tokenizer_compare_payload(
+            tokenizer
+        ) != _tokenizer_compare_payload(expected):
+            warnings.append(
+                _issue(
+                    "warning",
+                    "chunk_tokenizer_mismatch",
+                    "Chunk tokenizer metadata differs from its document-version parser fingerprint.",
+                    path=CHUNKS_PAYLOAD_PATH,
+                    document_version_id=version_id,
+                )
+            )
+
+
+def _tokenizer_compare_payload(tokenizer: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        "provider": str(tokenizer.get("provider") or ""),
+        "tokenizer_name": str(tokenizer.get("tokenizer_name") or ""),
+        "tokenizer_source": str(tokenizer.get("tokenizer_source") or ""),
+        "precision": str(tokenizer.get("precision") or ""),
+        "fallback_reason": str(tokenizer.get("fallback_reason") or ""),
+    }
+
+
+def _string_or_none(value: object) -> str | None:
+    return value if isinstance(value, str) else None
 
 
 def _payload_list(payloads: Mapping[str, Any], payload_name: str, field: str) -> list[Any]:

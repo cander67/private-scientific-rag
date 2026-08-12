@@ -24,6 +24,8 @@ Chunking tokenizers are resolved from the repository embedding settings. Sentenc
 
 Every parsed version fingerprint and generated chunk records tokenizer metadata: provider, tokenizer name, tokenizer source, precision, and any fallback reason. Changing the embedding provider/model, tokenizer metadata, chunk mode, chunk size, or overlap makes existing parsed chunks stale and requires document reprocessing before indexes are fresh again.
 
+Export/recreate bundles include these tokenizer details in document-version fingerprints and chunk payloads. Bundle validation reports the recorded tokenizer strategies, warns when fallback tokenizers were used, and warns when chunk tokenizer metadata does not match its version fingerprint.
+
 Full-text search has a separate SQLite FTS tokenizer setting. Current full-text tokenizer choices are `unicode61` and `porter`.
 
 `unicode61` is the default SQLite FTS5 tokenizer and is a good baseline for exact terms, formulas, identifiers, and mixed scientific text.

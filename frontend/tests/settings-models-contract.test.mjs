@@ -18,6 +18,9 @@ test("Settings / Models shows repository-scoped grouped defaults", () => {
   assert.match(source, /Repository settings/);
   assert.match(source, /repository\?\.[\s\S]*?name/);
   assert.match(source, /Chunking and parser/);
+  assert.match(source, /Chunk size \(tokens\)/);
+  assert.match(source, /Chunk overlap \(tokens\)/);
+  assert.match(source, /Chunk size and overlap are token counts/);
   assert.match(source, /Full-text/);
   assert.match(source, /Vector and embedding/);
   assert.match(source, /Reranking/);
@@ -68,6 +71,10 @@ test("Settings / Models uses the PRD23 model catalog for embedding guardrails", 
   assert.match(source, /supported_distances\.includes/);
   assert.match(source, /requires .* dimensions/);
   assert.match(source, /Custom Ollama embeddings require cosine distance and a live dimension probe/);
+  assert.match(source, /Tokenizer strategy/);
+  assert.match(source, /embeddingTokenizerLabel/);
+  assert.match(source, /tokenizer_precision/);
+  assert.match(source, /App fallback tokenizer for custom Ollama embeddings/);
 });
 
 test("Settings / Models uses the PRD23 model catalog for chat and reranker choices", () => {
@@ -157,6 +164,7 @@ test("Settings / Models supports edit, save, cancel, and field validation", () =
   assert.match(source, /Save settings/);
   assert.match(source, /Cancel/);
   assert.match(source, /validateSettingsDraft/);
+  assert.match(source, /Chunk size must be between 100 and 8000 tokens/);
   assert.match(source, /Chunk overlap must be smaller than chunk size/);
   assert.match(source, /Ollama embeddings currently require cosine distance/);
   assert.match(source, /Cross-encoder reranking requires a model/);

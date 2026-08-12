@@ -68,6 +68,16 @@ test("Source Viewer renders parser names before parser versions", () => {
   assert.match(source, /Built-in parser/);
 });
 
+test("Source Viewer displays PRD30 chunk tokenizer metadata", () => {
+  assert.match(source, /tokenWindowLabel/);
+  assert.match(source, /chunkTokenizerLabel/);
+  assert.match(source, /chunkTokenizerPrecisionLabel/);
+  assert.match(source, /tokenizerMetadata/);
+  assert.match(source, /<dt>tokens<\/dt>/);
+  assert.match(source, /<dt>chunk tokenizer<\/dt>/);
+  assert.match(source, /<dt>tokenizer precision<\/dt>/);
+});
+
 test("Document Manager and Source Viewer render as separate live views", () => {
   assert.match(source, /activeView === "documents"/);
   assert.match(source, /activeView === "source"/);

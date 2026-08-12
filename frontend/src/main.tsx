@@ -18,6 +18,7 @@ type RepositoryRead = {
 
 type RepositorySettings = {
   chunking: {
+    chunk_unit?: "tokens";
     chunk_size: number;
     chunk_overlap: number;
     mode: string;
@@ -142,6 +143,9 @@ type EmbeddingModelCatalogEntry = {
   setup_hint: string;
   requires_local_model: boolean;
   requires_live_probe: boolean;
+  tokenizer_name: string | null;
+  tokenizer_source: string | null;
+  tokenizer_precision: "exact" | "fallback";
 };
 
 type ChatModelCatalogEntry = ChatModelInfo & {
@@ -3310,6 +3314,12 @@ function App() {
                         <dd>{shortHash(selectedChunk.source_hash)}</dd>
                         <dt>offsets</dt>
                         <dd>{offsetLabel(selectedChunk)}</dd>
+                        <dt>tokens</dt>
+                        <dd>{tokenWindowLabel(selectedChunk)}</dd>
+                        <dt>chunk tokenizer</dt>
+                        <dd>{chunkTokenizerLabel(selectedChunk)}</dd>
+                        <dt>tokenizer precision</dt>
+                        <dd>{chunkTokenizerPrecisionLabel(selectedChunk)}</dd>
                         <dt>source type</dt>
                         <dd>{inspection.version.source_type}</dd>
                       </dl>
@@ -4738,18 +4748,22 @@ function SettingsModels({
           />
           <SettingNumber
             id="settings-chunk-size"
-            label="Chunk size"
+            label="Chunk size (tokens)"
             value={draft.chunking.chunk_size}
             error={validationByField.get("chunking.chunk_size")}
             onChange={(value) => updateDraft((next) => { next.chunking.chunk_size = value; })}
           />
           <SettingNumber
             id="settings-chunk-overlap"
-            label="Chunk overlap"
+            label="Chunk overlap (tokens)"
             value={draft.chunking.chunk_overlap}
             error={validationByField.get("chunking.chunk_overlap")}
             onChange={(value) => updateDraft((next) => { next.chunking.chunk_overlap = value; })}
           />
+          <p className="settings-field-note">
+            Chunk size and overlap are token counts. Recursive mode preserves parser segments
+            where possible; fixed mode creates deterministic token windows.
+          </p>
           <SettingSelect
             id="settings-structured-parser"
             label="Structured parser"
@@ -4904,6 +4918,14 @@ function SettingsModels({
             <small>
               {selectedEmbeddingModel?.resource_notes ??
                 "Custom models remain available, but verify vector dimensions before rebuilding."}
+            </small>
+            <small>
+              Tokenizer strategy:{" "}
+              {selectedEmbeddingModel
+                ? embeddingTokenizerLabel(selectedEmbeddingModel)
+                : draft.embedding.provider === "ollama"
+                  ? "App fallback tokenizer for custom Ollama embeddings until registry metadata is added."
+                  : "Selected SentenceTransformers tokenizer when cached locally; explicit fallback otherwise."}
             </small>
             <small>
               {selectedEmbeddingModel?.setup_hint ??
@@ -7949,6 +7971,68 @@ function offsetLabel(chunk: Chunk) {
   return "—";
 }
 
+function tokenWindowLabel(chunk: Chunk) {
+  const tokenCount = metadataNumber(chunk.metadata.token_count);
+  const start = metadataNumber(chunk.metadata.token_window_start);
+  const end = metadataNumber(chunk.metadata.token_window_end);
+  if (start !== null && end !== null) {
+    return `${tokenCount ?? end - start} tokens · window ${start}-${end}`;
+  }
+  return tokenCount !== null ? `${tokenCount} tokens` : "—";
+}
+
+function chunkTokenizerLabel(chunk: Chunk) {
+  const tokenizer = tokenizerMetadata(chunk);
+  if (!tokenizer) {
+    return "—";
+  }
+  const provider = tokenizer.provider ?? "unknown";
+  const name = tokenizer.tokenizer_name ?? "unknown tokenizer";
+  return `${provider} / ${name}`;
+}
+
+function chunkTokenizerPrecisionLabel(chunk: Chunk) {
+  const tokenizer = tokenizerMetadata(chunk);
+  if (!tokenizer) {
+    return "—";
+  }
+  const precision = tokenizer.precision === "exact" ? "exact" : "fallback";
+  const source = tokenizer.tokenizer_source ?? "unknown source";
+  return tokenizer.fallback_reason
+    ? `${precision} (${source}) · ${tokenizer.fallback_reason}`
+    : `${precision} (${source})`;
+}
+
+function tokenizerMetadata(chunk: Chunk) {
+  const raw = chunk.metadata.tokenizer;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const metadata = raw as Record<string, unknown>;
+  return {
+    provider: metadataString(metadata.provider),
+    tokenizer_name: metadataString(metadata.tokenizer_name),
+    tokenizer_source: metadataString(metadata.tokenizer_source),
+    precision: metadataString(metadata.precision),
+    fallback_reason: metadataString(metadata.fallback_reason),
+  };
+}
+
+function embeddingTokenizerLabel(model: EmbeddingModelCatalogEntry) {
+  const precision = model.tokenizer_precision === "exact" ? "exact" : "fallback";
+  const source = model.tokenizer_source ?? "unregistered tokenizer source";
+  const name = model.tokenizer_name ?? "unregistered tokenizer";
+  return `${name} · ${source} · ${precision}`;
+}
+
+function metadataString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function metadataNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function chunkContextWindow(chunks: Chunk[], selectedChunkId: string, radius = 1) {
   const selectedIndex = chunks.findIndex((chunk) => chunk.id === selectedChunkId);
   if (selectedIndex < 0) {
@@ -8350,7 +8434,7 @@ function settingsSummaryRows(settings: RepositorySettings | null) {
       label: "retrieval",
       value: `${settings.retrieval.mode} top-${settings.retrieval.top_k} / ${settings.retrieval.reranker_strategy}`,
     },
-    { label: "chunking", value: `${settings.chunking.mode} ${settings.chunking.chunk_size}/${settings.chunking.chunk_overlap}` },
+    { label: "chunking", value: `${settings.chunking.mode} ${settings.chunking.chunk_size}/${settings.chunking.chunk_overlap} tokens` },
     { label: "full-text", value: settings.full_text.tokenizer },
     { label: "parser", value: settings.parser.structured_parser },
   ];
@@ -8384,7 +8468,7 @@ function validateSettingsDraft(
     entry.supported_as.includes("fallback"),
   );
   if (settings.chunking.chunk_size < 100 || settings.chunking.chunk_size > 8000) {
-    issues.push({ field: "chunking.chunk_size", message: "Chunk size must be between 100 and 8000." });
+    issues.push({ field: "chunking.chunk_size", message: "Chunk size must be between 100 and 8000 tokens." });
   }
   if (settings.chunking.chunk_overlap < 0) {
     issues.push({ field: "chunking.chunk_overlap", message: "Chunk overlap cannot be negative." });
@@ -8569,7 +8653,7 @@ function dashboardConfigRows(summary: DashboardSummary | null, settings: Reposit
   if (summary) {
     const config = summary.active_config;
     return [
-      { label: "chunking", value: `${config.chunking.mode} ${config.chunking.chunk_size}/${config.chunking.chunk_overlap}` },
+      { label: "chunking", value: `${config.chunking.mode} ${config.chunking.chunk_size}/${config.chunking.chunk_overlap} tokens` },
       { label: "embedding", value: `${config.embedding.provider} / ${config.embedding.model}` },
       { label: "vector", value: `${config.vector.collection_name} · ${config.vector.vector_size} · ${config.vector.distance}` },
       {
@@ -8943,6 +9027,10 @@ function issueLabel(code: string) {
     unconfirmed_model: "Model not confirmed",
     model_availability_unconfirmed: "Model availability not checked",
     parser_fingerprint: "Parser/settings fingerprint",
+    chunk_tokenizer_metadata: "Chunk tokenizer metadata",
+    chunk_tokenizer_fallback: "Chunk tokenizer fallback",
+    chunk_tokenizer_mismatch: "Chunk tokenizer mismatch",
+    missing_chunk_tokenizer_metadata: "Missing chunk tokenizer metadata",
     count_mismatch: "Count mismatch",
     source_hash_verified: "Source hash verified",
     external_source_hash_verified: "External source hash verified",
