@@ -1,6 +1,6 @@
 # PRD 30: Token-Aware Chunking
 
-**Status:** Next planned implementation item.
+**Status:** Complete and accepted. Ready to merge after PR review.
 
 ## Problem Statement
 
@@ -77,7 +77,8 @@ Settings, source inspection, export/recreate, stale-index impact analysis, and d
 
 ## Further Notes
 
-- The first implementation should prefer correctness and inspectability over broad tokenizer coverage.
-- If exact tokenizer access is unavailable for an Ollama model, the fallback tokenizer should be visible in settings/readiness metadata and persisted chunk metadata.
-- Because chunking changes affect every downstream index, implementation should make the required reprocess and full-text/vector rebuild path obvious.
-- Default chunk-size values should be reconsidered during implementation because the current defaults were chosen as character counts, not token counts.
+- Implemented default chunking uses a 512-token chunk size and 64-token overlap.
+- The first implementation prefers correctness and inspectability over broad tokenizer coverage.
+- If exact tokenizer access is unavailable for an Ollama model, the fallback tokenizer is visible in settings guidance, parser fingerprints, persisted chunk metadata, export bundles, and recreate validation.
+- Because chunking changes affect every downstream index, Settings / Models, freshness metadata, and docs make the required reprocess and full-text/vector rebuild path explicit.
+- Deterministic verification covers tokenizer resolution, recursive token coalescing, fixed token windows, oversized segment splitting, upload/reprocess metadata, export/recreate validation, frontend contract surfaces, and calibrated fixture behavior. Live SentenceTransformers cache and Ollama runtime checks remain opt-in because they depend on local host state.
