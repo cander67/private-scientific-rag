@@ -1208,10 +1208,10 @@ def _chunk_parsed_document(
 ) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
     if chunking_mode == "fixed":
-        segments = _fixed_size_segments(parsed, chunk_size, chunk_overlap)
         tokenizer = (
             resolved_tokenizer.tokenizer if resolved_tokenizer else SimpleTokenFallbackTokenizer()
         )
+        segments = _fixed_size_segments(parsed, chunk_size, chunk_overlap, tokenizer)
     else:
         tokenizer = (
             resolved_tokenizer.tokenizer if resolved_tokenizer else SimpleTokenFallbackTokenizer()
@@ -1271,19 +1271,28 @@ def _fixed_size_segments(
     parsed: ParsedDocument,
     chunk_size: int,
     chunk_overlap: int,
+    tokenizer: TextTokenizer | None = None,
 ) -> list[ParsedSegment]:
     text = parsed.text or "\n".join(segment.text for segment in parsed.segments)
     if not text.strip():
         return []
+    token_counter = tokenizer or SimpleTokenFallbackTokenizer()
+    token_spans = token_counter.spans(text)
+    if not token_spans:
+        return []
     step = max(1, chunk_size - chunk_overlap)
     chunks: list[ParsedSegment] = []
-    start = 0
-    while start < len(text):
-        raw = text[start : start + chunk_size]
+    token_start = 0
+    while token_start < len(token_spans):
+        token_end = min(len(token_spans), token_start + chunk_size)
+        window_spans = token_spans[token_start:token_end]
+        raw_char_start = window_spans[0].char_start
+        raw_char_end = window_spans[-1].char_end
+        raw = text[raw_char_start:raw_char_end]
         leading_trimmed = len(raw) - len(raw.lstrip())
         trailing_trimmed = len(raw) - len(raw.rstrip())
-        char_start = start + leading_trimmed
-        char_end = start + len(raw) - trailing_trimmed
+        char_start = raw_char_start + leading_trimmed
+        char_end = raw_char_end - trailing_trimmed
         chunk_text = text[char_start:char_end]
         if chunk_text:
             chunks.append(
@@ -1293,12 +1302,17 @@ def _fixed_size_segments(
                     char_end=char_end,
                     line_start=text.count("\n", 0, char_start) + 1,
                     line_end=text.count("\n", 0, char_end) + 1,
-                    metadata={"fixed_window_start": start, "fixed_window_end": start + len(raw)},
+                    metadata={
+                        "token_window_start": token_start,
+                        "token_window_end": token_end,
+                        "token_window_step": step,
+                        "token_count": len(window_spans),
+                    },
                 )
             )
-        if start + chunk_size >= len(text):
+        if token_end >= len(token_spans):
             break
-        start += step
+        token_start += step
     return chunks
 
 

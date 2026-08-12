@@ -22,6 +22,7 @@ from private_rag.ingestion.schemas import ParsedDocument, ParsedSegment
 from private_rag.ingestion.service import (
     _chunk_parsed_document,
     _coalesce_segments,
+    _fixed_size_segments,
     _safe_filename,
     _write_source_file,
     delete_document,
@@ -854,7 +855,99 @@ def test_recursive_chunk_creation_records_token_metadata_and_source_fields() -> 
     assert chunks[0].extra_metadata["parser_fingerprint"] == "abc123"
 
 
-def test_upload_uses_fixed_chunking_mode_for_fixed_size_windows(tmp_path: Path) -> None:
+def test_fixed_size_segments_use_token_windows_with_overlap() -> None:
+    tokenizer = SimpleTokenFallbackTokenizer()
+    parsed = ParsedDocument(
+        source_type="text",
+        text="  alpha beta gamma\ndelta epsilon zeta eta  ",
+    )
+
+    chunks = _fixed_size_segments(parsed, chunk_size=3, chunk_overlap=1, tokenizer=tokenizer)
+
+    assert [chunk.text for chunk in chunks] == [
+        "alpha beta gamma",
+        "gamma\ndelta epsilon",
+        "epsilon zeta eta",
+    ]
+    assert [chunk.metadata["token_window_start"] for chunk in chunks] == [0, 2, 4]
+    assert [chunk.metadata["token_window_end"] for chunk in chunks] == [3, 5, 7]
+    assert [chunk.metadata["token_count"] for chunk in chunks] == [3, 3, 3]
+    assert [(chunk.line_start, chunk.line_end) for chunk in chunks] == [(1, 1), (1, 2), (2, 2)]
+    assert [(chunk.char_start, chunk.char_end) for chunk in chunks] == [
+        (2, 18),
+        (13, 32),
+        (25, 41),
+    ]
+
+
+def test_fixed_size_segments_create_final_short_chunk_and_skip_empty_text() -> None:
+    tokenizer = SimpleTokenFallbackTokenizer()
+
+    chunks = _fixed_size_segments(
+        ParsedDocument(source_type="text", text="alpha beta gamma delta"),
+        chunk_size=3,
+        chunk_overlap=0,
+        tokenizer=tokenizer,
+    )
+
+    assert [chunk.text for chunk in chunks] == ["alpha beta gamma", "delta"]
+    assert [chunk.metadata["token_count"] for chunk in chunks] == [3, 1]
+    assert (
+        _fixed_size_segments(
+            ParsedDocument(source_type="text", text="   \n\t"),
+            chunk_size=3,
+            chunk_overlap=1,
+            tokenizer=tokenizer,
+        )
+        == []
+    )
+
+
+def test_fixed_chunk_creation_records_token_window_metadata() -> None:
+    tokenizer = SimpleTokenFallbackTokenizer()
+    resolved = ResolvedTokenizer(
+        tokenizer=tokenizer,
+        metadata=TokenizerMetadata(
+            provider="private_rag",
+            tokenizer_name="fake-fixed",
+            tokenizer_source="test",
+            precision="fallback",
+        ),
+    )
+
+    chunks = _chunk_parsed_document(
+        parsed=ParsedDocument(
+            source_type="text",
+            text="alpha beta gamma delta epsilon",
+            parser_name="test-parser",
+            parser_version="test-v1",
+            metadata={"parser_fingerprint": "fixed-fingerprint"},
+        ),
+        repository_id="repo",
+        document_id="doc",
+        document_version_id="version",
+        chunking_mode="fixed",
+        chunk_size=3,
+        chunk_overlap=1,
+        source_hash="hash",
+        parser_version="test-v1",
+        resolved_tokenizer=resolved,
+    )
+
+    assert [chunk.text for chunk in chunks] == [
+        "alpha beta gamma",
+        "gamma delta epsilon",
+    ]
+    assert [chunk.extra_metadata["token_count"] for chunk in chunks] == [3, 3]
+    assert chunks[1].extra_metadata["token_window_start"] == 2
+    assert chunks[1].extra_metadata["token_window_end"] == 5
+    assert "fixed_window_start" not in chunks[0].extra_metadata
+    assert chunks[0].extra_metadata["tokenizer"]["tokenizer_name"] == "fake-fixed"
+    assert chunks[0].extra_metadata["parser_fingerprint"] == "fixed-fingerprint"
+    assert chunks[0].extra_metadata["source_hash"] == "hash"
+
+
+def test_upload_uses_fixed_chunking_mode_for_token_windows(tmp_path: Path) -> None:
     session = next(_session())
     repository_id = _repository_id(session, tmp_path)
     repository = session.get(Repository, repository_id)
@@ -863,7 +956,11 @@ def test_upload_uses_fixed_chunking_mode_for_fixed_size_windows(tmp_path: Path) 
     settings = RepositorySettings.model_validate(repository.settings.settings)
     settings.chunking.mode = "fixed"
     settings.chunking.chunk_size = 100
-    settings.chunking.chunk_overlap = 10
+    settings.chunking.chunk_overlap = 25
+    settings.embedding.provider = "ollama"
+    settings.embedding.model = "custom-local:latest"
+    settings.vector.vector_size = 768
+    settings.vector.distance = "cosine"
     repository.settings.settings = settings.model_dump(mode="json")
     session.add(repository.settings)
     session.commit()
@@ -873,7 +970,7 @@ def test_upload_uses_fixed_chunking_mode_for_fixed_size_windows(tmp_path: Path) 
         repository_id,
         "fixed.txt",
         "text/plain",
-        ("alpha " * 20 + "\n" + "beta " * 20).encode(),
+        ("alpha " * 120 + "\n" + "beta " * 120).encode(),
         settings=Settings(data_dir=tmp_path),
     )
 
@@ -881,17 +978,18 @@ def test_upload_uses_fixed_chunking_mode_for_fixed_size_windows(tmp_path: Path) 
     assert uploaded.version.chunk_count >= 2
     first_chunk = uploaded.chunks_preview[0]
     second_chunk = uploaded.chunks_preview[1]
-    assert len(first_chunk.text) <= 100
-    assert second_chunk.char_start == 90
+    assert first_chunk.metadata["token_count"] <= 100
+    assert second_chunk.metadata["token_window_start"] == 75
     assert first_chunk.metadata["chunking"] == {
         "chunking_mode": "fixed",
         "chunk_size": 100,
-        "chunk_overlap": 10,
+        "chunk_overlap": 25,
         "chunk_unit": "tokens",
     }
-    assert first_chunk.metadata["tokenizer"]["precision"] in {"exact", "fallback"}
+    assert first_chunk.metadata["tokenizer"]["precision"] == "fallback"
     assert first_chunk.metadata["tokenizer"]["tokenizer_name"]
-    assert "fixed_window_start" in first_chunk.metadata
+    assert "token_window_start" in first_chunk.metadata
+    assert "fixed_window_start" not in first_chunk.metadata
 
 
 def test_upload_recursive_chunking_preserves_segment_coalescing(tmp_path: Path) -> None:
