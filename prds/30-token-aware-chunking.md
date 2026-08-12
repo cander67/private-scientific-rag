@@ -1,6 +1,6 @@
 # PRD 30: Token-Aware Chunking
 
-**Status:** Draft.
+**Status:** Next planned implementation item.
 
 ## Problem Statement
 

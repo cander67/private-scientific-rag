@@ -1,6 +1,6 @@
 # PRD 25: Chat Context Inspection
 
-**Status:** Ready for final review.
+**Status:** Complete and closed.
 
 ## Problem Statement
 
@@ -55,3 +55,4 @@ The inspection surface is for transparency and debugging. It should not become P
 
 - This PRD comes from user testing after PRD23 baseline work.
 - Prompt Sandbox already has context snapshots for experimental runs; this PRD brings equivalent transparency to normal chat without merging the two workflows.
+- PRD25 was merged to `main` in pull request #48. The delivered scope includes draft context preview, persisted assistant-answer context snapshots, Chat Workspace inspector UI, source navigation for retrieved context entries, and deterministic backend/frontend coverage.
