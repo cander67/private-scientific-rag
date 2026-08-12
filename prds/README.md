@@ -28,13 +28,14 @@ Current status:
 - Complete: PRD22 Ollama chat model expansion.
 - Complete: PRD23 settings model catalog and collection guardrails.
 - Backlog: PRD24 local storage provenance and housekeeping.
-- Backlog: PRD25 chat context inspection.
+- Ready for final review: PRD25 chat context inspection, including draft context preview, persisted assistant-answer context snapshots, Chat Workspace inspector UI, source navigation for retrieved context entries, and deterministic backend/frontend coverage. It is not marked complete until user acceptance.
 - Complete: PRD26 repository loading and parser controls.
 - Complete: PRD27 retrieval defaults transparency and controls.
 - Backlog: PRD28 document manager preview and batch actions.
 - Backlog: PRD29 PRD13 manual acceptance testing.
+- Draft: PRD30 token-aware chunking.
 
-PRD13 is ready for final review after parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and documentation preparation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional OCR dependency/golden-corpus checks remain explicit manual checks. PRD29 is the proposed manual acceptance-testing pass for PRD13: it should exercise installed OCR providers, realistic scanned and mixed PDFs, stale-index recovery, Source Viewer review, export/recreate metadata, and cross-host notes before PRD13 is closed. PRD23, PRD26, and PRD27 are complete and merged. PRD25 remains backlog follow-up work.
+PRD13 is ready for final review after parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and documentation preparation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional OCR dependency/golden-corpus checks remain explicit manual checks. PRD29 is the proposed manual acceptance-testing pass for PRD13: it should exercise installed OCR providers, realistic scanned and mixed PDFs, stale-index recovery, Source Viewer review, export/recreate metadata, and cross-host notes before PRD13 is closed. PRD25 is ready for final review after backend preview/persisted-inspection APIs, Chat Workspace inspector controls, source navigation, docs, and deterministic quality gates; it is not marked complete until user acceptance. PRD30 is drafted as the next chunking direction, replacing character-count chunk sizing with token-aware defaults and explicit tokenizer metadata. PRD23, PRD26, and PRD27 are complete and merged.
 
 The remaining backlog should be prioritized from hands-on use of the current app, adjusting order when a later PRD is needed to unblock an earlier one.
 
@@ -56,11 +57,12 @@ Shared decisions:
 - Test fixture posture: default CI uses `tests/fixtures/`, not `documents/golden_corpus/`.
 - Ollama embedding scope: PRD15 should add one generic Ollama embedding provider plus registry metadata for known supported embedding models. New Ollama embedding models should usually be registry/settings additions when they support Ollama embeddings and pass readiness/vector-dimension checks; they should not require one-off provider code.
 - Ollama chat scope: ordinary Ollama chat models should flow through the existing generic chat provider by model name. PRD22 tracks registry/readiness/docs expansion for additional chat models; focused model-specific work is only expected for unusual prompting, context, multimodal, tool/function, or structured-output requirements.
-- Chat context inspection scope: PRD25 owns exposing the exact local LLM payload for normal chat. Prompt Sandbox remains the owner for side-by-side prompt/retrieval/model experiments.
+- Chat context inspection scope: PRD25 exposes the exact local LLM payload for normal chat review, including draft preview and persisted assistant-answer inspection. Prompt Sandbox remains the owner for side-by-side prompt/retrieval/model experiments.
 - Repository loading and parser controls scope: PRD26 completed visible repository-switch loading states and fixed parser-choice controls, including an `Auto` parser option. PRD13 owns making those parser choices operational during upload, reprocess, OCR, and index freshness checks.
 - Retrieval defaults scope: PRD27 completed effective retrieval defaults across Search Lab, Chat Workspace, Prompt Sandbox, and evaluation, including explicit metadata boost `off` behavior and copy/promote paths that do not mutate defaults implicitly.
 - Document Manager batch scope: PRD28 owns row-click metadata preview and selected-document batch actions for reprocess, OCR, and delete as a follow-up to the completed PRD3 Document Manager.
 - PRD13 manual acceptance scope: PRD29 owns the real-dependency/manual-document test checklist and evidence capture needed before PRD13 can move from ready for final review to complete.
+- Token-aware chunking scope: PRD30 owns replacing character-count chunk sizing with token-aware defaults, model-specific SentenceTransformers tokenizers, explicit Ollama tokenizer registry/fallback behavior, and tokenizer metadata for inspection/export.
 
 PRD files:
 
@@ -88,8 +90,9 @@ PRD files:
 22. [Ollama chat model expansion](22-ollama-chat-model-expansion.md) - complete
 23. [Settings model catalog and collection guardrails](23-settings-model-catalog-guardrails.md) - complete
 24. [Local storage provenance and housekeeping](24-local-storage-housekeeping.md) - backlog
-25. [Chat context inspection](25-chat-context-inspection.md) - backlog
+25. [Chat context inspection](25-chat-context-inspection.md) - ready for final review
 26. [Repository loading and parser controls](26-repository-loading-and-parser-controls.md) - complete
 27. [Retrieval defaults transparency and controls](27-retrieval-defaults-transparency-controls.md) - complete
 28. [Document manager preview and batch actions](28-document-manager-preview-batch-actions.md) - backlog
 29. [PRD13 manual acceptance testing](29-prd13-manual-acceptance-testing.md) - backlog
+30. [Token-aware chunking](30-token-aware-chunking.md) - draft

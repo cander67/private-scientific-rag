@@ -1,6 +1,6 @@
 # PRD 25: Chat Context Inspection
 
-**Status:** Backlog.
+**Status:** Ready for final review.
 
 ## Problem Statement
 

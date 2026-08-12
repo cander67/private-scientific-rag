@@ -791,6 +791,7 @@ type ChatMessage = {
   content: string;
   retrieval_run_id: string | null;
   citations: ChatCitation[];
+  context_inspection_available: boolean;
   created_at: string;
 };
 
@@ -810,6 +811,52 @@ type ChatQuestionResponse = {
   session: ChatSession;
   user_message: ChatMessage;
   assistant_message: ChatMessage;
+};
+
+type ChatContextMessage = {
+  role: string;
+  content: string;
+};
+
+type ChatContextStatus = {
+  status: "ready" | "empty" | "unavailable";
+  message: string;
+};
+
+type ChatContextRetrievalRun = {
+  id: string;
+  query: string;
+  mode: SearchMode;
+  top_k: number;
+  candidate_pool_size: number;
+  rrf_constant: number;
+  reranker_strategy: RerankerStrategy;
+  filters: RetrievalFilters;
+  metadata_boosts: MetadataBoostSettings;
+};
+
+type ChatContextInspection = {
+  repository: {
+    id: string;
+    name: string;
+  };
+  session: ChatSession;
+  model: string;
+  prompt: {
+    id: string;
+    name: string;
+    text: string;
+  };
+  retrieval_settings: ChatRetrievalSettings;
+  retrieval_run_id: string | null;
+  context_status: ChatContextStatus;
+  context_entries: RetrievalSearchResult[];
+  history_messages: ChatContextMessage[];
+  llm_messages: ChatContextMessage[];
+  assistant_message?: ChatMessage | null;
+  question_message?: ChatMessage | null;
+  retrieval_run?: ChatContextRetrievalRun | null;
+  warnings?: string[];
 };
 
 type ChatModelInfo = {
@@ -946,6 +993,9 @@ function App() {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatMessage, setChatMessage] = useState("Create a chat session or ask a question.");
   const [activeCitation, setActiveCitation] = useState<ChatCitation | null>(null);
+  const [chatContextInspector, setChatContextInspector] = useState<ChatContextInspection | null>(null);
+  const [chatContextInspectorBusy, setChatContextInspectorBusy] = useState(false);
+  const [chatContextInspectorMessage, setChatContextInspectorMessage] = useState<string | null>(null);
   const [chatRetrievalSettings, setChatRetrievalSettings] = useState<ChatRetrievalSettings>(
     defaultChatRetrievalSettings,
   );
@@ -1222,6 +1272,8 @@ function App() {
     setChatSessions([]);
     setActiveChatSessionId(null);
     setActiveCitation(null);
+    setChatContextInspector(null);
+    setChatContextInspectorMessage(null);
     setChatMessage("Loading chat sessions");
     setChatReadiness(null);
     setChatReadinessCheckedAt(null);
@@ -1956,6 +2008,68 @@ function App() {
     }
   }
 
+  async function previewChatContext() {
+    if (!repository || !chatInput.trim()) {
+      return;
+    }
+    const content = chatInput.trim();
+    setChatContextInspectorBusy(true);
+    setChatContextInspectorMessage("Assembling draft context");
+    try {
+      const chatSession = activeChatSession ?? (await createChatSession(false));
+      if (!chatSession) {
+        throw new Error("missing chat session");
+      }
+      const response = await fetch(
+        `${API_BASE}/repositories/${repository.id}/chat/sessions/${chatSession.id}/context-preview`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, retrieval_settings: chatRetrievalSettings }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error("context preview failed");
+      }
+      const payload = (await response.json()) as ChatContextInspection;
+      setChatContextInspector(payload);
+      setActiveChatSessionId(payload.session.id);
+      setChatSessions((current) =>
+        current.some((session) => session.id === payload.session.id)
+          ? current.map((session) => (session.id === payload.session.id ? payload.session : session))
+          : [payload.session, ...current],
+      );
+      setChatContextInspectorMessage(payload.context_status.message);
+    } catch {
+      setChatContextInspectorMessage("Could not inspect draft context");
+    } finally {
+      setChatContextInspectorBusy(false);
+    }
+  }
+
+  async function inspectChatMessage(chatMessageId: string) {
+    if (!repository || !activeChatSession) {
+      return;
+    }
+    setChatContextInspectorBusy(true);
+    setChatContextInspectorMessage("Loading persisted context");
+    try {
+      const response = await fetch(
+        `${API_BASE}/repositories/${repository.id}/chat/sessions/${activeChatSession.id}/messages/${chatMessageId}/context`,
+      );
+      if (!response.ok) {
+        throw new Error("context inspection failed");
+      }
+      const payload = (await response.json()) as ChatContextInspection;
+      setChatContextInspector(payload);
+      setChatContextInspectorMessage(payload.context_status.message);
+    } catch {
+      setChatContextInspectorMessage("Could not load persisted context");
+    } finally {
+      setChatContextInspectorBusy(false);
+    }
+  }
+
   async function deleteChatSession(chatSessionId: string) {
     if (!repository) {
       return;
@@ -2452,6 +2566,14 @@ function App() {
     navigateTo("source");
   }
 
+  function openChatContextEntry(result: RetrievalSearchResult) {
+    setPendingSourceTarget({ documentId: result.document_id, chunkId: result.chunk_id });
+    setSelectedDocumentId(result.document_id);
+    setSelectedChunkId(result.chunk_id);
+    setChatContextInspector(null);
+    navigateTo("source");
+  }
+
   function openSandboxContext(result: RetrievalSearchResult) {
     setSelectedDocumentId(result.document_id);
     setSelectedChunkId(result.chunk_id);
@@ -2780,6 +2902,9 @@ function App() {
                 busy={chatBusy}
                 message={chatMessage}
                 activeCitation={activeCitation}
+                contextInspector={chatContextInspector}
+                contextInspectorBusy={chatContextInspectorBusy}
+                contextInspectorMessage={chatContextInspectorMessage}
                 retrievalSettings={chatRetrievalSettings}
                 readiness={chatReadiness}
                 readinessBusy={chatReadinessBusy}
@@ -2791,6 +2916,12 @@ function App() {
                 onDeleteSession={(chatSessionId) => void deleteChatSession(chatSessionId)}
                 onClearSessions={() => void clearChatSessions()}
                 onAsk={() => void askChatQuestion()}
+                onInspectDraft={() => void previewChatContext()}
+                onInspectMessage={(chatMessageId) => void inspectChatMessage(chatMessageId)}
+                onCloseContextInspector={() => {
+                  setChatContextInspector(null);
+                  setChatContextInspectorMessage(null);
+                }}
                 onRetrievalSettingsChange={setChatRetrievalSettings}
                 onRebuildFullText={() => void rebuildChatIndex("full-text")}
                 onRebuildVector={() => void rebuildChatIndex("vector")}
@@ -2798,6 +2929,7 @@ function App() {
                 onCitationClick={setActiveCitation}
                 onCloseCitation={() => setActiveCitation(null)}
                 onOpenCitation={openChatCitation}
+                onOpenContextEntry={openChatContextEntry}
               />
             ) : activeView === "sandbox" ? (
               <PromptSandbox
@@ -6194,6 +6326,9 @@ function ChatWorkspace({
   busy,
   message,
   activeCitation,
+  contextInspector,
+  contextInspectorBusy,
+  contextInspectorMessage,
   retrievalSettings,
   readiness,
   readinessBusy,
@@ -6205,6 +6340,9 @@ function ChatWorkspace({
   onDeleteSession,
   onClearSessions,
   onAsk,
+  onInspectDraft,
+  onInspectMessage,
+  onCloseContextInspector,
   onRetrievalSettingsChange,
   onRebuildFullText,
   onRebuildVector,
@@ -6212,6 +6350,7 @@ function ChatWorkspace({
   onCitationClick,
   onCloseCitation,
   onOpenCitation,
+  onOpenContextEntry,
 }: {
   settings: RepositorySettings | null;
   sessions: ChatSession[];
@@ -6220,6 +6359,9 @@ function ChatWorkspace({
   busy: boolean;
   message: string;
   activeCitation: ChatCitation | null;
+  contextInspector: ChatContextInspection | null;
+  contextInspectorBusy: boolean;
+  contextInspectorMessage: string | null;
   retrievalSettings: ChatRetrievalSettings;
   readiness: ChatReadiness | null;
   readinessBusy: boolean;
@@ -6231,6 +6373,9 @@ function ChatWorkspace({
   onDeleteSession: (value: string) => void;
   onClearSessions: () => void;
   onAsk: () => void;
+  onInspectDraft: () => void;
+  onInspectMessage: (value: string) => void;
+  onCloseContextInspector: () => void;
   onRetrievalSettingsChange: (value: ChatRetrievalSettings) => void;
   onRebuildFullText: () => void;
   onRebuildVector: () => void;
@@ -6238,6 +6383,7 @@ function ChatWorkspace({
   onCitationClick: (citation: ChatCitation) => void;
   onCloseCitation: () => void;
   onOpenCitation: (citation: ChatCitation) => void;
+  onOpenContextEntry: (result: RetrievalSearchResult) => void;
 }) {
   const threadRef = useRef<HTMLDivElement | null>(null);
   const readyForSelectedMode = chatReadyForSelectedMode(readiness, retrievalSettings);
@@ -6545,6 +6691,8 @@ function ChatWorkspace({
                   message={chatMessage}
                   key={chatMessage.id}
                   onCitationClick={onCitationClick}
+                  onInspectMessage={onInspectMessage}
+                  inspectBusy={contextInspectorBusy}
                 />
               ))
             ) : (
@@ -6585,14 +6733,34 @@ function ChatWorkspace({
                 placeholder="Ask a question grounded in this repository..."
                 disabled={busy}
               />
-              <button className="btn btn-primary" type="button" onClick={onAsk} disabled={busy || !input.trim()}>
-                {busy ? "Sending" : "Send"}
-              </button>
+              <div className="chat-composer-actions">
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={onInspectDraft}
+                  disabled={busy || contextInspectorBusy || !input.trim()}
+                >
+                  {contextInspectorBusy ? "Inspecting" : "Inspect context"}
+                </button>
+                <button className="btn btn-primary" type="button" onClick={onAsk} disabled={busy || !input.trim()}>
+                  {busy ? "Sending" : "Send"}
+                </button>
+              </div>
             </div>
-            <p className="hint">{busy ? "Local model is still working..." : message}</p>
+            <p className="hint">
+              {contextInspectorMessage ?? (busy ? "Local model is still working..." : message)}
+            </p>
           </div>
         </section>
       </div>
+
+      {contextInspector && (
+        <ChatContextInspectorModal
+          inspection={contextInspector}
+          onClose={onCloseContextInspector}
+          onOpenContextEntry={onOpenContextEntry}
+        />
+      )}
 
       {activeCitation && (
         <div className="overlay open" role="dialog" aria-modal="true">
@@ -6669,13 +6837,29 @@ function ReadinessPill({ label, item }: { label: string; item: ChatReadinessItem
 function ChatBubble({
   message,
   onCitationClick,
+  onInspectMessage,
+  inspectBusy,
 }: {
   message: ChatMessage;
   onCitationClick: (citation: ChatCitation) => void;
+  onInspectMessage: (value: string) => void;
+  inspectBusy: boolean;
 }) {
   return (
     <div className={message.role === "user" ? "msg user" : "msg assistant"}>
       <p>{message.content}</p>
+      {message.role === "assistant" && message.context_inspection_available && (
+        <div className="chat-message-actions">
+          <button
+            className="btn btn-sm"
+            type="button"
+            onClick={() => onInspectMessage(message.id)}
+            disabled={inspectBusy}
+          >
+            Inspect context
+          </button>
+        </div>
+      )}
       {message.citations.length > 0 && (
         <div className="chat-citations">
           {message.citations.map((citation) => (
@@ -6692,6 +6876,199 @@ function ChatBubble({
         </div>
       )}
     </div>
+  );
+}
+
+function ChatContextInspectorModal({
+  inspection,
+  onClose,
+  onOpenContextEntry,
+}: {
+  inspection: ChatContextInspection;
+  onClose: () => void;
+  onOpenContextEntry: (result: RetrievalSearchResult) => void;
+}) {
+  const retrievalSettings = inspection.retrieval_settings;
+  const contextEntries = inspection.context_entries;
+  const llmMessages = inspection.llm_messages;
+  const historyMessages = inspection.history_messages;
+  const warnings = inspection.warnings ?? [];
+
+  return (
+    <div className="overlay open" role="dialog" aria-modal="true">
+      <div className="modal context-inspector-modal">
+        <div className="modal-head">
+          <div>
+            <div className="eyebrow">Context inspector</div>
+            <h2>{inspection.session.title}</h2>
+            <p className="hint">
+              {inspection.repository.name} · {inspection.context_status.message}
+            </p>
+          </div>
+          <button className="close-x" type="button" onClick={onClose} aria-label="Close context inspector">
+            x
+          </button>
+        </div>
+
+        <div className={`context-status ${inspection.context_status.status}`}>
+          <strong>{inspection.context_status.status}</strong>
+          <span>{inspection.context_status.message}</span>
+        </div>
+
+        <div className="context-summary-grid">
+          <div>
+            <span>Model</span>
+            <b>{inspection.model}</b>
+          </div>
+          <div>
+            <span>Prompt</span>
+            <b>{inspection.prompt.name}</b>
+          </div>
+          <div>
+            <span>Retrieval</span>
+            <b>
+              {retrievalSettings.mode} · top-{retrievalSettings.top_k}
+            </b>
+          </div>
+          <div>
+            <span>Reranker</span>
+            <b>{retrievalSettings.reranker_strategy.replace(/_/g, " ")}</b>
+          </div>
+        </div>
+
+        <section className="context-section">
+          <div className="context-section-head">
+            <h3>Prompt</h3>
+            <span>{inspection.prompt.id}</span>
+          </div>
+          <pre>{inspection.prompt.text}</pre>
+        </section>
+
+        <section className="context-section">
+          <div className="context-section-head">
+            <h3>Retrieval settings</h3>
+            <span>{inspection.retrieval_run_id ? `run ${inspection.retrieval_run_id.slice(0, 8)}` : "preview"}</span>
+          </div>
+          <dl className="kv context-kv">
+            <dt>mode</dt>
+            <dd>{retrievalSettings.mode}</dd>
+            <dt>top k</dt>
+            <dd>{retrievalSettings.top_k}</dd>
+            <dt>candidate pool</dt>
+            <dd>{retrievalSettings.candidate_pool_size ?? "auto"}</dd>
+            <dt>rrf constant</dt>
+            <dd>{retrievalSettings.rrf_constant}</dd>
+            <dt>document kind filter</dt>
+            <dd>{retrievalSettings.filters.document_kind ?? "any"}</dd>
+          </dl>
+        </section>
+
+        <ContextMessageList title="History" messages={historyMessages} emptyText="No prior chat history was included." />
+
+        <section className="context-section">
+          <div className="context-section-head">
+            <h3>Retrieved context</h3>
+            <span>{contextEntries.length} entries</span>
+          </div>
+          {contextEntries.length > 0 ? (
+            <div className="context-entry-list">
+              {contextEntries.map((entry) => (
+                <article className="context-entry" key={entry.chunk_id}>
+                  <div className="context-entry-head">
+                    <div>
+                      <strong>
+                        [{entry.rank}] {entry.document_title}
+                      </strong>
+                      <span>
+                        {entry.section ?? "No section"} · chunk {entry.chunk_index + 1}
+                      </span>
+                    </div>
+                    <button className="btn btn-sm" type="button" onClick={() => onOpenContextEntry(entry)}>
+                      Open source
+                    </button>
+                  </div>
+                  <p dangerouslySetInnerHTML={{ __html: entry.snippet ?? entry.text_preview ?? "No preview available." }} />
+                  <div className="row result-meta">
+                    <span className="badge">score {formatScore(entry.final_score)}</span>
+                    <span className="badge">BM25 {formatScore(entry.score_breakdown.bm25)}</span>
+                    <span className="badge">Dense {formatScore(entry.score_breakdown.dense)}</span>
+                    <span className="badge">Rerank {formatScore(entry.score_breakdown.rerank)}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <p className="muted">No retrieved context entries were assembled for this turn.</p>
+          )}
+        </section>
+
+        <ContextMessageList title="Assembled messages" messages={llmMessages} emptyText="No assembled LLM messages were stored." />
+
+        {inspection.retrieval_run && (
+          <section className="context-section">
+            <div className="context-section-head">
+              <h3>Retrieval run</h3>
+              <span>{inspection.retrieval_run.id.slice(0, 8)}</span>
+            </div>
+            <dl className="kv context-kv">
+              <dt>query</dt>
+              <dd>{inspection.retrieval_run.query}</dd>
+              <dt>mode</dt>
+              <dd>{inspection.retrieval_run.mode}</dd>
+              <dt>top k</dt>
+              <dd>{inspection.retrieval_run.top_k}</dd>
+              <dt>reranker</dt>
+              <dd>{inspection.retrieval_run.reranker_strategy.replace(/_/g, " ")}</dd>
+            </dl>
+          </section>
+        )}
+
+        {warnings.length > 0 && (
+          <section className="context-section">
+            <div className="context-section-head">
+              <h3>Warnings</h3>
+              <span>{warnings.length}</span>
+            </div>
+            <ul className="context-warning-list">
+              {warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ContextMessageList({
+  title,
+  messages,
+  emptyText,
+}: {
+  title: string;
+  messages: ChatContextMessage[];
+  emptyText: string;
+}) {
+  return (
+    <section className="context-section">
+      <div className="context-section-head">
+        <h3>{title}</h3>
+        <span>{messages.length} messages</span>
+      </div>
+      {messages.length > 0 ? (
+        <div className="context-message-list">
+          {messages.map((message, index) => (
+            <div className="context-message" key={`${title}-${index}-${message.role}`}>
+              <strong>{message.role}</strong>
+              <pre>{message.content}</pre>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="muted">{emptyText}</p>
+      )}
+    </section>
   );
 }
 

@@ -10,8 +10,15 @@ from private_rag.chat.llm import MODEL_REGISTRY, ChatLLM, ChatMessage, OllamaUna
 from private_rag.chat.models import ChatMessageRow, ChatSession
 from private_rag.chat.schemas import (
     ChatCitation,
+    ChatContextInspectionResponse,
+    ChatContextMessage,
+    ChatContextPreviewResponse,
+    ChatContextRepository,
+    ChatContextRetrievalRun,
+    ChatContextStatus,
     ChatMessageRead,
     ChatModelRegistryResponse,
+    ChatPromptMetadata,
     ChatQuestionResponse,
     ChatReadinessItem,
     ChatReadinessResponse,
@@ -21,14 +28,19 @@ from private_rag.chat.schemas import (
 )
 from private_rag.ingestion.models import Document, DocumentChunk
 from private_rag.repositories.models import Repository
-from private_rag.repositories.schemas import RepositorySettings
+from private_rag.repositories.schemas import PromptLibraryEntry, RepositorySettings
 from private_rag.retrieval.defaults import (
     normalize_retrieval_defaults,
     resolve_effective_retrieval_settings,
     retrieval_request_payload,
 )
+from private_rag.retrieval.models import RetrievalResult, RetrievalRun
 from private_rag.retrieval.rerankers import RerankerProvider
-from private_rag.retrieval.schemas import RetrievalSearchRequest, RetrievalSearchResult
+from private_rag.retrieval.schemas import (
+    RetrievalDefaults,
+    RetrievalSearchRequest,
+    RetrievalSearchResult,
+)
 from private_rag.retrieval.service import search_retrieval
 from private_rag.search.service import FTS_TABLE
 from private_rag.vector.embeddings import EmbeddingProviderSource
@@ -172,45 +184,206 @@ def ask_chat_question(
         citations=[],
     )
 
-    retrieval = search_retrieval(
+    assembled = _assemble_chat_context(
         session=session,
         repository_id=repository_id,
-        request=RetrievalSearchRequest(
-            query=question,
-            **retrieval_request_payload(effective_retrieval.settings),
-        ),
+        chat_session=chat_session,
+        question=question,
+        prompt=settings.prompt.active_chat_prompt,
+        retrieval_settings=effective_retrieval.settings,
         store=store,
         embedder=embedder,
         reranker=reranker,
+        persist_retrieval_run=True,
+        excluded_message_id=user_message.id,
     )
-    if retrieval is None:
+    if assembled is None:
         return None
 
-    prompt_messages = build_chat_prompt(
-        system_prompt=settings.prompt.active_chat_prompt.text,
-        history=[
-            ChatMessage(role=message.role, content=message.content)
-            for message in chat_session.messages
-            if message.id != user_message.id
-        ],
-        question=question,
-        context_results=retrieval.results,
-    )
-    completion = llm.complete(model=chat_session.model, messages=prompt_messages)
-    citations = map_citations(completion.content, retrieval.results)
+    completion = llm.complete(model=chat_session.model, messages=assembled.llm_messages)
+    citations = map_citations(completion.content, assembled.context_entries)
     assistant_message = _append_message(
         session,
         chat_session=chat_session,
         role="assistant",
         content=completion.content,
-        retrieval_run_id=retrieval.run_id,
+        retrieval_run_id=assembled.retrieval_run_id,
         citations=[citation.model_dump(mode="json") for citation in citations],
+        extra_metadata=_context_inspection_snapshot(
+            model=chat_session.model,
+            prompt=settings.prompt.active_chat_prompt,
+            retrieval_settings=effective_retrieval.settings,
+            retrieval_run_id=assembled.retrieval_run_id,
+            question_message=user_message,
+            context_entries=assembled.context_entries,
+            history_messages=assembled.history_messages,
+            llm_messages=assembled.llm_messages,
+        ),
     )
     session.refresh(chat_session)
     return ChatQuestionResponse(
         session=_session_read(chat_session),
         user_message=_message_read(user_message),
         assistant_message=_message_read(assistant_message),
+    )
+
+
+def preview_chat_context(
+    session: Session,
+    *,
+    repository_id: str,
+    chat_session_id: str,
+    question: str,
+    store: VectorStore,
+    embedder: EmbeddingProviderSource,
+    reranker: RerankerProvider,
+    retrieval_settings: ChatRetrievalSettings | None = None,
+) -> ChatContextPreviewResponse | None:
+    chat_session = session.get(ChatSession, chat_session_id)
+    repository = session.get(Repository, repository_id)
+    if (
+        chat_session is None
+        or repository is None
+        or repository.settings is None
+        or chat_session.repository_id != repository_id
+    ):
+        return None
+
+    settings = RepositorySettings.model_validate(repository.settings.settings)
+    effective_retrieval = resolve_effective_retrieval_settings(
+        fallback_defaults=ChatRetrievalSettings(),
+        session_defaults=normalize_retrieval_defaults(
+            chat_session.retrieval_settings,
+            defaults_type=ChatRetrievalSettings,
+        ),
+        run_overrides=retrieval_settings,
+    )
+    prompt = settings.prompt.active_chat_prompt
+    assembled = _assemble_chat_context(
+        session=session,
+        repository_id=repository_id,
+        chat_session=chat_session,
+        question=question,
+        prompt=prompt,
+        retrieval_settings=effective_retrieval.settings,
+        store=store,
+        embedder=embedder,
+        reranker=reranker,
+        persist_retrieval_run=False,
+    )
+    if assembled is None:
+        return None
+
+    return ChatContextPreviewResponse(
+        repository=ChatContextRepository(id=repository.id, name=repository.name),
+        session=_session_read(chat_session),
+        model=chat_session.model,
+        prompt=ChatPromptMetadata(id=prompt.id, name=prompt.name, text=prompt.text),
+        retrieval_settings=ChatRetrievalSettings.model_validate(
+            effective_retrieval.settings.model_dump(mode="json")
+        ),
+        retrieval_run_id=assembled.retrieval_run_id,
+        context_status=ChatContextStatus(
+            status="ready" if assembled.context_entries else "empty",
+            message=(
+                f"{len(assembled.context_entries)} retrieved context entries assembled"
+                if assembled.context_entries
+                else "No retrieved context entries were found for this question."
+            ),
+        ),
+        context_entries=assembled.context_entries,
+        history_messages=[_context_message(message) for message in assembled.history_messages],
+        llm_messages=[_context_message(message) for message in assembled.llm_messages],
+    )
+
+
+def inspect_chat_message_context(
+    session: Session,
+    *,
+    repository_id: str,
+    chat_session_id: str,
+    message_id: str,
+) -> ChatContextInspectionResponse | None:
+    chat_session = session.get(ChatSession, chat_session_id)
+    repository = session.get(Repository, repository_id)
+    message = session.get(ChatMessageRow, message_id)
+    if (
+        chat_session is None
+        or repository is None
+        or repository.settings is None
+        or message is None
+        or chat_session.repository_id != repository_id
+        or message.repository_id != repository_id
+        or message.session_id != chat_session_id
+    ):
+        return None
+
+    if message.role != "assistant":
+        return _unavailable_context_response(
+            repository=repository,
+            chat_session=chat_session,
+            message=None,
+            question_message=None,
+            message_text="Only assistant messages have inspectable retrieval context.",
+        )
+    assistant_message = _message_read(message)
+    snapshot = _context_inspection_snapshot_from_message(message)
+    if not snapshot:
+        return _unavailable_context_response(
+            repository=repository,
+            chat_session=chat_session,
+            message=assistant_message,
+            question_message=_preceding_user_message(chat_session, message),
+            message_text="This assistant message does not include a stored context snapshot.",
+        )
+
+    retrieval_run = (
+        session.get(RetrievalRun, message.retrieval_run_id) if message.retrieval_run_id else None
+    )
+    if retrieval_run is not None and retrieval_run.repository_id != repository_id:
+        retrieval_run = None
+
+    question_message = _preceding_user_message(chat_session, message)
+    context_entries = [
+        RetrievalSearchResult.model_validate(entry)
+        for entry in _snapshot_list(snapshot, "context_entries")
+        if isinstance(entry, dict)
+    ]
+    warnings = (
+        ["The retrieval run linked to this assistant message is no longer available."]
+        if message.retrieval_run_id and retrieval_run is None
+        else []
+    )
+    return ChatContextInspectionResponse(
+        repository=ChatContextRepository(id=repository.id, name=repository.name),
+        session=_session_read(chat_session),
+        model=str(snapshot.get("model") or chat_session.model),
+        prompt=ChatPromptMetadata.model_validate(snapshot["prompt"]),
+        retrieval_settings=ChatRetrievalSettings.model_validate(snapshot["retrieval_settings"]),
+        retrieval_run_id=message.retrieval_run_id,
+        context_status=ChatContextStatus(
+            status="ready" if context_entries else "empty",
+            message=(
+                f"{len(context_entries)} persisted context entries loaded from message snapshot"
+                if context_entries
+                else "The stored context snapshot did not include any context entries."
+            ),
+        ),
+        context_entries=context_entries,
+        history_messages=[
+            ChatContextMessage.model_validate(history)
+            for history in _snapshot_list(snapshot, "history_messages")
+            if isinstance(history, dict)
+        ],
+        llm_messages=[
+            ChatContextMessage.model_validate(prompt_message)
+            for prompt_message in _snapshot_list(snapshot, "llm_messages")
+            if isinstance(prompt_message, dict)
+        ],
+        assistant_message=assistant_message,
+        question_message=_message_read(question_message) if question_message is not None else None,
+        retrieval_run=_retrieval_run_read(retrieval_run) if retrieval_run is not None else None,
+        warnings=warnings,
     )
 
 
@@ -238,6 +411,210 @@ def build_chat_prompt(
     messages.extend(history[-MAX_HISTORY_MESSAGES:])
     messages.append(ChatMessage(role="user", content=question))
     return messages
+
+
+class _AssembledChatContext:
+    def __init__(
+        self,
+        *,
+        retrieval_run_id: str | None,
+        context_entries: list[RetrievalSearchResult],
+        history_messages: list[ChatMessage],
+        llm_messages: list[ChatMessage],
+    ) -> None:
+        self.retrieval_run_id = retrieval_run_id
+        self.context_entries = context_entries
+        self.history_messages = history_messages
+        self.llm_messages = llm_messages
+
+
+def _assemble_chat_context(
+    *,
+    session: Session,
+    repository_id: str,
+    chat_session: ChatSession,
+    question: str,
+    prompt: PromptLibraryEntry,
+    retrieval_settings: RetrievalDefaults,
+    store: VectorStore,
+    embedder: EmbeddingProviderSource,
+    reranker: RerankerProvider,
+    persist_retrieval_run: bool,
+    excluded_message_id: str | None = None,
+) -> _AssembledChatContext | None:
+    retrieval = search_retrieval(
+        session=session,
+        repository_id=repository_id,
+        request=RetrievalSearchRequest(
+            query=question,
+            **retrieval_request_payload(retrieval_settings),
+        ),
+        store=store,
+        embedder=embedder,
+        reranker=reranker,
+    )
+    if retrieval is None:
+        return None
+    retrieval_run_id: str | None = retrieval.run_id
+    if not persist_retrieval_run and retrieval_run_id is not None:
+        _discard_retrieval_run(session, retrieval_run_id)
+        retrieval_run_id = None
+
+    history_messages = [
+        ChatMessage(role=message.role, content=message.content)
+        for message in chat_session.messages
+        if message.id != excluded_message_id
+    ][-MAX_HISTORY_MESSAGES:]
+    llm_messages = build_chat_prompt(
+        system_prompt=prompt.text,
+        history=history_messages,
+        question=question,
+        context_results=retrieval.results,
+    )
+    return _AssembledChatContext(
+        retrieval_run_id=retrieval_run_id,
+        context_entries=retrieval.results,
+        history_messages=history_messages,
+        llm_messages=llm_messages,
+    )
+
+
+def _discard_retrieval_run(session: Session, retrieval_run_id: str) -> None:
+    session.query(RetrievalResult).filter(RetrievalResult.run_id == retrieval_run_id).delete(
+        synchronize_session=False
+    )
+    session.query(RetrievalRun).filter(RetrievalRun.id == retrieval_run_id).delete(
+        synchronize_session=False
+    )
+    session.commit()
+
+
+def _context_message(message: ChatMessage) -> ChatContextMessage:
+    return ChatContextMessage(role=message.role, content=message.content)
+
+
+def _context_inspection_snapshot(
+    *,
+    model: str,
+    prompt: PromptLibraryEntry,
+    retrieval_settings: RetrievalDefaults,
+    retrieval_run_id: str | None,
+    question_message: ChatMessageRow,
+    context_entries: list[RetrievalSearchResult],
+    history_messages: list[ChatMessage],
+    llm_messages: list[ChatMessage],
+) -> dict[str, object]:
+    return {
+        "version": 1,
+        "model": model,
+        "prompt": {
+            "id": prompt.id,
+            "name": prompt.name,
+            "text": prompt.text,
+        },
+        "retrieval_settings": retrieval_settings.model_dump(mode="json"),
+        "retrieval_run_id": retrieval_run_id,
+        "question_message_id": question_message.id,
+        "context_entries": [entry.model_dump(mode="json") for entry in context_entries],
+        "history_messages": [
+            {"role": message.role, "content": message.content} for message in history_messages
+        ],
+        "llm_messages": [
+            {"role": message.role, "content": message.content} for message in llm_messages
+        ],
+    }
+
+
+def _context_inspection_snapshot_from_message(
+    message: ChatMessageRow,
+) -> dict[str, object]:
+    snapshot = (message.extra_metadata or {}).get("context_inspection")
+    if isinstance(snapshot, dict):
+        return snapshot
+    legacy_snapshot = message.extra_metadata or {}
+    if legacy_snapshot.get("version") == 1 and "llm_messages" in legacy_snapshot:
+        return legacy_snapshot
+    return {}
+
+
+def _snapshot_list(snapshot: dict[str, object], key: str) -> list[object]:
+    value = snapshot.get(key)
+    return value if isinstance(value, list) else []
+
+
+def _unavailable_context_response(
+    *,
+    repository: Repository,
+    chat_session: ChatSession,
+    message: ChatMessageRead | None,
+    question_message: ChatMessageRow | None,
+    message_text: str,
+    retrieval_run: RetrievalRun | None = None,
+) -> ChatContextInspectionResponse:
+    retrieval_settings = (
+        _chat_retrieval_settings_from_run(retrieval_run)
+        if retrieval_run is not None
+        else normalize_retrieval_defaults(
+            chat_session.retrieval_settings,
+            defaults_type=ChatRetrievalSettings,
+        )
+    )
+    return ChatContextInspectionResponse(
+        repository=ChatContextRepository(id=repository.id, name=repository.name),
+        session=_session_read(chat_session),
+        model=chat_session.model,
+        prompt=ChatPromptMetadata(id=chat_session.prompt_id, name="Unavailable prompt", text=""),
+        retrieval_settings=retrieval_settings,
+        retrieval_run_id=retrieval_run.id if retrieval_run is not None else None,
+        context_status=ChatContextStatus(status="unavailable", message=message_text),
+        context_entries=[],
+        history_messages=[],
+        llm_messages=[],
+        assistant_message=message,
+        question_message=_message_read(question_message) if question_message is not None else None,
+        retrieval_run=_retrieval_run_read(retrieval_run) if retrieval_run is not None else None,
+        warnings=[message_text],
+    )
+
+
+def _preceding_user_message(
+    chat_session: ChatSession,
+    assistant_message: ChatMessageRow,
+) -> ChatMessageRow | None:
+    for message in reversed(chat_session.messages):
+        if message.sequence < assistant_message.sequence and message.role == "user":
+            return message
+    return None
+
+
+def _chat_retrieval_settings_from_run(retrieval_run: RetrievalRun) -> ChatRetrievalSettings:
+    return ChatRetrievalSettings.model_validate(
+        {
+            "mode": retrieval_run.mode,
+            "top_k": retrieval_run.top_k,
+            "candidate_pool_size": retrieval_run.candidate_pool_size,
+            "rrf_constant": retrieval_run.rrf_constant,
+            "reranker_strategy": retrieval_run.reranker_strategy,
+            "metadata_boosts": dict(retrieval_run.metadata_boosts or {}),
+            "filters": dict(retrieval_run.filters or {}),
+        }
+    )
+
+
+def _retrieval_run_read(retrieval_run: RetrievalRun) -> ChatContextRetrievalRun:
+    return ChatContextRetrievalRun.model_validate(
+        {
+            "id": retrieval_run.id,
+            "query": retrieval_run.query,
+            "mode": retrieval_run.mode,
+            "top_k": retrieval_run.top_k,
+            "candidate_pool_size": retrieval_run.candidate_pool_size,
+            "rrf_constant": retrieval_run.rrf_constant,
+            "reranker_strategy": retrieval_run.reranker_strategy,
+            "filters": dict(retrieval_run.filters or {}),
+            "metadata_boosts": dict(retrieval_run.metadata_boosts or {}),
+        }
+    )
 
 
 def chat_readiness(
@@ -344,6 +721,7 @@ def _append_message(
     content: str,
     retrieval_run_id: str | None,
     citations: list[dict[str, object]],
+    extra_metadata: dict[str, object] | None = None,
 ) -> ChatMessageRow:
     message = ChatMessageRow(
         session_id=chat_session.id,
@@ -353,6 +731,7 @@ def _append_message(
         content=content,
         retrieval_run_id=retrieval_run_id,
         citations=citations,
+        extra_metadata=extra_metadata or {},
     )
     session.add(message)
     session.commit()
@@ -466,6 +845,9 @@ def _message_read(message: ChatMessageRow) -> ChatMessageRead:
         role="assistant" if message.role == "assistant" else "user",
         content=message.content,
         retrieval_run_id=message.retrieval_run_id,
+        context_inspection_available=(
+            message.role == "assistant" and bool(_context_inspection_snapshot_from_message(message))
+        ),
         citations=[ChatCitation.model_validate(citation) for citation in message.citations],
         created_at=message.created_at,
     )

@@ -6,7 +6,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from private_rag.chat.llm import ChatModelInfo
-from private_rag.retrieval.schemas import RerankerStrategy, RetrievalDefaults, RetrievalMode
+from private_rag.retrieval.schemas import (
+    RerankerStrategy,
+    RetrievalDefaults,
+    RetrievalMode,
+    RetrievalSearchResult,
+)
 
 ChatRole = Literal["user", "assistant"]
 ChatReadinessStatus = Literal[
@@ -53,6 +58,7 @@ class ChatMessageRead(BaseModel):
     role: ChatRole
     content: str
     retrieval_run_id: str | None = None
+    context_inspection_available: bool = False
     citations: list[ChatCitation] = Field(default_factory=list)
     created_at: datetime
 
@@ -78,6 +84,63 @@ class ChatSessionCreate(BaseModel):
 class ChatQuestionRequest(BaseModel):
     content: str = Field(min_length=1)
     retrieval_settings: ChatRetrievalSettings | None = None
+
+
+class ChatContextPreviewRequest(ChatQuestionRequest):
+    pass
+
+
+class ChatPromptMetadata(BaseModel):
+    id: str
+    name: str
+    text: str
+
+
+class ChatContextRepository(BaseModel):
+    id: str
+    name: str
+
+
+class ChatContextMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatContextStatus(BaseModel):
+    status: Literal["ready", "empty", "unavailable"]
+    message: str
+
+
+class ChatContextRetrievalRun(BaseModel):
+    id: str
+    query: str
+    mode: RetrievalMode
+    top_k: int
+    candidate_pool_size: int
+    rrf_constant: int
+    reranker_strategy: RerankerStrategy
+    filters: dict[str, Any] = Field(default_factory=dict)
+    metadata_boosts: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatContextPreviewResponse(BaseModel):
+    repository: ChatContextRepository
+    session: ChatSessionRead
+    model: str
+    prompt: ChatPromptMetadata
+    retrieval_settings: ChatRetrievalSettings
+    retrieval_run_id: str | None = None
+    context_status: ChatContextStatus
+    context_entries: list[RetrievalSearchResult] = Field(default_factory=list)
+    history_messages: list[ChatContextMessage] = Field(default_factory=list)
+    llm_messages: list[ChatContextMessage] = Field(default_factory=list)
+
+
+class ChatContextInspectionResponse(ChatContextPreviewResponse):
+    assistant_message: ChatMessageRead | None = None
+    question_message: ChatMessageRead | None = None
+    retrieval_run: ChatContextRetrievalRun | None = None
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ChatQuestionResponse(BaseModel):
