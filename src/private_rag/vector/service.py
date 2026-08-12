@@ -31,14 +31,17 @@ def rebuild_vector_index(
     repository_id: str,
     store: VectorStore,
     embedder: EmbeddingProviderSource,
+    *,
+    enforce_freshness: bool = True,
 ) -> VectorRebuildResponse | None:
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
         return None
     settings = RepositorySettings.model_validate(repository.settings.settings)
-    stale_documents = stale_parser_chunk_documents(session, repository_id, settings)
-    if stale_documents:
-        raise ParserChunkStaleError(stale_documents)
+    if enforce_freshness:
+        stale_documents = stale_parser_chunk_documents(session, repository_id, settings)
+        if stale_documents:
+            raise ParserChunkStaleError(stale_documents)
     collection_name = collection_name_for_repository(repository_id)
     resolved_embedder = resolve_embedding_provider(
         embedder,

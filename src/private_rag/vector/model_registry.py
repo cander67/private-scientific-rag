@@ -5,6 +5,7 @@ from typing import Literal
 
 EmbeddingProviderName = Literal["sentence_transformers", "ollama"]
 VectorDistance = Literal["cosine", "dot", "euclid"]
+TokenizerPrecision = Literal["exact", "fallback"]
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,9 @@ class EmbeddingModelMetadata:
     setup_hint: str
     requires_local_model: bool
     requires_live_probe: bool = False
+    tokenizer_name: str | None = None
+    tokenizer_source: str | None = None
+    tokenizer_precision: TokenizerPrecision = "fallback"
 
 
 class EmbeddingModelCompatibilityError(ValueError):
@@ -34,6 +38,9 @@ KNOWN_EMBEDDING_MODELS: tuple[EmbeddingModelMetadata, ...] = (
         resource_notes="Small local SentenceTransformers baseline for fast CPU indexing.",
         setup_hint="Install/cache with SentenceTransformers before rebuilding.",
         requires_local_model=True,
+        tokenizer_name="sentence-transformers/all-MiniLM-L6-v2",
+        tokenizer_source="sentence_transformers_model",
+        tokenizer_precision="exact",
     ),
     EmbeddingModelMetadata(
         provider="sentence_transformers",
@@ -44,6 +51,9 @@ KNOWN_EMBEDDING_MODELS: tuple[EmbeddingModelMetadata, ...] = (
         resource_notes="Higher-quality SentenceTransformers model with a larger vector size.",
         setup_hint="Install/cache with SentenceTransformers before rebuilding.",
         requires_local_model=True,
+        tokenizer_name="sentence-transformers/all-mpnet-base-v2",
+        tokenizer_source="sentence_transformers_model",
+        tokenizer_precision="exact",
     ),
     EmbeddingModelMetadata(
         provider="ollama",
@@ -54,6 +64,9 @@ KNOWN_EMBEDDING_MODELS: tuple[EmbeddingModelMetadata, ...] = (
         resource_notes="Lightweight multilingual Ollama embedding model with a 2K context window.",
         setup_hint="Start Ollama, then run `ollama pull embeddinggemma:300m`.",
         requires_local_model=True,
+        tokenizer_name="private-rag/simple-token-fallback-v1",
+        tokenizer_source="ollama_registry_fallback",
+        tokenizer_precision="fallback",
     ),
     EmbeddingModelMetadata(
         provider="ollama",
@@ -64,6 +77,9 @@ KNOWN_EMBEDDING_MODELS: tuple[EmbeddingModelMetadata, ...] = (
         resource_notes="Larger multilingual Ollama embedding model for high-capacity retrieval.",
         setup_hint="Start Ollama, then run `ollama pull qwen3-embedding:8b`.",
         requires_local_model=True,
+        tokenizer_name="private-rag/simple-token-fallback-v1",
+        tokenizer_source="ollama_registry_fallback",
+        tokenizer_precision="fallback",
     ),
 )
 

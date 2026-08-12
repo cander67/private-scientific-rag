@@ -493,6 +493,9 @@ def repository_model_catalog(
                 setup_hint=metadata.setup_hint,
                 requires_local_model=metadata.requires_local_model,
                 requires_live_probe=metadata.requires_live_probe,
+                tokenizer_name=metadata.tokenizer_name,
+                tokenizer_source=metadata.tokenizer_source,
+                tokenizer_precision=metadata.tokenizer_precision,
             )
             for metadata in known_embedding_models()
         ],
@@ -1232,11 +1235,14 @@ def analyze_settings_impact(
         ]
 
     parsing_fields = changed(
+        "chunking.chunk_unit",
         "chunking.mode",
         "chunking.chunk_size",
         "chunking.chunk_overlap",
         "parser.structured_parser",
         "parser.fallback_parser",
+        "embedding.provider",
+        "embedding.model",
     )
     if parsing_fields:
         impacts.append(

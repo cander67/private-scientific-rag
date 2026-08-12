@@ -767,7 +767,10 @@ def test_upload_uses_fixed_chunking_mode_for_fixed_size_windows(tmp_path: Path) 
         "chunking_mode": "fixed",
         "chunk_size": 100,
         "chunk_overlap": 10,
+        "chunk_unit": "tokens",
     }
+    assert first_chunk.metadata["tokenizer"]["precision"] in {"exact", "fallback"}
+    assert first_chunk.metadata["tokenizer"]["tokenizer_name"]
     assert "fixed_window_start" in first_chunk.metadata
 
 
@@ -801,7 +804,10 @@ def test_upload_recursive_chunking_preserves_segment_coalescing(tmp_path: Path) 
         "chunking_mode": "recursive",
         "chunk_size": 100,
         "chunk_overlap": 10,
+        "chunk_unit": "tokens",
     }
+    assert first_chunk.metadata["tokenizer"]["precision"] in {"exact", "fallback"}
+    assert first_chunk.metadata["tokenizer"]["tokenizer_name"]
     assert "fixed_window_start" not in first_chunk.metadata
 
 
@@ -867,6 +873,8 @@ def test_upload_uses_repository_parser_settings_and_records_fingerprint(
         "structured_parser": "pymupdf",
         "fallback_parser": "built_in_fallback",
     }
+    assert payload["chunking"]["chunk_unit"] == "tokens"
+    assert payload["tokenizer"]["tokenizer_name"]
     assert payload["source_hash"] == uploaded.version.sha256
     assert uploaded.chunks_preview[0].metadata["parser_fingerprint"] == fingerprint
     assert uploaded.chunks_preview[0].metadata["parser_route"] == ["pymupdf"]

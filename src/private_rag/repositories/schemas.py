@@ -17,6 +17,7 @@ from private_rag.vector.model_registry import (
 
 
 class ChunkingSettings(BaseModel):
+    chunk_unit: Literal["tokens"] = "tokens"
     chunk_size: int = Field(default=800, ge=100, le=8000)
     chunk_overlap: int = Field(default=120, ge=0)
     mode: Literal["recursive", "semantic", "fixed"] = "recursive"
@@ -296,6 +297,9 @@ class EmbeddingModelCatalogEntry(BaseModel):
     setup_hint: str
     requires_local_model: bool
     requires_live_probe: bool
+    tokenizer_name: str | None = None
+    tokenizer_source: str | None = None
+    tokenizer_precision: Literal["exact", "fallback"] = "fallback"
 
 
 class ChatModelCatalogEntry(BaseModel):

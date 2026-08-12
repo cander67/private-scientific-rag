@@ -37,6 +37,7 @@ from private_rag.ingestion.schemas import (
     ParsedSegment,
     SourceType,
 )
+from private_rag.ingestion.tokenizers import resolve_tokenizer
 from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
 
@@ -77,10 +78,12 @@ def upload_document(
     storage_path = _write_source_file(repository_id, filename, digest, data, app_settings)
     parsed = _parse_document_safely(filename, content_type, data, repository_settings)
     _attach_annotation_pair_metadata(session, repository_id, filename, parsed)
+    tokenizer_metadata = _tokenizer_metadata_for_settings(repository_settings)
     _attach_parser_fingerprint(
         parsed=parsed,
         repository_settings=repository_settings,
         source_hash=digest,
+        tokenizer_metadata=tokenizer_metadata,
     )
 
     document = Document(repository_id=repository_id, display_name=filename)
@@ -128,6 +131,7 @@ def upload_document(
         chunk_overlap=repository_settings.chunking.chunk_overlap,
         source_hash=digest,
         parser_version=parsed.parser_version,
+        tokenizer_metadata=tokenizer_metadata,
     )
     session.add_all(chunks)
     version.chunk_count = len(chunks)
@@ -302,10 +306,12 @@ def reprocess_document(
         repository_settings,
     )
     _attach_annotation_pair_metadata(session, repository_id, version.original_filename, parsed)
+    tokenizer_metadata = _tokenizer_metadata_for_settings(repository_settings)
     _attach_parser_fingerprint(
         parsed=parsed,
         repository_settings=repository_settings,
         source_hash=digest,
+        tokenizer_metadata=tokenizer_metadata,
     )
     previous_fingerprint = str(version.extra_metadata.get("parser_fingerprint") or "")
     next_fingerprint = str(parsed.metadata.get("parser_fingerprint") or "")
@@ -347,6 +353,7 @@ def reprocess_document(
         chunk_overlap=repository_settings.chunking.chunk_overlap,
         source_hash=digest,
         parser_version=parsed.parser_version,
+        tokenizer_metadata=tokenizer_metadata,
     )
     session.add_all(chunks)
     new_version.chunk_count = len(chunks)
@@ -625,11 +632,13 @@ def _attach_parser_fingerprint(
     parsed: ParsedDocument,
     repository_settings: RepositorySettings,
     source_hash: str,
+    tokenizer_metadata: dict[str, str] | None = None,
 ) -> None:
     payload = _parser_fingerprint_payload(
         parsed=parsed,
         repository_settings=repository_settings,
         source_hash=source_hash,
+        tokenizer_metadata=tokenizer_metadata,
     )
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     parsed.metadata["parser_fingerprint"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -640,6 +649,7 @@ def _parser_fingerprint_payload(
     parsed: ParsedDocument,
     repository_settings: RepositorySettings,
     source_hash: str,
+    tokenizer_metadata: dict[str, str] | None = None,
 ) -> dict[str, object]:
     return {
         "parser": repository_settings.parser.model_dump(mode="json"),
@@ -647,6 +657,7 @@ def _parser_fingerprint_payload(
         "parser_quality_thresholds": parsed.metadata.get("parser_quality_thresholds", {}),
         "source_hash": source_hash,
         "chunking": repository_settings.chunking.model_dump(mode="json"),
+        "tokenizer": tokenizer_metadata or _tokenizer_metadata_for_settings(repository_settings),
     }
 
 
@@ -659,8 +670,14 @@ def _parser_fingerprint_changed_fields(
         "parser.structured_parser",
         "parser.fallback_parser",
         "chunking.mode",
+        "chunking.chunk_unit",
         "chunking.chunk_size",
         "chunking.chunk_overlap",
+        "tokenizer.provider",
+        "tokenizer.tokenizer_name",
+        "tokenizer.tokenizer_source",
+        "tokenizer.precision",
+        "tokenizer.fallback_reason",
         "source_hash",
     ):
         if _nested_value(previous, field) != _nested_value(current, field):
@@ -710,6 +727,7 @@ def _reprocess_status_metadata(
         **payload,
         "parser": repository_settings.parser.model_dump(mode="json"),
         "chunking": repository_settings.chunking.model_dump(mode="json"),
+        "tokenizer": _tokenizer_metadata_for_settings(repository_settings),
     }
     encoded = json.dumps(current_payload, sort_keys=True, separators=(",", ":"))
     current_fingerprint = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -1181,6 +1199,7 @@ def _chunk_parsed_document(
     chunk_overlap: int,
     source_hash: str,
     parser_version: str,
+    tokenizer_metadata: dict[str, str] | None = None,
 ) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
     if chunking_mode == "fixed":
@@ -1191,6 +1210,7 @@ def _chunk_parsed_document(
         "chunking_mode": chunking_mode,
         "chunk_size": chunk_size,
         "chunk_overlap": chunk_overlap,
+        "chunk_unit": "tokens",
     }
     for segment in segments:
         text = segment.text.strip()
@@ -1214,6 +1234,7 @@ def _chunk_parsed_document(
                 extra_metadata={
                     **segment.metadata,
                     "chunking": chunking_metadata,
+                    "tokenizer": tokenizer_metadata or {},
                     "source_hash": source_hash,
                     "source_type": parsed.source_type,
                     "parser_name": parsed.parser_name,
@@ -1225,6 +1246,10 @@ def _chunk_parsed_document(
             )
         )
     return chunks
+
+
+def _tokenizer_metadata_for_settings(repository_settings: RepositorySettings) -> dict[str, str]:
+    return resolve_tokenizer(repository_settings).metadata.model_dump()
 
 
 def _fixed_size_segments(

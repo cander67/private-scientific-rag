@@ -108,7 +108,13 @@ def compare_embedding_model_recall(
         for spec in specs:
             try:
                 _apply_embedding_settings(session, repository_id, spec)
-                rebuilt = rebuild_vector_index(session, repository_id, store, embedder)
+                rebuilt = rebuild_vector_index(
+                    session,
+                    repository_id,
+                    store,
+                    embedder,
+                    enforce_freshness=False,
+                )
                 if rebuilt is None:
                     raise RuntimeError("Repository not found while rebuilding vector index.")
                 recall = evaluate_semantic_recall(
