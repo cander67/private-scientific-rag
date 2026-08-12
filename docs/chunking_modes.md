@@ -6,7 +6,7 @@ Chunk size and overlap are token counts. The settings API records this as `chunk
 
 ## Chunking Modes
 
-`recursive` is the default general-purpose mode. It tries to keep nearby text together while respecting the configured token size and token overlap. Use it when you want stable, readable chunks for mixed scientific PDFs, Markdown, text files, and patent-like documents.
+`recursive` is the default general-purpose mode. It keeps parser-derived segments together while they fit inside the configured token size, carries overlap by token budget, and splits oversized parser segments into token windows. Use it when you want stable, readable chunks for mixed scientific PDFs, Markdown, text files, and patent-like documents.
 
 `fixed` is the simplest mode. It splits text into fixed-size token windows with the configured overlap. Use it when repeatability is more important than preserving section-like boundaries.
 

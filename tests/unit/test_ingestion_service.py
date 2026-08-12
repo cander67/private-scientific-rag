@@ -32,6 +32,11 @@ from private_rag.ingestion.service import (
     run_document_ocr,
     upload_document,
 )
+from private_rag.ingestion.tokenizers import (
+    ResolvedTokenizer,
+    SimpleTokenFallbackTokenizer,
+    TokenizerMetadata,
+)
 from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
 from private_rag.repositories.service import ensure_default_repository
@@ -730,8 +735,123 @@ def test_helper_storage_and_chunk_edges(tmp_path: Path) -> None:
     assert written.name == "abcdef123456-name-.txt"
     assert _safe_filename("///") == "document"
     assert blank_chunks == []
-    assert len(coalesced) >= 2
-    assert coalesced[-1].metadata["sections"] == ["B"]
+    assert len(coalesced) == 1
+    assert coalesced[-1].metadata["sections"] == ["A", "B"]
+
+
+def test_recursive_coalescing_respects_token_budget_and_overlap() -> None:
+    tokenizer = SimpleTokenFallbackTokenizer()
+    chunks = _coalesce_segments(
+        [
+            ParsedSegment(text="alpha beta", section="A", line_start=1, line_end=1),
+            ParsedSegment(text="gamma delta", section="B", line_start=2, line_end=2),
+            ParsedSegment(text="epsilon zeta", section="C", line_start=3, line_end=3),
+        ],
+        chunk_size=5,
+        chunk_overlap=2,
+        tokenizer=tokenizer,
+    )
+
+    assert [chunk.metadata["token_count"] for chunk in chunks] == [4, 4]
+    assert chunks[0].text == "alpha beta\ngamma delta"
+    assert chunks[1].text == "gamma delta\nepsilon zeta"
+    assert chunks[0].metadata["sections"] == ["A", "B"]
+    assert chunks[1].metadata["sections"] == ["B", "C"]
+
+
+def test_recursive_coalescing_splits_oversized_segments_by_token_window() -> None:
+    tokenizer = SimpleTokenFallbackTokenizer()
+    text = "one two\nthree four five six seven"
+    chunks = _coalesce_segments(
+        [
+            ParsedSegment(
+                text=text,
+                section="Long",
+                line_start=10,
+                line_end=11,
+                char_start=100,
+                char_end=100 + len(text),
+            )
+        ],
+        chunk_size=3,
+        chunk_overlap=1,
+        tokenizer=tokenizer,
+    )
+
+    assert [chunk.text for chunk in chunks] == [
+        "one two\nthree",
+        "three four five",
+        "five six seven",
+    ]
+    assert all(chunk.metadata["oversized_segment_split"] for chunk in chunks)
+    assert all(chunk.metadata["token_count"] <= 3 for chunk in chunks)
+    assert [(chunk.line_start, chunk.line_end) for chunk in chunks] == [
+        (10, 11),
+        (11, 11),
+        (11, 11),
+    ]
+    assert [(chunk.char_start, chunk.char_end) for chunk in chunks] == [
+        (100, 113),
+        (108, 123),
+        (119, 133),
+    ]
+
+
+def test_recursive_chunk_creation_records_token_metadata_and_source_fields() -> None:
+    tokenizer = SimpleTokenFallbackTokenizer()
+    resolved = ResolvedTokenizer(
+        tokenizer=tokenizer,
+        metadata=TokenizerMetadata(
+            provider="private_rag",
+            tokenizer_name="fake",
+            tokenizer_source="test",
+            precision="fallback",
+            fallback_reason="unit test",
+        ),
+    )
+
+    chunks = _chunk_parsed_document(
+        parsed=ParsedDocument(
+            source_type="text",
+            text="",
+            parser_name="test-parser",
+            parser_version="test-v1",
+            segments=[
+                ParsedSegment(
+                    text="alpha beta gamma delta epsilon",
+                    section="A",
+                    line_start=1,
+                    line_end=1,
+                    char_start=0,
+                    char_end=30,
+                    metadata={"parser_segment_id": "seg-1"},
+                )
+            ],
+            metadata={"parser_fingerprint": "abc123", "parser_route": ["test"]},
+        ),
+        repository_id="repo",
+        document_id="doc",
+        document_version_id="version",
+        chunking_mode="recursive",
+        chunk_size=3,
+        chunk_overlap=1,
+        source_hash="hash",
+        parser_version="test-v1",
+        resolved_tokenizer=resolved,
+    )
+
+    assert len(chunks) == 2
+    assert all(chunk.extra_metadata["chunking"]["chunk_unit"] == "tokens" for chunk in chunks)
+    assert all(chunk.extra_metadata["token_count"] <= 3 for chunk in chunks)
+    assert chunks[0].extra_metadata["tokenizer"] == {
+        "provider": "private_rag",
+        "tokenizer_name": "fake",
+        "tokenizer_source": "test",
+        "precision": "fallback",
+        "fallback_reason": "unit test",
+    }
+    assert chunks[0].extra_metadata["source_hash"] == "hash"
+    assert chunks[0].extra_metadata["parser_fingerprint"] == "abc123"
 
 
 def test_upload_uses_fixed_chunking_mode_for_fixed_size_windows(tmp_path: Path) -> None:
@@ -934,6 +1054,9 @@ def test_reprocess_records_unchanged_and_changed_fingerprint_paths(tmp_path: Pat
     assert unchanged is not None
     assert unchanged.version.metadata["reprocess"]["fingerprint_changed"] is False
     assert unchanged.version.metadata["reprocess"]["changed_fields"] == []
+    assert unchanged.chunks[0].metadata["chunking"]["chunk_unit"] == "tokens"
+    assert unchanged.chunks[0].metadata["token_count"] > 0
+    assert unchanged.chunks[0].metadata["tokenizer"]["tokenizer_name"]
 
     repository = session.get(Repository, repository_id)
     assert repository is not None
@@ -949,6 +1072,7 @@ def test_reprocess_records_unchanged_and_changed_fingerprint_paths(tmp_path: Pat
     assert changed is not None
     assert changed.version.metadata["reprocess"]["fingerprint_changed"] is True
     assert changed.version.metadata["reprocess"]["changed_fields"] == ["parser.structured_parser"]
+    assert changed.chunks[0].metadata["chunking"]["chunk_unit"] == "tokens"
 
 
 def test_reprocess_parser_failure_creates_failed_version_without_deleting_prior_chunks(

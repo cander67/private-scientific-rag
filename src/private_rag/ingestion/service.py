@@ -37,7 +37,12 @@ from private_rag.ingestion.schemas import (
     ParsedSegment,
     SourceType,
 )
-from private_rag.ingestion.tokenizers import resolve_tokenizer
+from private_rag.ingestion.tokenizers import (
+    ResolvedTokenizer,
+    SimpleTokenFallbackTokenizer,
+    TextTokenizer,
+    resolve_tokenizer,
+)
 from private_rag.repositories.models import Repository
 from private_rag.repositories.schemas import RepositorySettings
 
@@ -78,12 +83,12 @@ def upload_document(
     storage_path = _write_source_file(repository_id, filename, digest, data, app_settings)
     parsed = _parse_document_safely(filename, content_type, data, repository_settings)
     _attach_annotation_pair_metadata(session, repository_id, filename, parsed)
-    tokenizer_metadata = _tokenizer_metadata_for_settings(repository_settings)
+    resolved_tokenizer = resolve_tokenizer(repository_settings)
     _attach_parser_fingerprint(
         parsed=parsed,
         repository_settings=repository_settings,
         source_hash=digest,
-        tokenizer_metadata=tokenizer_metadata,
+        tokenizer_metadata=resolved_tokenizer.metadata.model_dump(),
     )
 
     document = Document(repository_id=repository_id, display_name=filename)
@@ -131,7 +136,7 @@ def upload_document(
         chunk_overlap=repository_settings.chunking.chunk_overlap,
         source_hash=digest,
         parser_version=parsed.parser_version,
-        tokenizer_metadata=tokenizer_metadata,
+        resolved_tokenizer=resolved_tokenizer,
     )
     session.add_all(chunks)
     version.chunk_count = len(chunks)
@@ -306,12 +311,12 @@ def reprocess_document(
         repository_settings,
     )
     _attach_annotation_pair_metadata(session, repository_id, version.original_filename, parsed)
-    tokenizer_metadata = _tokenizer_metadata_for_settings(repository_settings)
+    resolved_tokenizer = resolve_tokenizer(repository_settings)
     _attach_parser_fingerprint(
         parsed=parsed,
         repository_settings=repository_settings,
         source_hash=digest,
-        tokenizer_metadata=tokenizer_metadata,
+        tokenizer_metadata=resolved_tokenizer.metadata.model_dump(),
     )
     previous_fingerprint = str(version.extra_metadata.get("parser_fingerprint") or "")
     next_fingerprint = str(parsed.metadata.get("parser_fingerprint") or "")
@@ -353,7 +358,7 @@ def reprocess_document(
         chunk_overlap=repository_settings.chunking.chunk_overlap,
         source_hash=digest,
         parser_version=parsed.parser_version,
-        tokenizer_metadata=tokenizer_metadata,
+        resolved_tokenizer=resolved_tokenizer,
     )
     session.add_all(chunks)
     new_version.chunk_count = len(chunks)
@@ -1199,13 +1204,22 @@ def _chunk_parsed_document(
     chunk_overlap: int,
     source_hash: str,
     parser_version: str,
-    tokenizer_metadata: dict[str, str] | None = None,
+    resolved_tokenizer: ResolvedTokenizer | None = None,
 ) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
     if chunking_mode == "fixed":
         segments = _fixed_size_segments(parsed, chunk_size, chunk_overlap)
+        tokenizer = (
+            resolved_tokenizer.tokenizer if resolved_tokenizer else SimpleTokenFallbackTokenizer()
+        )
     else:
-        segments = _coalesce_segments(parsed.segments, chunk_size, chunk_overlap)
+        tokenizer = (
+            resolved_tokenizer.tokenizer if resolved_tokenizer else SimpleTokenFallbackTokenizer()
+        )
+        segments = _coalesce_segments(parsed.segments, chunk_size, chunk_overlap, tokenizer)
+    tokenizer_metadata = (
+        resolved_tokenizer.metadata.model_dump() if resolved_tokenizer is not None else {}
+    )
     chunking_metadata = {
         "chunking_mode": chunking_mode,
         "chunk_size": chunk_size,
@@ -1234,6 +1248,7 @@ def _chunk_parsed_document(
                 extra_metadata={
                     **segment.metadata,
                     "chunking": chunking_metadata,
+                    "token_count": tokenizer.count(text),
                     "tokenizer": tokenizer_metadata or {},
                     "source_hash": source_hash,
                     "source_type": parsed.source_type,
@@ -1291,45 +1306,126 @@ def _coalesce_segments(
     segments: list[ParsedSegment],
     chunk_size: int,
     chunk_overlap: int,
+    tokenizer: TextTokenizer | None = None,
 ) -> list[ParsedSegment]:
     if not segments:
         return []
 
+    token_counter = tokenizer or SimpleTokenFallbackTokenizer()
+    budgeted_segments = _split_oversized_segments(
+        segments, chunk_size, chunk_overlap, token_counter
+    )
     chunks: list[ParsedSegment] = []
     current: list[ParsedSegment] = []
-    current_length = 0
-    for segment in segments:
-        segment_length = len(segment.text)
-        if current and current_length + segment_length + 1 > chunk_size:
-            chunks.append(_merge_segments(current))
-            current = _overlap_tail(current, chunk_overlap)
-            current_length = sum(len(item.text) + 1 for item in current)
+    for segment in budgeted_segments:
+        candidate = [*current, segment]
+        if current and _segments_token_count(candidate, token_counter) > chunk_size:
+            chunks.append(_merge_segments(current, token_counter))
+            current = _overlap_tail(current, chunk_overlap, token_counter)
+            candidate = [*current, segment]
+            if current and _segments_token_count(candidate, token_counter) > chunk_size:
+                current = []
         current.append(segment)
-        current_length += segment_length + 1
 
     if current:
-        chunks.append(_merge_segments(current))
+        chunks.append(_merge_segments(current, token_counter))
     return chunks
 
 
-def _overlap_tail(segments: list[ParsedSegment], chunk_overlap: int) -> list[ParsedSegment]:
+def _split_oversized_segments(
+    segments: list[ParsedSegment],
+    chunk_size: int,
+    chunk_overlap: int,
+    tokenizer: TextTokenizer,
+) -> list[ParsedSegment]:
+    split_segments: list[ParsedSegment] = []
+    for segment in segments:
+        token_spans = tokenizer.spans(segment.text)
+        if len(token_spans) <= chunk_size:
+            split_segments.append(
+                segment.model_copy(
+                    update={
+                        "metadata": {
+                            **segment.metadata,
+                            "token_count": len(token_spans),
+                        }
+                    }
+                )
+            )
+            continue
+        step = max(1, chunk_size - chunk_overlap)
+        token_start = 0
+        while token_start < len(token_spans):
+            token_end = min(len(token_spans), token_start + chunk_size)
+            window_spans = token_spans[token_start:token_end]
+            relative_char_start = window_spans[0].char_start
+            relative_char_end = window_spans[-1].char_end
+            raw_text = segment.text[relative_char_start:relative_char_end]
+            text = raw_text.strip()
+            if text:
+                leading_trimmed = len(raw_text) - len(raw_text.lstrip())
+                absolute_char_start = (
+                    segment.char_start + relative_char_start + leading_trimmed
+                    if segment.char_start is not None
+                    else None
+                )
+                absolute_char_end = (
+                    segment.char_start + relative_char_start + leading_trimmed + len(text)
+                    if segment.char_start is not None
+                    else None
+                )
+                split_segments.append(
+                    ParsedSegment(
+                        text=text,
+                        section=segment.section,
+                        page_start=segment.page_start,
+                        page_end=segment.page_end,
+                        line_start=_line_for_relative_char(segment, relative_char_start),
+                        line_end=_line_for_relative_char(segment, relative_char_end),
+                        char_start=absolute_char_start,
+                        char_end=absolute_char_end,
+                        metadata={
+                            **segment.metadata,
+                            "oversized_segment_split": True,
+                            "token_window_start": token_start,
+                            "token_window_end": token_end,
+                            "token_count": len(window_spans),
+                        },
+                    )
+                )
+            if token_end >= len(token_spans):
+                break
+            token_start += step
+    return split_segments
+
+
+def _overlap_tail(
+    segments: list[ParsedSegment],
+    chunk_overlap: int,
+    tokenizer: TextTokenizer,
+) -> list[ParsedSegment]:
     if chunk_overlap <= 0:
         return []
     tail: list[ParsedSegment] = []
-    length = 0
     for segment in reversed(segments):
-        if tail and length + len(segment.text) > chunk_overlap:
+        candidate = [segment, *tail]
+        if tail and _segments_token_count(candidate, tokenizer) > chunk_overlap:
             break
-        tail.insert(0, segment)
-        length += len(segment.text) + 1
+        if _segments_token_count(candidate, tokenizer) <= chunk_overlap:
+            tail.insert(0, segment)
     return tail
 
 
-def _merge_segments(segments: list[ParsedSegment]) -> ParsedSegment:
+def _merge_segments(
+    segments: list[ParsedSegment],
+    tokenizer: TextTokenizer | None = None,
+) -> ParsedSegment:
     first = segments[0]
     last = segments[-1]
+    text = "\n".join(segment.text for segment in segments)
+    token_counter = tokenizer or SimpleTokenFallbackTokenizer()
     return ParsedSegment(
-        text="\n".join(segment.text for segment in segments),
+        text=text,
         section=last.section or first.section,
         page_start=_first_value(segment.page_start for segment in segments),
         page_end=_last_value(segment.page_end for segment in segments),
@@ -1338,7 +1434,9 @@ def _merge_segments(segments: list[ParsedSegment]) -> ParsedSegment:
         char_start=first.char_start,
         char_end=last.char_end,
         metadata={
+            **(first.metadata if len(segments) == 1 else {}),
             "segment_count": len(segments),
+            "token_count": token_counter.count(text),
             "sections": [
                 section
                 for section in dict.fromkeys(segment.section for segment in segments)
@@ -1346,6 +1444,16 @@ def _merge_segments(segments: list[ParsedSegment]) -> ParsedSegment:
             ],
         },
     )
+
+
+def _segments_token_count(segments: list[ParsedSegment], tokenizer: TextTokenizer) -> int:
+    return tokenizer.count("\n".join(segment.text for segment in segments))
+
+
+def _line_for_relative_char(segment: ParsedSegment, relative_char: int) -> int | None:
+    if segment.line_start is None:
+        return None
+    return segment.line_start + segment.text.count("\n", 0, relative_char)
 
 
 def _first_value(values: Iterable[int | None]) -> int | None:
