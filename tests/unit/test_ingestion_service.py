@@ -17,7 +17,7 @@ from private_rag.ingestion.ocr import (
     OcrPageImage,
     normalize_ocr_page_result,
 )
-from private_rag.ingestion.parser import ParserExecutionSettings
+from private_rag.ingestion.parser import ParserExecutionSettings, parse_source
 from private_rag.ingestion.schemas import ParsedDocument, ParsedSegment
 from private_rag.ingestion.service import (
     _chunk_parsed_document,
@@ -39,7 +39,11 @@ from private_rag.ingestion.tokenizers import (
     TokenizerMetadata,
 )
 from private_rag.repositories.models import Repository
-from private_rag.repositories.schemas import RepositorySettings
+from private_rag.repositories.schemas import (
+    DEFAULT_CHUNK_OVERLAP_TOKENS,
+    DEFAULT_CHUNK_SIZE_TOKENS,
+    RepositorySettings,
+)
 from private_rag.repositories.service import ensure_default_repository
 
 
@@ -103,6 +107,23 @@ class FallbackOcrProvider:
             provider_version=self.provider_version,
             image=image,
         )
+
+
+def _resolved_calibration_tokenizer() -> ResolvedTokenizer:
+    return ResolvedTokenizer(
+        tokenizer=SimpleTokenFallbackTokenizer(),
+        metadata=TokenizerMetadata(
+            provider="private_rag",
+            tokenizer_name="private-rag/simple-token-fallback-v1",
+            tokenizer_source="calibration_fixture",
+            precision="fallback",
+            fallback_reason="deterministic fixture test",
+        ),
+    )
+
+
+def _token_series(prefix: str, count: int) -> str:
+    return " ".join(f"{prefix}_{index:03d}" for index in range(count))
 
 
 def test_upload_returns_none_for_missing_repository(tmp_path: Path) -> None:
@@ -853,6 +874,181 @@ def test_recursive_chunk_creation_records_token_metadata_and_source_fields() -> 
     }
     assert chunks[0].extra_metadata["source_hash"] == "hash"
     assert chunks[0].extra_metadata["parser_fingerprint"] == "abc123"
+
+
+def test_default_token_chunking_settings_are_calibrated() -> None:
+    settings = RepositorySettings.from_app_settings(Settings())
+
+    assert settings.chunking.chunk_unit == "tokens"
+    assert settings.chunking.chunk_size == DEFAULT_CHUNK_SIZE_TOKENS
+    assert settings.chunking.chunk_overlap == DEFAULT_CHUNK_OVERLAP_TOKENS
+    assert DEFAULT_CHUNK_SIZE_TOKENS == 512
+    assert DEFAULT_CHUNK_OVERLAP_TOKENS == 64
+
+
+@pytest.mark.parametrize(
+    ("fixture_path", "filename", "content_type", "expected_source_type", "expected_phrase"),
+    [
+        (
+            "tests/fixtures/ingestion/materials-synthesis-procedure.txt",
+            "materials-synthesis-procedure.txt",
+            "text/plain",
+            "text",
+            "pale yellow crystals",
+        ),
+        (
+            "tests/fixtures/ingestion/dataset-readme.md",
+            "dataset-readme.md",
+            "text/markdown",
+            "markdown",
+            "BRAT standoff annotations",
+        ),
+    ],
+)
+def test_default_token_chunking_keeps_small_committed_fixtures_readable(
+    fixture_path: str,
+    filename: str,
+    content_type: str,
+    expected_source_type: str,
+    expected_phrase: str,
+) -> None:
+    settings = RepositorySettings.from_app_settings(Settings())
+    parsed = parse_source(filename, content_type, Path(fixture_path).read_bytes())
+    resolved = _resolved_calibration_tokenizer()
+
+    chunks = _chunk_parsed_document(
+        parsed=parsed,
+        repository_id="repo",
+        document_id="doc",
+        document_version_id="version",
+        chunking_mode=settings.chunking.mode,
+        chunk_size=settings.chunking.chunk_size,
+        chunk_overlap=settings.chunking.chunk_overlap,
+        source_hash="hash",
+        parser_version=parsed.parser_version,
+        resolved_tokenizer=resolved,
+    )
+
+    assert parsed.source_type == expected_source_type
+    assert len(chunks) == 1
+    assert expected_phrase in chunks[0].text
+    assert chunks[0].extra_metadata["chunking"] == {
+        "chunking_mode": "recursive",
+        "chunk_size": DEFAULT_CHUNK_SIZE_TOKENS,
+        "chunk_overlap": DEFAULT_CHUNK_OVERLAP_TOKENS,
+        "chunk_unit": "tokens",
+    }
+    assert chunks[0].extra_metadata["token_count"] < DEFAULT_CHUNK_SIZE_TOKENS
+
+
+def test_default_token_chunking_coalesces_parser_segments_without_flattening_sections() -> None:
+    settings = RepositorySettings.from_app_settings(Settings())
+    parsed = ParsedDocument(
+        source_type="text",
+        text="",
+        parser_name="calibration-parser",
+        parser_version="test-v1",
+        segments=[
+            ParsedSegment(
+                text=_token_series("abstract_alpha", 140),
+                section="Abstract",
+                line_start=1,
+                line_end=3,
+            ),
+            ParsedSegment(
+                text=_token_series("method_beta", 140),
+                section="Methods",
+                line_start=4,
+                line_end=8,
+            ),
+            ParsedSegment(
+                text=_token_series("results_gamma", 140),
+                section="Results",
+                line_start=9,
+                line_end=13,
+            ),
+            ParsedSegment(
+                text=_token_series("discussion_delta", 140),
+                section="Discussion",
+                line_start=14,
+                line_end=18,
+            ),
+        ],
+    )
+
+    chunks = _chunk_parsed_document(
+        parsed=parsed,
+        repository_id="repo",
+        document_id="doc",
+        document_version_id="version",
+        chunking_mode=settings.chunking.mode,
+        chunk_size=settings.chunking.chunk_size,
+        chunk_overlap=settings.chunking.chunk_overlap,
+        source_hash="hash",
+        parser_version=parsed.parser_version,
+        resolved_tokenizer=_resolved_calibration_tokenizer(),
+    )
+
+    assert len(chunks) == 2
+    assert chunks[0].text.startswith("abstract_alpha_000")
+    assert chunks[0].section == "Results"
+    assert chunks[1].text.startswith("discussion_delta_000")
+    assert chunks[1].section == "Discussion"
+    assert [chunk.extra_metadata["token_count"] for chunk in chunks] == [420, 140]
+    assert all(
+        chunk.extra_metadata["chunking"]["chunk_size"] == DEFAULT_CHUNK_SIZE_TOKENS
+        for chunk in chunks
+    )
+
+
+def test_default_token_chunking_splits_ocr_like_long_block_into_readable_windows() -> None:
+    settings = RepositorySettings.from_app_settings(Settings())
+    text = Path("tests/fixtures/ingestion/ocr-like-long-block.txt").read_text()
+    parsed = ParsedDocument(
+        source_type="pdf",
+        text=text,
+        parser_name="ocr-calibration",
+        parser_version="test-v1",
+        segments=[
+            ParsedSegment(
+                text=text,
+                section="OCR recovered text",
+                page_start=1,
+                page_end=16,
+                line_start=1,
+                line_end=16,
+                char_start=0,
+                char_end=len(text),
+                metadata={"ocr_derived": True},
+            )
+        ],
+    )
+
+    chunks = _chunk_parsed_document(
+        parsed=parsed,
+        repository_id="repo",
+        document_id="doc",
+        document_version_id="version",
+        chunking_mode=settings.chunking.mode,
+        chunk_size=settings.chunking.chunk_size,
+        chunk_overlap=settings.chunking.chunk_overlap,
+        source_hash="hash",
+        parser_version=parsed.parser_version,
+        resolved_tokenizer=_resolved_calibration_tokenizer(),
+    )
+
+    assert len(chunks) == 2
+    assert chunks[0].text.startswith("OCR page 1 recovered")
+    assert chunks[1].text.startswith("and the final note warns")
+    assert chunks[1].text.endswith(
+        "reproducibility context, and the extracted text preserves enough sequence detail for chunk calibration."
+    )
+    assert [chunk.extra_metadata["token_count"] for chunk in chunks] == [512, 190]
+    assert chunks[0].extra_metadata["token_window_start"] == 0
+    assert chunks[0].extra_metadata["token_window_end"] == DEFAULT_CHUNK_SIZE_TOKENS
+    assert chunks[1].extra_metadata["token_window_start"] == 448
+    assert chunks[1].extra_metadata["chunking"]["chunk_overlap"] == DEFAULT_CHUNK_OVERLAP_TOKENS
+    assert all(chunk.extra_metadata["ocr_derived"] is True for chunk in chunks)
 
 
 def test_fixed_size_segments_use_token_windows_with_overlap() -> None:

@@ -2,7 +2,7 @@
 
 Repository chunking settings control how parsed document text is split before full-text indexing, vector embedding, retrieval, chat, and export/recreate snapshots. Changing chunking or parser settings affects future processing and should be treated as a document reprocessing change for existing content.
 
-Chunk size and overlap are token counts. The settings API records this as `chunk_unit: "tokens"` so source inspection, parser fingerprints, and export/recreate manifests can identify the sizing unit that produced a chunk.
+Chunk size and overlap are token counts. The default is a 512-token chunk size with 64-token overlap. That budget is large enough to keep most short scientific sections, Markdown blocks, and parser-derived procedure segments readable while still staying comfortably below local embedding-model context limits. Increase it when long-form narrative context is being split too aggressively; decrease it when retrieval results feel too broad or unrelated facts are being bundled together. The settings API records this as `chunk_unit: "tokens"` so source inspection, parser fingerprints, and export/recreate manifests can identify the sizing unit that produced a chunk.
 
 ## Chunking Modes
 

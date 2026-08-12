@@ -4761,8 +4761,9 @@ function SettingsModels({
             onChange={(value) => updateDraft((next) => { next.chunking.chunk_overlap = value; })}
           />
           <p className="settings-field-note">
-            Chunk size and overlap are token counts. Recursive mode preserves parser segments
-            where possible; fixed mode creates deterministic token windows.
+            Chunk size and overlap are token counts. The default is 512 tokens with
+            64-token overlap. Recursive mode preserves parser segments where possible;
+            fixed mode creates deterministic token windows.
           </p>
           <SettingSelect
             id="settings-structured-parser"

@@ -21,6 +21,7 @@ test("Settings / Models shows repository-scoped grouped defaults", () => {
   assert.match(source, /Chunk size \(tokens\)/);
   assert.match(source, /Chunk overlap \(tokens\)/);
   assert.match(source, /Chunk size and overlap are token counts/);
+  assert.match(source, /default is 512 tokens/);
   assert.match(source, /Full-text/);
   assert.match(source, /Vector and embedding/);
   assert.match(source, /Reranking/);

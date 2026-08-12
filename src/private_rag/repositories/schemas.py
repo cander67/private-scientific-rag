@@ -15,11 +15,14 @@ from private_rag.vector.model_registry import (
     validate_embedding_model_settings,
 )
 
+DEFAULT_CHUNK_SIZE_TOKENS = 512
+DEFAULT_CHUNK_OVERLAP_TOKENS = 64
+
 
 class ChunkingSettings(BaseModel):
     chunk_unit: Literal["tokens"] = "tokens"
-    chunk_size: int = Field(default=800, ge=100, le=8000)
-    chunk_overlap: int = Field(default=120, ge=0)
+    chunk_size: int = Field(default=DEFAULT_CHUNK_SIZE_TOKENS, ge=100, le=8000)
+    chunk_overlap: int = Field(default=DEFAULT_CHUNK_OVERLAP_TOKENS, ge=0)
     mode: Literal["recursive", "semantic", "fixed"] = "recursive"
 
 

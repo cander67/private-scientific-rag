@@ -26,7 +26,10 @@ from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersio
 from private_rag.prompt_sandbox.models import SandboxComparison, SandboxRun
 from private_rag.repositories import models as repository_models  # noqa: F401
 from private_rag.repositories.models import Repository, RepositorySnapshot
-from private_rag.repositories.schemas import RepositorySettingsReadinessItem
+from private_rag.repositories.schemas import (
+    DEFAULT_CHUNK_SIZE_TOKENS,
+    RepositorySettingsReadinessItem,
+)
 from private_rag.retrieval.models import RetrievalRun
 from private_rag.search.service import rebuild_full_text_index
 from private_rag.vector.models import EmbeddingRun
@@ -60,7 +63,7 @@ def test_default_repository_is_created_on_first_request() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["repository"]["name"] == "Default Repository"
-    assert payload["settings"]["chunking"]["chunk_size"] == 800
+    assert payload["settings"]["chunking"]["chunk_size"] == DEFAULT_CHUNK_SIZE_TOKENS
     assert payload["settings"]["embedding"]["model"]
 
 
