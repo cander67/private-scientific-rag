@@ -12,7 +12,7 @@ The selected-document metadata card is useful, but users currently have to inspe
 
 Add a Document Manager interaction layer for lightweight document metadata preview and selected-document batch actions. A row click should select a document and immediately populate the metadata card from list-summary data. Full Source Viewer inspection should remain available for chunk/page review, but it should not be required just to inspect document metadata or enable eligible document actions.
 
-Add explicit multi-document selection and batch action APIs for reprocess, OCR, and delete. Batch actions should return per-document outcomes so partial success, skipped items, missing OCR dependencies, missing source files, and wrong-repository protection are visible.
+Add explicit multi-document selection and batch action APIs for reprocess, OCR, and delete. Batch actions should return per-document outcomes so partial success, skipped items, missing OCR dependencies, missing source files, and wrong-repository protection are visible. Repository-wide reprocess should use the same batch contract with an explicit "all repository documents" request mode, so users can refresh a full corpus from Document Manager without manually selecting every row or processing documents one at a time.
 
 This PRD is a follow-up to closed PRD3 and review-ready PRD13. It does not reopen PRD3 or PRD13; it addresses product friction discovered after the original Document Manager and Source Viewer behavior shipped.
 
@@ -28,6 +28,8 @@ This PRD is a follow-up to closed PRD3 and review-ready PRD13. It does not reope
 8. As a researcher, I can see why a document is ineligible for OCR or reprocess, so that disabled actions do not feel arbitrary.
 9. As a maintainer, I want batch routes to reuse single-document service behavior, so that batch actions do not create divergent semantics.
 10. As a maintainer, I want deterministic tests for partial batch outcomes and UI state, so that destructive and expensive actions remain safe.
+11. As a researcher, I can reprocess every document in the current repository from Document Manager, so that a parser or chunking settings change can be applied to the whole corpus without document-by-document repetition.
+12. As a maintainer, I want full-repository reprocess to use the same explicit batch semantics as selected-document reprocess, so that "all" actions remain auditable and do not create a hidden background workflow.
 
 ## Scope
 
@@ -36,10 +38,12 @@ This PRD is a follow-up to closed PRD3 and review-ready PRD13. It does not reope
 - Multi-select checkboxes, selected-count state, and select-visible/clear-selection controls.
 - Batch action toolbar for reprocess, OCR, and delete.
 - Batch reprocess API over explicit selected document IDs.
+- Full-repository reprocess API/request mode over all documents in the current repository.
 - Batch OCR API over explicit selected document IDs, using PRD13 OCR semantics and dependency behavior.
 - Batch delete API over explicit selected document IDs, distinct from delete all.
 - Per-document batch result schema with action, document ID, status, optional version metadata, warnings, and error message.
 - UI summaries for all-success, mixed-success, skipped, failed, missing-source, missing-dependency, and ineligible outcomes.
+- Full-repository reprocess confirmation and result summary that state how many current repository documents were attempted.
 - Refresh behavior after batch actions so the table, selected document card, stale status, and Source Viewer links stay coherent.
 
 ## Non-Goals
@@ -50,6 +54,7 @@ This PRD is a follow-up to closed PRD3 and review-ready PRD13. It does not reope
 - Full storage cleanup or orphan detection; PRD24 owns housekeeping.
 - Changing parser/OCR implementation details owned by PRD13.
 - Rebuilding full-text/vector indexes automatically after reprocess or OCR.
+- Cross-workflow stale-index repair from Search Lab or Chat Workspace; PRD32 owns reprocess/rebuild actions surfaced outside Document Manager.
 
 ## Acceptance Criteria
 
@@ -58,18 +63,20 @@ This PRD is a follow-up to closed PRD3 and review-ready PRD13. It does not reope
 - Reprocess/OCR/delete actions for a selected single document do not require a prior Source Viewer inspection unless the action truly needs deeper data.
 - Users can select one, many, all visible, or none of the documents in the current filtered view.
 - Batch reprocess returns per-document completed, skipped, failed, and missing-source outcomes.
+- Full-repository reprocess uses the batch outcome schema and returns completed, skipped, failed, and missing-source outcomes for every attempted repository document.
 - Batch OCR returns per-document completed, skipped, failed, ineligible, and missing-dependency outcomes.
 - Batch delete deletes only selected document IDs and returns per-document deleted or failed outcomes.
 - Batch APIs validate repository ownership for every selected document.
 - One recoverable document failure does not abort unrelated documents in the same batch.
 - Delete-selected confirmation states the exact selected count and is clearly distinct from delete all.
+- Reprocess-all confirmation states the exact repository document count and is clearly distinct from selected-document reprocess.
 - After batch actions, Document Manager refreshes the document list, selected-document card, and status messages.
-- Tests cover row preview, selection behavior, all-success batches, partial failures, wrong-repository protection, ineligible OCR, missing dependencies, and destructive-action confirmation.
+- Tests cover row preview, selection behavior, all-success batches, full-repository reprocess, partial failures, wrong-repository protection, ineligible OCR, missing dependencies, and destructive-action confirmation.
 
 ## Implementation Decisions
 
 - Keep existing single-document routes intact for direct actions.
-- Prefer small batch service wrappers that call existing single-document operations and collect outcomes.
+- Prefer small batch service wrappers that call existing single-document operations and collect outcomes. Full-repository reprocess should resolve the current repository document set first, then use the same per-document loop and result schema.
 - Make batch delete explicit and selection-scoped. Do not overload the existing delete-all route.
 - Use document summary metadata for preview; use inspection only for Source Viewer and chunk/page-specific interactions.
 - Keep batch action results structured enough for frontend display and future export/audit use, but do not create a generalized job system until batch duration requires it.
@@ -78,8 +85,8 @@ This PRD is a follow-up to closed PRD3 and review-ready PRD13. It does not reope
 ## Testing Decisions
 
 - Unit tests should cover batch outcome classification and repository ownership checks.
-- Integration tests should cover batch reprocess, OCR, and delete routes using deterministic fixtures and fake OCR providers.
-- Frontend contract tests should cover row-click preview, checkbox selection, select-visible/clear-selection, toolbar state, action messages, partial-result rendering, and confirmation copy.
+- Integration tests should cover selected-document batch reprocess, full-repository reprocess, OCR, and delete routes using deterministic fixtures and fake OCR providers.
+- Frontend contract tests should cover row-click preview, checkbox selection, select-visible/clear-selection, reprocess-all action state, toolbar state, action messages, partial-result rendering, and confirmation copy.
 - Tests should assert external behavior and returned batch outcomes rather than parser/OCR internals.
 
 ## Further Notes
