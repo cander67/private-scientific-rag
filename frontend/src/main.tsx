@@ -1122,12 +1122,6 @@ function App() {
   }, [exportDownloadUrl]);
 
   useEffect(() => {
-    if (repository && selectedDocumentId) {
-      void inspectDocument(repository.id, selectedDocumentId);
-    }
-  }, [repository, selectedDocumentId]);
-
-  useEffect(() => {
     if (
       pendingSourceTarget &&
       inspection?.document.id === pendingSourceTarget.documentId &&
@@ -2580,6 +2574,9 @@ function App() {
 
   function openSearchResult(result: SearchResult) {
     setSelectedDocumentId(result.document_id);
+    if (repository) {
+      void inspectDocument(repository.id, result.document_id);
+    }
     setSelectedChunkId(result.chunk_id);
     navigateTo("source");
   }
@@ -2587,6 +2584,9 @@ function App() {
   function openChatCitation(citation: ChatCitation) {
     setPendingSourceTarget({ documentId: citation.document_id, chunkId: citation.chunk_id });
     setSelectedDocumentId(citation.document_id);
+    if (repository) {
+      void inspectDocument(repository.id, citation.document_id);
+    }
     setActiveCitation(null);
     navigateTo("source");
   }
@@ -2594,6 +2594,9 @@ function App() {
   function openChatContextEntry(result: RetrievalSearchResult) {
     setPendingSourceTarget({ documentId: result.document_id, chunkId: result.chunk_id });
     setSelectedDocumentId(result.document_id);
+    if (repository) {
+      void inspectDocument(repository.id, result.document_id);
+    }
     setSelectedChunkId(result.chunk_id);
     setChatContextInspector(null);
     navigateTo("source");
@@ -2601,7 +2604,17 @@ function App() {
 
   function openSandboxContext(result: RetrievalSearchResult) {
     setSelectedDocumentId(result.document_id);
+    if (repository) {
+      void inspectDocument(repository.id, result.document_id);
+    }
     setSelectedChunkId(result.chunk_id);
+    navigateTo("source");
+  }
+
+  function openSelectedDocumentInSource() {
+    if (repository && selectedDocumentId) {
+      void inspectDocument(repository.id, selectedDocumentId);
+    }
     navigateTo("source");
   }
 
@@ -3115,7 +3128,19 @@ function App() {
                               filteredDocuments.map((document) => (
                                 <tr
                                   key={document.id}
-                                  className={document.id === selectedDocumentId ? "selected-row" : ""}
+                                  className={
+                                    document.id === selectedDocumentId
+                                      ? "selectable-row selected-row"
+                                      : "selectable-row"
+                                  }
+                                  tabIndex={0}
+                                  onClick={() => setSelectedDocumentId(document.id)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      setSelectedDocumentId(document.id);
+                                    }
+                                  }}
                                 >
                                   <td>
                                     <div className="name">{document.display_name}</div>
@@ -3151,8 +3176,12 @@ function App() {
                                       <button
                                         className="btn btn-sm btn-ghost"
                                         type="button"
-                                        onClick={() => {
+                                        onClick={(event) => {
+                                          event.stopPropagation();
                                           setSelectedDocumentId(document.id);
+                                          if (repository) {
+                                            void inspectDocument(repository.id, document.id);
+                                          }
                                           navigateTo("source");
                                         }}
                                       >
@@ -3161,7 +3190,10 @@ function App() {
                                       <button
                                         className="btn btn-sm btn-ghost danger-action"
                                         type="button"
-                                        onClick={() => void deleteDocument(document.id)}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          void deleteDocument(document.id);
+                                        }}
                                         disabled={busy}
                                       >
                                         Delete
@@ -3177,11 +3209,11 @@ function App() {
 
                       <SelectedDocumentCard
                         selectedDocument={selectedDocument}
-                        inspection={inspection}
                         busy={busy}
                         onReprocess={() => void reprocessSelected()}
                         onRunOcr={() => void runOcrSelected()}
                         onDelete={() => void deleteSelected()}
+                        onOpenSource={openSelectedDocumentInSource}
                       />
                     </div>
                   </>
@@ -7706,20 +7738,21 @@ function OcrPageTextPanel({ version, pages }: { version: DocumentVersion; pages:
 
 function SelectedDocumentCard({
   selectedDocument,
-  inspection,
   busy,
   onReprocess,
   onRunOcr,
   onDelete,
+  onOpenSource,
 }: {
   selectedDocument: DocumentSummary | null;
-  inspection: Inspection | null;
   busy: boolean;
   onReprocess: () => void;
   onRunOcr: () => void;
   onDelete: () => void;
+  onOpenSource: () => void;
 }) {
   const version = selectedDocument?.current_version ?? null;
+  const reprocessStatus = version ? getReprocessStatus(version) : null;
   if (!selectedDocument || !version) {
     return (
       <div className="card card-pad-sm">
@@ -7760,17 +7793,22 @@ function SelectedDocumentCard({
         </>
       )}
       <div className="stack selected-actions">
-        <a className="btn btn-primary" href="#source-viewer">
+        <button className="btn btn-primary" type="button" onClick={onOpenSource} disabled={busy}>
           Open in Source Viewer
-        </a>
-        <button className="btn" type="button" onClick={onReprocess} disabled={busy || !inspection}>
+        </button>
+        <button
+          className="btn"
+          type="button"
+          onClick={onReprocess}
+          disabled={busy || reprocessStatus?.reprocess_available === false}
+        >
           Reprocess
         </button>
         <button
           className="btn"
           type="button"
           onClick={onRunOcr}
-          disabled={busy || !inspection || version.source_type !== "pdf" || !version.ocr_required}
+          disabled={busy || version.source_type !== "pdf" || !version.ocr_required}
         >
           Run OCR
         </button>

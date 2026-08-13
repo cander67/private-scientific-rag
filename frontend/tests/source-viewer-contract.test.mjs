@@ -90,12 +90,34 @@ test("Document Manager and Source Viewer render as separate live views", () => {
   assert.match(source, /activeView === "documents"[\s\S]*className="btn btn-primary upload-button"/);
 });
 
+test("Document Manager previews selected rows without opening Source Viewer", () => {
+  const selectionEffects = source.slice(
+    source.indexOf("const [pendingSourceTarget"),
+    source.indexOf("const selectedDocument = useMemo"),
+  );
+  assert.match(source, /className=\{[\s\S]*?"selectable-row selected-row"[\s\S]*?: "selectable-row"/);
+  assert.match(source, /onClick=\{\(\) => setSelectedDocumentId\(document\.id\)\}/);
+  assert.match(source, /onKeyDown=\{\(event\) => \{[\s\S]*setSelectedDocumentId\(document\.id\)/);
+  assert.match(source, /const version = selectedDocument\?\.current_version \?\? null/);
+  assert.match(source, /<dt>Reprocess<\/dt>[\s\S]*reprocessStatusLabel\(version\)/);
+  assert.doesNotMatch(selectionEffects, /inspectDocument\(repository\.id, selectedDocumentId\)/);
+});
+
+test("Document Manager keeps Source Viewer inspection explicit", () => {
+  assert.match(source, /function openSelectedDocumentInSource/);
+  assert.match(source, /inspectDocument\(repository\.id, selectedDocumentId\)/);
+  assert.match(source, /onOpenSource=\{openSelectedDocumentInSource\}/);
+  assert.match(source, /Open in Source Viewer/);
+  assert.match(source, /disabled=\{busy \|\| reprocessStatus\?\.reprocess_available === false\}/);
+  assert.match(source, /disabled=\{busy \|\| version\.source_type !== "pdf" \|\| !version\.ocr_required\}/);
+});
+
 test("Document Manager supports direct row delete and delete all actions", () => {
   assert.match(source, /function deleteDocument/);
   assert.match(source, /function deleteAllDocuments/);
   assert.match(source, /Delete all/);
   assert.match(source, /className="row table-actions"/);
-  assert.match(source, /onClick=\{\(\) => void deleteDocument\(document\.id\)\}/);
+  assert.match(source, /event\.stopPropagation\(\);[\s\S]*void deleteDocument\(document\.id\)/);
   assert.match(source, /window\.confirm\(`Delete \$\{document\?\.display_name/);
   assert.match(source, /DELETE/);
 });

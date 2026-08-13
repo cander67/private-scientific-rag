@@ -476,6 +476,10 @@ tbody tr.selected-row td {
   background: var(--surface-2);
 }
 
+tbody tr.selectable-row {
+  cursor: pointer;
+}
+
 td .name {
   font-weight: 600;
   overflow-wrap: anywhere;
