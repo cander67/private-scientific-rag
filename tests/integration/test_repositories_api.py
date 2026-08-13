@@ -244,7 +244,7 @@ def test_repository_settings_model_catalog_returns_known_defaults() -> None:
     assert ollama_embedding["tokenizer_precision"] == "fallback"
     assert ollama_embedding["tokenizer_source"] == "ollama_registry_fallback"
     assert {
-        ("tiktoken:cl100k_base", "tiktoken", "exact"),
+        ("hf:sentence-transformers/all-MiniLM-L6-v2", "transformers", "exact"),
         ("private-rag/simple-token-fallback-v1", "regex", "fallback"),
     } <= {
         (entry["id"], entry["implementation_library"], entry["precision"])

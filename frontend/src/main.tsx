@@ -181,8 +181,8 @@ type ParserCatalogEntry = {
 type TokenizerCatalogEntry = {
   id: string;
   label: string;
-  provider: "sentence_transformers" | "ollama" | "openai" | "private_rag";
-  implementation_library: "transformers" | "tiktoken" | "regex";
+  provider: "sentence_transformers" | "ollama" | "private_rag";
+  implementation_library: "transformers" | "ollama" | "regex";
   tokenizer_name: string;
   tokenizer_source: string;
   precision: "exact" | "fallback";
@@ -8111,11 +8111,12 @@ function resolvedChunkTokenizer(
       ? `${settings.chunking.tokenizer_id} · unsupported manual tokenizer`
       : "Manual tokenizer ID required";
   }
+  if (settings.embedding.provider === "ollama") {
+    const model = settings.embedding.model || embeddingModel?.model || "selected Ollama model";
+    return `ollama:${model} via Ollama runtime when available · registry/regex fallback otherwise · auto`;
+  }
   if (embeddingModel) {
     return `${embeddingTokenizerLabel(embeddingModel)} · auto`;
-  }
-  if (settings.embedding.provider === "ollama") {
-    return "private-rag/simple-token-fallback-v1 via regex · auto fallback for custom Ollama";
   }
   return `hf:${settings.embedding.model} via transformers · auto when cached locally, regex fallback otherwise`;
 }

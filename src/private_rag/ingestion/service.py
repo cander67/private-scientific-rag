@@ -83,7 +83,10 @@ def upload_document(
     storage_path = _write_source_file(repository_id, filename, digest, data, app_settings)
     parsed = _parse_document_safely(filename, content_type, data, repository_settings)
     _attach_annotation_pair_metadata(session, repository_id, filename, parsed)
-    resolved_tokenizer = resolve_tokenizer(repository_settings)
+    resolved_tokenizer = resolve_tokenizer(
+        repository_settings,
+        ollama_base_url=app_settings.ollama_base_url,
+    )
     _attach_parser_fingerprint(
         parsed=parsed,
         repository_settings=repository_settings,
@@ -216,6 +219,8 @@ def stale_parser_chunk_documents(
     session: Session,
     repository_id: str,
     repository_settings: RepositorySettings,
+    *,
+    ollama_base_url: str | None = None,
 ) -> list[dict[str, object]]:
     rows = session.execute(
         select(Document, DocumentVersion)
@@ -225,7 +230,11 @@ def stale_parser_chunk_documents(
     ).all()
     stale_documents: list[dict[str, object]] = []
     for document, version in rows:
-        status = _reprocess_status_metadata(version, repository_settings)
+        status = _reprocess_status_metadata(
+            version,
+            repository_settings,
+            ollama_base_url=ollama_base_url,
+        )
         if status["status"] != "stale":
             continue
         stale_documents.append(
@@ -311,7 +320,10 @@ def reprocess_document(
         repository_settings,
     )
     _attach_annotation_pair_metadata(session, repository_id, version.original_filename, parsed)
-    resolved_tokenizer = resolve_tokenizer(repository_settings)
+    resolved_tokenizer = resolve_tokenizer(
+        repository_settings,
+        ollama_base_url=get_settings().ollama_base_url,
+    )
     _attach_parser_fingerprint(
         parsed=parsed,
         repository_settings=repository_settings,
@@ -662,7 +674,9 @@ def _parser_fingerprint_payload(
         "parser_quality_thresholds": parsed.metadata.get("parser_quality_thresholds", {}),
         "source_hash": source_hash,
         "chunking": repository_settings.chunking.model_dump(mode="json"),
-        "tokenizer": tokenizer_metadata or _tokenizer_metadata_for_settings(repository_settings),
+        "tokenizer": _fingerprint_tokenizer_metadata(
+            tokenizer_metadata or _tokenizer_metadata_for_settings(repository_settings)
+        ),
     }
 
 
@@ -689,7 +703,6 @@ def _parser_fingerprint_changed_fields(
         "tokenizer.selection_mode",
         "tokenizer.offset_mapping",
         "tokenizer.is_fallback",
-        "tokenizer.fallback_reason",
         "source_hash",
     ):
         if _nested_value(previous, field) != _nested_value(current, field):
@@ -723,6 +736,8 @@ def _version_metadata(
 def _reprocess_status_metadata(
     version: DocumentVersion,
     repository_settings: RepositorySettings,
+    *,
+    ollama_base_url: str | None = None,
 ) -> dict[str, Any]:
     payload = _dict_or_empty(version.extra_metadata.get("parser_fingerprint_payload"))
     stored_fingerprint = str(version.extra_metadata.get("parser_fingerprint") or "")
@@ -739,8 +754,14 @@ def _reprocess_status_metadata(
         **payload,
         "parser": repository_settings.parser.model_dump(mode="json"),
         "chunking": repository_settings.chunking.model_dump(mode="json"),
-        "tokenizer": _tokenizer_metadata_for_settings(repository_settings),
+        "tokenizer": _tokenizer_metadata_for_settings(
+            repository_settings,
+            ollama_base_url=ollama_base_url,
+        ),
     }
+    current_payload["tokenizer"] = _fingerprint_tokenizer_metadata(
+        _dict_or_empty(current_payload.get("tokenizer"))
+    )
     encoded = json.dumps(current_payload, sort_keys=True, separators=(",", ":"))
     current_fingerprint = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
     changed_fields = _parser_fingerprint_changed_fields(payload, current_payload)
@@ -1270,8 +1291,21 @@ def _chunk_parsed_document(
     return chunks
 
 
-def _tokenizer_metadata_for_settings(repository_settings: RepositorySettings) -> dict[str, object]:
-    return resolve_tokenizer(repository_settings).metadata.model_dump()
+def _tokenizer_metadata_for_settings(
+    repository_settings: RepositorySettings,
+    *,
+    ollama_base_url: str | None = None,
+) -> dict[str, object]:
+    return resolve_tokenizer(
+        repository_settings,
+        ollama_base_url=ollama_base_url,
+    ).metadata.model_dump()
+
+
+def _fingerprint_tokenizer_metadata(tokenizer_metadata: dict[str, object]) -> dict[str, object]:
+    return {
+        key: value for key, value in tokenizer_metadata.items() if key not in {"fallback_reason"}
+    }
 
 
 def _fixed_size_segments(

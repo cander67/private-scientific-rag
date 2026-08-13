@@ -33,13 +33,19 @@ def rebuild_vector_index(
     embedder: EmbeddingProviderSource,
     *,
     enforce_freshness: bool = True,
+    ollama_base_url: str | None = None,
 ) -> VectorRebuildResponse | None:
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
         return None
     settings = RepositorySettings.model_validate(repository.settings.settings)
     if enforce_freshness:
-        stale_documents = stale_parser_chunk_documents(session, repository_id, settings)
+        stale_documents = stale_parser_chunk_documents(
+            session,
+            repository_id,
+            settings,
+            ollama_base_url=ollama_base_url,
+        )
         if stale_documents:
             raise ParserChunkStaleError(stale_documents)
     collection_name = collection_name_for_repository(repository_id)

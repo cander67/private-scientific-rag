@@ -221,7 +221,7 @@ def test_settings_impact_reports_chunk_tokenizer_changes() -> None:
     current = RepositorySettings.from_app_settings(Settings())
     draft_payload = current.model_dump(mode="json")
     draft_payload["chunking"]["tokenizer_mode"] = "manual"
-    draft_payload["chunking"]["tokenizer_id"] = "tiktoken:cl100k_base"
+    draft_payload["chunking"]["tokenizer_id"] = "hf:sentence-transformers/all-mpnet-base-v2"
     draft = RepositorySettings.model_validate(draft_payload)
 
     result = analyze_settings_impact(current, draft)
@@ -435,7 +435,7 @@ def test_model_catalog_uses_known_metadata_without_runtime_detection() -> None:
         ("ollama", "embeddinggemma:300m", 768),
     } <= {(entry.provider, entry.model, entry.vector_size) for entry in catalog.embedding_models}
     assert {
-        ("tiktoken:cl100k_base", "tiktoken", "exact"),
+        ("hf:sentence-transformers/all-MiniLM-L6-v2", "transformers", "exact"),
         ("private-rag/simple-token-fallback-v1", "regex", "fallback"),
     } <= {
         (entry.id, entry.implementation_library, entry.precision)
@@ -459,12 +459,12 @@ def test_model_catalog_uses_known_metadata_without_runtime_detection() -> None:
 def test_repository_settings_accept_manual_catalog_tokenizer() -> None:
     payload = RepositorySettings.from_app_settings(Settings()).model_dump(mode="json")
     payload["chunking"]["tokenizer_mode"] = "manual"
-    payload["chunking"]["tokenizer_id"] = "tiktoken:o200k_base"
+    payload["chunking"]["tokenizer_id"] = "hf:sentence-transformers/all-mpnet-base-v2"
 
     settings = RepositorySettings.model_validate(payload)
 
     assert settings.chunking.tokenizer_mode == "manual"
-    assert settings.chunking.tokenizer_id == "tiktoken:o200k_base"
+    assert settings.chunking.tokenizer_id == "hf:sentence-transformers/all-mpnet-base-v2"
 
 
 def test_repository_settings_reject_unknown_manual_tokenizer() -> None:

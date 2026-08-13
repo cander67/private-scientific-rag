@@ -46,7 +46,14 @@ def rebuild_repository_vector_index(
     embedder: EmbeddingProviderDependency,
 ) -> VectorRebuildResponse:
     try:
-        rebuilt = rebuild_vector_index(session, repository_id, store, embedder)
+        settings = get_settings()
+        rebuilt = rebuild_vector_index(
+            session,
+            repository_id,
+            store,
+            embedder,
+            ollama_base_url=settings.ollama_base_url,
+        )
     except ParserChunkStaleError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (RuntimeError, ValueError, VectorStoreError) as exc:

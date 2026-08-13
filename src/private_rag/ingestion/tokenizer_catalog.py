@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-TokenizerProvider = Literal["sentence_transformers", "ollama", "openai", "private_rag"]
+TokenizerProvider = Literal["sentence_transformers", "ollama", "private_rag"]
 TokenizerPrecision = Literal["exact", "fallback"]
-TokenizerImplementationLibrary = Literal["transformers", "tiktoken", "regex"]
+TokenizerImplementationLibrary = Literal["transformers", "ollama", "regex"]
 
 FALLBACK_TOKENIZER_ID = "private-rag/simple-token-fallback-v1"
 
@@ -52,32 +52,6 @@ TOKENIZER_CATALOG: tuple[TokenizerCatalogEntry, ...] = (
         requires_local_model=True,
         is_fallback=False,
         notes="Exact HuggingFace tokenizer for the MPNet embedding model when cached locally.",
-    ),
-    TokenizerCatalogEntry(
-        id="tiktoken:cl100k_base",
-        label="OpenAI cl100k_base",
-        provider="openai",
-        implementation_library="tiktoken",
-        tokenizer_name="cl100k_base",
-        tokenizer_source="tiktoken_encoding",
-        precision="exact",
-        offset_mapping=True,
-        requires_local_model=False,
-        is_fallback=False,
-        notes="Exact tiktoken encoding used by many OpenAI chat and embedding models.",
-    ),
-    TokenizerCatalogEntry(
-        id="tiktoken:o200k_base",
-        label="OpenAI o200k_base",
-        provider="openai",
-        implementation_library="tiktoken",
-        tokenizer_name="o200k_base",
-        tokenizer_source="tiktoken_encoding",
-        precision="exact",
-        offset_mapping=True,
-        requires_local_model=False,
-        is_fallback=False,
-        notes="Exact tiktoken encoding used by newer OpenAI models.",
     ),
     TokenizerCatalogEntry(
         id=FALLBACK_TOKENIZER_ID,

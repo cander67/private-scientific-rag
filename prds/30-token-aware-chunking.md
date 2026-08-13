@@ -1,6 +1,6 @@
 # PRD 30: Token-Aware Chunking
 
-**Status:** Implemented through phase 6. Reopened for scoped tokenizer-strategy remediation: remove `tiktoken` from current vector/embedding chunk-tokenizer settings, prefer HuggingFace/Transformers tokenizers for local model families, add feature-detected Ollama runtime tokenizer support when available, and document true multimodal image-token budgeting as follow-up scope.
+**Status:** Implemented through phase 7 and ready for review. Phase 7 removed `tiktoken` from current vector/embedding chunk-tokenizer settings, prefers HuggingFace/Transformers tokenizers for local model families, adds feature-detected Ollama runtime tokenizer support when available, and documents true multimodal image-token budgeting as follow-up scope.
 
 ## Problem Statement
 
@@ -99,7 +99,7 @@ PRD30 is still a text-chunking PRD. It applies to parsed text, OCR-recovered tex
 
 - Implemented default chunking uses a 512-token chunk size and 64-token overlap.
 - Phase 6 remediation replaced opaque tokenizer labels with a visible tokenizer catalog and library-backed tokenizer choices.
-- The next tokenizer remediation should remove `tiktoken` from the current settings/catalog surface, because current vector embeddings are local SentenceTransformers/Ollama rather than OpenAI-compatible providers.
+- Phase 7 remediation removed `tiktoken` from the current settings/catalog surface, because current vector embeddings are local SentenceTransformers/Ollama rather than OpenAI-compatible providers.
 - The tokenizer stack should prefer exact local-runtime or library tokenizers, then known registry mappings to library tokenizers, then the explicit regex fallback.
 - If exact tokenizer access is unavailable for an Ollama model, the fallback tokenizer is visible in settings guidance, parser fingerprints, persisted chunk metadata, export bundles, and recreate validation.
 - Because chunking changes affect every downstream index, Settings / Models, freshness metadata, and docs make the required reprocess and full-text/vector rebuild path explicit.

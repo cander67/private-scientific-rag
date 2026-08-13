@@ -5,6 +5,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast
 
+import httpx
+
 from private_rag.ingestion.tokenizer_catalog import (
     FALLBACK_TOKENIZER_ID,
     TokenizerImplementationLibrary,
@@ -127,37 +129,61 @@ class HuggingFaceTokenizer:
         return len(self.encode(text))
 
 
-class TiktokenTokenizer:
-    def __init__(self, encoding_name: str) -> None:
-        import tiktoken
-
-        self._encoding = tiktoken.get_encoding(encoding_name)
+class OllamaRuntimeTokenizer:
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        client: httpx.Client | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+        self._client = client
+        self._cache: dict[str, list[str]] = {}
 
     def encode(self, text: str) -> list[str]:
-        return [str(token) for token in self._encoding.encode(text)]
+        if text in self._cache:
+            return self._cache[text]
+        tokens = self._tokenize(text)
+        self._cache[text] = tokens
+        return tokens
 
     def spans(self, text: str) -> list[TokenSpan]:
-        token_ids = self._encoding.encode(text)
-        decoded, offsets = self._encoding.decode_with_offsets(token_ids)
-        if decoded != text:
-            return SimpleTokenFallbackTokenizer().spans(text)
-        return [
-            TokenSpan(
-                token=str(token_id),
-                char_start=int(offset),
-                char_end=int(offsets[index + 1] if index + 1 < len(offsets) else len(text)),
-            )
-            for index, (token_id, offset) in enumerate(zip(token_ids, offsets, strict=False))
-        ]
+        return SimpleTokenFallbackTokenizer().spans(text)
 
     def count(self, text: str) -> int:
         return len(self.encode(text))
+
+    def _tokenize(self, text: str) -> list[str]:
+        payload = {"model": self._model, "prompt": text}
+        if self._client is not None:
+            response = self._client.post(f"{self._base_url}/api/tokenize", json=payload)
+            response.raise_for_status()
+            return _tokens_from_ollama_response(response.json())
+        with httpx.Client(timeout=10.0) as client:
+            response = client.post(f"{self._base_url}/api/tokenize", json=payload)
+            response.raise_for_status()
+            return _tokens_from_ollama_response(response.json())
+
+
+def _tokens_from_ollama_response(payload: object) -> list[str]:
+    if not isinstance(payload, dict):
+        raise ValueError("Ollama tokenizer response must be a JSON object.")
+    raw_tokens = payload.get("tokens")
+    if raw_tokens is None:
+        raw_tokens = payload.get("token_ids")
+    if not isinstance(raw_tokens, list):
+        raise ValueError("Ollama tokenizer response did not include a token list.")
+    return [str(token) for token in raw_tokens]
 
 
 def resolve_tokenizer(
     repository_settings: RepositorySettings,
     *,
     sentence_transformers_loader: SentenceTransformersTokenizerLoader | None = None,
+    ollama_base_url: str | None = None,
+    ollama_client: httpx.Client | None = None,
 ) -> ResolvedTokenizer:
     if repository_settings.chunking.tokenizer_mode == "manual":
         return _resolve_manual_tokenizer(
@@ -172,7 +198,12 @@ def resolve_tokenizer(
             sentence_transformers_loader=sentence_transformers_loader,
         )
     if provider == "ollama":
-        return _resolve_ollama_tokenizer(model)
+        return _resolve_ollama_tokenizer(
+            model,
+            ollama_base_url=ollama_base_url,
+            ollama_client=ollama_client,
+            sentence_transformers_loader=sentence_transformers_loader,
+        )
     return _fallback(f"Unsupported embedding provider '{provider}'.")
 
 
@@ -210,9 +241,78 @@ def _load_huggingface_tokenizer(model: str) -> TextTokenizer:
     return HuggingFaceTokenizer(AutoTokenizer.from_pretrained(model, local_files_only=True))
 
 
-def _resolve_ollama_tokenizer(model: str) -> ResolvedTokenizer:
+def _resolve_ollama_tokenizer(
+    model: str,
+    *,
+    ollama_base_url: str | None,
+    ollama_client: httpx.Client | None,
+    sentence_transformers_loader: SentenceTransformersTokenizerLoader | None,
+) -> ResolvedTokenizer:
+    runtime_fallback_reason: str | None = None
+    if ollama_base_url:
+        try:
+            runtime_tokenizer = OllamaRuntimeTokenizer(
+                base_url=ollama_base_url,
+                model=model,
+                client=ollama_client,
+            )
+            runtime_tokenizer.count("tokenizer readiness probe")
+        except Exception as exc:
+            runtime_fallback_reason = (
+                f"Ollama runtime tokenizer for '{model}' is unavailable ({type(exc).__name__})."
+            )
+        else:
+            return ResolvedTokenizer(
+                tokenizer=runtime_tokenizer,
+                metadata=TokenizerMetadata(
+                    provider="ollama",
+                    tokenizer_id=f"ollama:{model}",
+                    tokenizer_name=model,
+                    tokenizer_source="ollama_runtime",
+                    implementation_library="ollama",
+                    precision="exact",
+                    selection_mode="auto",
+                    offset_mapping=False,
+                ),
+            )
+
     metadata = lookup_embedding_model("ollama", model)
     if metadata is not None and metadata.tokenizer_name and metadata.tokenizer_source:
+        if metadata.tokenizer_implementation_library == "transformers":
+            loader = sentence_transformers_loader or _load_huggingface_tokenizer
+            try:
+                registry_tokenizer = loader(metadata.tokenizer_name)
+            except Exception as exc:
+                return _fallback(
+                    _append_runtime_fallback_reason(
+                        f"Ollama registry HuggingFace tokenizer '{metadata.tokenizer_name}' "
+                        f"is not available locally ({type(exc).__name__}).",
+                        runtime_fallback_reason,
+                    )
+                )
+            return ResolvedTokenizer(
+                tokenizer=registry_tokenizer,
+                metadata=TokenizerMetadata(
+                    provider="ollama",
+                    tokenizer_id=metadata.tokenizer_id
+                    or huggingface_tokenizer_id(metadata.tokenizer_name),
+                    tokenizer_name=metadata.tokenizer_name,
+                    tokenizer_source=metadata.tokenizer_source,
+                    implementation_library="transformers",
+                    precision=metadata.tokenizer_precision,
+                    selection_mode="auto",
+                    offset_mapping=metadata.tokenizer_offset_mapping,
+                    is_fallback=metadata.tokenizer_precision == "fallback",
+                    fallback_reason=(
+                        _append_runtime_fallback_reason(
+                            f"Ollama model '{model}' uses fallback registry metadata.",
+                            runtime_fallback_reason,
+                        )
+                        if metadata.tokenizer_precision == "fallback"
+                        else runtime_fallback_reason
+                    ),
+                ),
+            )
         return ResolvedTokenizer(
             tokenizer=SimpleTokenFallbackTokenizer(),
             metadata=TokenizerMetadata(
@@ -229,13 +329,21 @@ def _resolve_ollama_tokenizer(model: str) -> ResolvedTokenizer:
                 offset_mapping=metadata.tokenizer_offset_mapping,
                 is_fallback=metadata.tokenizer_precision == "fallback",
                 fallback_reason=(
-                    f"Ollama model '{model}' uses the registry-declared fallback tokenizer."
+                    _append_runtime_fallback_reason(
+                        f"Ollama model '{model}' uses the registry-declared fallback tokenizer.",
+                        runtime_fallback_reason,
+                    )
                     if metadata.tokenizer_precision == "fallback"
                     else None
                 ),
             ),
         )
-    return _fallback(f"Ollama model '{model}' does not have tokenizer registry metadata.")
+    return _fallback(
+        _append_runtime_fallback_reason(
+            f"Ollama model '{model}' does not have tokenizer registry metadata.",
+            runtime_fallback_reason,
+        )
+    )
 
 
 def _resolve_manual_tokenizer(
@@ -255,21 +363,6 @@ def _resolve_manual_tokenizer(
         )
     if entry.implementation_library == "regex":
         return _fallback("Manual fallback tokenizer selected.", selection_mode="manual")
-    if entry.implementation_library == "tiktoken":
-        return ResolvedTokenizer(
-            tokenizer=TiktokenTokenizer(entry.tokenizer_name),
-            metadata=TokenizerMetadata(
-                provider=entry.provider,
-                tokenizer_id=entry.id,
-                tokenizer_name=entry.tokenizer_name,
-                tokenizer_source=entry.tokenizer_source,
-                implementation_library=entry.implementation_library,
-                precision=entry.precision,
-                selection_mode="manual",
-                offset_mapping=entry.offset_mapping,
-                is_fallback=entry.is_fallback,
-            ),
-        )
     loader = sentence_transformers_loader or _load_huggingface_tokenizer
     try:
         tokenizer = loader(entry.tokenizer_name)
@@ -311,3 +404,9 @@ def _fallback(reason: str, *, selection_mode: TokenizerSelectionMode = "auto") -
             fallback_reason=reason,
         ),
     )
+
+
+def _append_runtime_fallback_reason(reason: str, runtime_reason: str | None) -> str:
+    if runtime_reason:
+        return f"{runtime_reason} {reason}"
+    return reason

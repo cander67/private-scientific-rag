@@ -82,7 +82,8 @@ test("Settings / Models uses the PRD23 model catalog for embedding guardrails", 
   assert.match(source, /tokenizer_id/);
   assert.match(source, /tokenizer_implementation_library/);
   assert.match(source, /tokenizer_precision/);
-  assert.match(source, /private-rag\/simple-token-fallback-v1 via regex/);
+  assert.match(source, /via Ollama runtime when available/);
+  assert.match(source, /registry\/regex fallback otherwise/);
   assert.match(source, /Regex fallback rule: word-like runs plus individual punctuation\/symbol tokens/);
 });
 

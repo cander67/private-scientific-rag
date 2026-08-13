@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+
+import httpx
+import pytest
+
 from private_rag.core.settings import Settings
 from private_rag.ingestion.tokenizers import (
     SimpleTokenFallbackTokenizer,
-    TiktokenTokenizer,
     TokenSpan,
     resolve_tokenizer,
 )
@@ -89,6 +93,90 @@ def test_known_ollama_resolution_uses_registry_declared_strategy() -> None:
     }
 
 
+def test_ollama_resolution_prefers_runtime_tokenizer_when_available() -> None:
+    payload = RepositorySettings.from_app_settings(Settings()).model_dump(mode="json")
+    payload["embedding"]["provider"] = "ollama"
+    payload["embedding"]["model"] = "embeddinggemma:300m"
+    payload["vector"]["vector_size"] = 768
+    settings = RepositorySettings.model_validate(payload)
+    requests: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"tokens": [101, 202, 303]})
+
+    resolved = resolve_tokenizer(
+        settings,
+        ollama_base_url="http://ollama.test",
+        ollama_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    assert resolved.metadata.model_dump() == {
+        "provider": "ollama",
+        "tokenizer_id": "ollama:embeddinggemma:300m",
+        "tokenizer_name": "embeddinggemma:300m",
+        "tokenizer_source": "ollama_runtime",
+        "implementation_library": "ollama",
+        "precision": "exact",
+        "selection_mode": "auto",
+        "offset_mapping": False,
+        "is_fallback": False,
+    }
+    assert resolved.tokenizer.count("LiFePO4 + C-rate") == 3
+    assert requests == [
+        {"model": "embeddinggemma:300m", "prompt": "tokenizer readiness probe"},
+        {"model": "embeddinggemma:300m", "prompt": "LiFePO4 + C-rate"},
+    ]
+
+
+def test_ollama_resolution_falls_back_when_runtime_endpoint_is_unsupported() -> None:
+    payload = RepositorySettings.from_app_settings(Settings()).model_dump(mode="json")
+    payload["embedding"]["provider"] = "ollama"
+    payload["embedding"]["model"] = "embeddinggemma:300m"
+    payload["vector"]["vector_size"] = 768
+    settings = RepositorySettings.model_validate(payload)
+
+    resolved = resolve_tokenizer(
+        settings,
+        ollama_base_url="http://ollama.test",
+        ollama_client=httpx.Client(
+            transport=httpx.MockTransport(lambda _request: httpx.Response(404))
+        ),
+    )
+
+    metadata = resolved.metadata.model_dump()
+    assert metadata["implementation_library"] == "regex"
+    assert metadata["precision"] == "fallback"
+    fallback_reason = metadata["fallback_reason"]
+    assert isinstance(fallback_reason, str)
+    assert "Ollama runtime tokenizer" in fallback_reason
+    assert "registry-declared fallback tokenizer" in fallback_reason
+
+
+def test_ollama_resolution_falls_back_when_runtime_response_is_malformed() -> None:
+    payload = RepositorySettings.from_app_settings(Settings()).model_dump(mode="json")
+    payload["embedding"]["provider"] = "ollama"
+    payload["embedding"]["model"] = "custom-local:latest"
+    payload["vector"]["vector_size"] = 768
+    settings = RepositorySettings.model_validate(payload)
+
+    resolved = resolve_tokenizer(
+        settings,
+        ollama_base_url="http://ollama.test",
+        ollama_client=httpx.Client(
+            transport=httpx.MockTransport(lambda _request: httpx.Response(200, json={}))
+        ),
+    )
+
+    metadata = resolved.metadata.model_dump()
+    assert metadata["provider"] == "private_rag"
+    assert metadata["implementation_library"] == "regex"
+    fallback_reason = metadata["fallback_reason"]
+    assert isinstance(fallback_reason, str)
+    assert "Ollama runtime tokenizer" in fallback_reason
+    assert "does not have tokenizer registry metadata" in fallback_reason
+
+
 def test_custom_ollama_resolution_uses_app_fallback() -> None:
     payload = RepositorySettings.from_app_settings(Settings()).model_dump(mode="json")
     payload["embedding"]["provider"] = "ollama"
@@ -108,20 +196,13 @@ def test_custom_ollama_resolution_uses_app_fallback() -> None:
     assert "does not have tokenizer registry metadata" in fallback_reason
 
 
-def test_manual_tiktoken_resolution_uses_tiktoken_encoding() -> None:
+def test_manual_tiktoken_tokenizer_is_not_supported() -> None:
     payload = RepositorySettings.from_app_settings(Settings()).model_dump(mode="json")
     payload["chunking"]["tokenizer_mode"] = "manual"
     payload["chunking"]["tokenizer_id"] = "tiktoken:cl100k_base"
-    settings = RepositorySettings.model_validate(payload)
 
-    resolved = resolve_tokenizer(settings)
-
-    metadata = resolved.metadata.model_dump()
-    assert metadata["tokenizer_id"] == "tiktoken:cl100k_base"
-    assert metadata["implementation_library"] == "tiktoken"
-    assert metadata["selection_mode"] == "manual"
-    assert metadata["precision"] == "exact"
-    assert resolved.tokenizer.count("LiFePO4 + C-rate") == 7
+    with pytest.raises(ValueError, match="Unsupported chunk tokenizer"):
+        RepositorySettings.model_validate(payload)
 
 
 def test_manual_sentence_transformers_resolution_uses_catalog_entry() -> None:
@@ -172,13 +253,3 @@ def test_simple_fallback_tokenizer_counts_words_symbols_and_formula_tokens() -> 
         ("+", 2, 3),
         ("B", 4, 5),
     ]
-
-
-def test_tiktoken_tokenizer_returns_source_spans() -> None:
-    tokenizer = TiktokenTokenizer("cl100k_base")
-
-    spans = tokenizer.spans("LiFePO4 + C-rate")
-
-    assert tokenizer.count("LiFePO4 + C-rate") == len(spans)
-    assert spans[0].char_start == 0
-    assert spans[-1].char_end == len("LiFePO4 + C-rate")

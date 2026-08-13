@@ -363,8 +363,8 @@ class ParserCatalogEntry(BaseModel):
 class TokenizerCatalogEntryResponse(BaseModel):
     id: str
     label: str
-    provider: Literal["sentence_transformers", "ollama", "openai", "private_rag"]
-    implementation_library: Literal["transformers", "tiktoken", "regex"]
+    provider: Literal["sentence_transformers", "ollama", "private_rag"]
+    implementation_library: Literal["transformers", "ollama", "regex"]
     tokenizer_name: str
     tokenizer_source: str
     precision: Literal["exact", "fallback"]
