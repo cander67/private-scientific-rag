@@ -1374,6 +1374,9 @@ function App() {
   async function loadDocuments(repositoryId: string) {
     try {
       const response = await fetch(`${API_BASE}/repositories/${repositoryId}/documents`);
+      if (!response.ok) {
+        throw new Error("documents unavailable");
+      }
       const payload = (await response.json()) as DocumentSummary[];
       setDocuments(payload);
       setSelectedBatchDocumentIds((current) =>
@@ -1384,7 +1387,7 @@ function App() {
           ? current
           : (payload[0]?.id ?? null),
       );
-      return true;
+      return payload;
     } catch {
       setMessage("Could not load documents");
       return false;
@@ -1692,10 +1695,15 @@ function App() {
   async function inspectDocument(repositoryId: string, documentId: string) {
     try {
       const response = await fetch(`${API_BASE}/repositories/${repositoryId}/documents/${documentId}`);
+      if (!response.ok) {
+        throw new Error("inspection unavailable");
+      }
       const payload = (await response.json()) as Inspection;
       setInspection(payload);
+      return payload;
     } catch {
       setMessage("Could not inspect document");
+      return null;
     }
   }
 
@@ -2709,10 +2717,13 @@ function App() {
       }
       const payload = (await response.json()) as DocumentBatchResponse;
       setDocumentBatchResult(payload);
+      const deletedIds =
+        action === "delete"
+          ? payload.results
+              .filter((result) => result.status === "deleted")
+              .map((result) => result.document_id)
+          : [];
       if (action === "delete") {
-        const deletedIds = payload.results
-          .filter((result) => result.status === "deleted")
-          .map((result) => result.document_id);
         setSelectedBatchDocumentIds((current) =>
           current.filter((documentId) => !deletedIds.includes(documentId)),
         );
@@ -2721,14 +2732,48 @@ function App() {
           setInspection(null);
         }
       }
-      await loadDocuments(repository.id);
-      await loadChatReadiness(repository.id);
-      await loadDashboardSummary(repository.id);
+      await refreshDocumentManagerAfterBatch(repository.id, payload, deletedIds);
       setMessage(documentBatchSummary(payload));
     } catch {
       setMessage("Batch action failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function refreshDocumentManagerAfterBatch(
+    repositoryId: string,
+    result: DocumentBatchResponse,
+    deletedIds: string[],
+  ) {
+    const refreshedDocuments = await loadDocuments(repositoryId);
+    await loadChatReadiness(repositoryId);
+    await loadDashboardSummary(repositoryId);
+    if (documentBatchChangesRepositoryContent(result)) {
+      setLastRebuild(null);
+      setSearchResults([]);
+      setSearchMessage(
+        "Document content changed; rebuild full-text/vector indexes before relying on retrieval.",
+      );
+      setChatMessage(
+        "Document content changed; check retrieval readiness before relying on new chat context.",
+      );
+    }
+
+    const affectedIds = result.results.map((outcome) => outcome.document_id);
+    const inspectionTargetId =
+      selectedDocumentId && affectedIds.includes(selectedDocumentId)
+        ? selectedDocumentId
+        : inspection?.document.id && affectedIds.includes(inspection.document.id)
+          ? inspection.document.id
+          : null;
+    if (
+      inspectionTargetId &&
+      !deletedIds.includes(inspectionTargetId) &&
+      refreshedDocuments &&
+      refreshedDocuments.some((document) => document.id === inspectionTargetId)
+    ) {
+      await inspectDocument(repositoryId, inspectionTargetId);
     }
   }
 
@@ -8160,6 +8205,21 @@ function documentBatchBusyMessage(action: DocumentBatchAction, allRepositoryDocu
 function documentBatchSummary(result: DocumentBatchResponse) {
   const counts = documentBatchStatusCounts(result);
   return `${documentBatchActionLabel(result.action)} complete: ${documentBatchCountsLabel(counts)}`;
+}
+
+function documentBatchChangesRepositoryContent(result: DocumentBatchResponse) {
+  return result.results.some((outcome) => {
+    if (outcome.status === "deleted") {
+      return true;
+    }
+    if (outcome.action === "reprocess") {
+      return outcome.status === "completed" || outcome.status === "missing_source";
+    }
+    if (outcome.action === "ocr") {
+      return outcome.status === "completed";
+    }
+    return false;
+  });
 }
 
 function documentBatchStatusCounts(result: DocumentBatchResponse) {

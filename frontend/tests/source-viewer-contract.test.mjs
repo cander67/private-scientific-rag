@@ -153,6 +153,27 @@ test("Document Manager renders batch eligibility and partial outcomes", () => {
   assert.match(source, /No documents were selected for this batch/);
 });
 
+test("Document Manager refreshes rows, Source Viewer, and readiness after batches", () => {
+  assert.match(source, /function refreshDocumentManagerAfterBatch/);
+  assert.match(source, /await loadDocuments\(repositoryId\)/);
+  assert.match(source, /await loadChatReadiness\(repositoryId\)/);
+  assert.match(source, /await loadDashboardSummary\(repositoryId\)/);
+  assert.match(source, /inspectDocument\(repositoryId, inspectionTargetId\)/);
+  assert.match(source, /refreshedDocuments\.some\(\(document\) => document\.id === inspectionTargetId\)/);
+  assert.match(source, /await refreshDocumentManagerAfterBatch\(repository\.id, payload, deletedIds\)/);
+});
+
+test("Document Manager surfaces stale retrieval guidance after content-changing batches", () => {
+  assert.match(source, /function documentBatchChangesRepositoryContent/);
+  assert.match(source, /outcome\.status === "deleted"/);
+  assert.match(source, /outcome\.action === "reprocess"/);
+  assert.match(source, /outcome\.action === "ocr"/);
+  assert.match(source, /setLastRebuild\(null\)/);
+  assert.match(source, /setSearchResults\(\[\]\)/);
+  assert.match(source, /Document content changed; rebuild full-text\/vector indexes/);
+  assert.match(source, /Document content changed; check retrieval readiness/);
+});
+
 test("Document Manager supports direct row delete and delete all actions", () => {
   assert.match(source, /function deleteDocument/);
   assert.match(source, /function deleteAllDocuments/);
