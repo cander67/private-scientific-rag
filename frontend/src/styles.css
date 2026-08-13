@@ -708,6 +708,27 @@ textarea {
   justify-content: flex-end;
 }
 
+.search-stale-repair {
+  border-color: var(--warn);
+}
+
+.search-stale-repair h2 {
+  font-size: 1rem;
+}
+
+.search-stale-repair-summary {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--s4);
+  padding-top: var(--s3);
+}
+
+.search-stale-repair-summary small {
+  color: var(--text-faint);
+}
+
 .sandbox-layout {
   display: flex;
   flex-direction: column;

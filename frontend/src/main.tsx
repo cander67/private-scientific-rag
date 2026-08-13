@@ -1041,6 +1041,8 @@ function App() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchMessage, setSearchMessage] = useState("Rebuild the full-text index, then run a query.");
+  const [searchRepairBusy, setSearchRepairBusy] = useState(false);
+  const [searchStaleRepairResult, setSearchStaleRepairResult] = useState<DocumentBatchResponse | null>(null);
   const [lastRebuild, setLastRebuild] = useState<SearchRebuildResponse | null>(null);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
@@ -2442,6 +2444,7 @@ function App() {
         setSearchMessage(`Indexed ${payload.indexed_chunks} chunks`);
       }
       await loadDashboardSummary(repository.id);
+      setSearchStaleRepairResult(null);
     } catch (error) {
       setSearchMessage(`${searchModeLabel(searchMode)} rebuild failed: ${errorMessage(error)}`);
     } finally {
@@ -2470,6 +2473,7 @@ function App() {
       const payload = (await response.json()) as RetrievalSearchResponse;
       setSearchResults(payload.results.map((result) => ({ ...result, mode: searchMode })));
       void loadDashboardSummary(repository.id);
+      setSearchStaleRepairResult(null);
       setSearchMessage(`${payload.results.length} results · run ${payload.run_id.slice(0, 8)}`);
     } catch (error) {
       setSearchMessage(
@@ -2478,6 +2482,38 @@ function App() {
       setSearchResults([]);
     } finally {
       setSearchBusy(false);
+    }
+  }
+
+  async function repairSearchStaleDocuments() {
+    if (!repository) {
+      return;
+    }
+    setSearchRepairBusy(true);
+    setSearchMessage("Reprocessing repository documents for Search Lab");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/documents/batch/reprocess`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          document_ids: [],
+          all_repository_documents: true,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await apiErrorMessage(response, "reprocess failed"));
+      }
+      const payload = (await response.json()) as DocumentBatchResponse;
+      setSearchStaleRepairResult(payload);
+      setLastRebuild(null);
+      setSearchResults([]);
+      await loadDocuments(repository.id);
+      await loadDashboardSummary(repository.id);
+      setSearchMessage(searchStaleRepairSummary(payload));
+    } catch (error) {
+      setSearchMessage(`Search Lab reprocess failed: ${errorMessage(error)}`);
+    } finally {
+      setSearchRepairBusy(false);
     }
   }
 
@@ -3136,7 +3172,9 @@ function App() {
                 patentSection={searchPatentSection}
                 results={searchResults}
                 busy={searchBusy}
+                repairBusy={searchRepairBusy}
                 message={searchMessage}
+                staleRepairResult={searchStaleRepairResult}
                 lastRebuild={lastRebuild}
                 onModeChange={(mode) => {
                   setSearchMode(mode);
@@ -3159,6 +3197,7 @@ function App() {
                 onPatentSectionChange={setSearchPatentSection}
                 onRebuild={() => void rebuildSearchIndex()}
                 onSearch={() => void runSearch()}
+                onRepairStaleDocuments={() => void repairSearchStaleDocuments()}
                 onCopyToChat={copySearchSettingsToChat}
                 onPromoteToDefaults={() => void promoteSearchSettingsToRepositoryDefaults()}
                 onOpenResult={openSearchResult}
@@ -7681,7 +7720,9 @@ function SearchLab({
   patentSection,
   results,
   busy,
+  repairBusy,
   message,
+  staleRepairResult,
   lastRebuild,
   onModeChange,
   onRerankerStrategyChange,
@@ -7699,6 +7740,7 @@ function SearchLab({
   onPatentSectionChange,
   onRebuild,
   onSearch,
+  onRepairStaleDocuments,
   onCopyToChat,
   onPromoteToDefaults,
   onOpenResult,
@@ -7721,7 +7763,9 @@ function SearchLab({
   patentSection: string;
   results: SearchResult[];
   busy: boolean;
+  repairBusy: boolean;
   message: string;
+  staleRepairResult: DocumentBatchResponse | null;
   lastRebuild: SearchRebuildResponse | null;
   onModeChange: (value: SearchMode) => void;
   onRerankerStrategyChange: (value: RerankerStrategy) => void;
@@ -7739,10 +7783,12 @@ function SearchLab({
   onPatentSectionChange: (value: string) => void;
   onRebuild: () => void;
   onSearch: () => void;
+  onRepairStaleDocuments: () => void;
   onCopyToChat: () => void;
   onPromoteToDefaults: () => void;
   onOpenResult: (result: SearchResult) => void;
 }) {
+  const staleRepairAvailable = isParserChunkStaleMessage(message) || Boolean(staleRepairResult);
   const sections = Array.from(
     new Set(
       documents
@@ -8006,6 +8052,35 @@ function SearchLab({
           Manual rebuild
         </span>
       </div>
+
+      {staleRepairAvailable && (
+        <section className="card search-stale-repair">
+          <div className="row row-between">
+            <div>
+              <div className="eyebrow">Stale parser/chunk settings</div>
+              <h2>Reprocess repository documents</h2>
+              <p className="muted">
+                Reprocess refreshes parsed chunks only. Rebuild full-text, vector, or hybrid indexes after it completes.
+              </p>
+            </div>
+            <button
+              className={`btn btn-primary ${repairBusy ? "btn-running" : ""}`}
+              type="button"
+              onClick={onRepairStaleDocuments}
+              disabled={busy || repairBusy || !repositoryReady}
+              aria-busy={repairBusy}
+            >
+              {repairBusy ? "Reprocessing..." : "Reprocess repository"}
+            </button>
+          </div>
+          {staleRepairResult && (
+            <div className="search-stale-repair-summary">
+              <strong>{searchStaleRepairSummary(staleRepairResult)}</strong>
+              <small>Index rebuilds remain manual after reprocess.</small>
+            </div>
+          )}
+        </section>
+      )}
 
       {busy ? (
         <div className="card card-pad-sm">
@@ -8392,6 +8467,20 @@ function documentBatchBusyMessage(action: DocumentBatchAction, allRepositoryDocu
 function documentBatchSummary(result: DocumentBatchResponse) {
   const counts = documentBatchStatusCounts(result);
   return `${documentBatchActionLabel(result.action)} complete: ${documentBatchCountsLabel(counts)}`;
+}
+
+function searchStaleRepairSummary(result: DocumentBatchResponse) {
+  const counts = documentBatchStatusCounts(result);
+  return `Search Lab reprocess complete: ${counts.completed} completed · ${counts.skipped} skipped · ${counts.failed} failed · ${counts.missing_source} missing-source`;
+}
+
+function isParserChunkStaleMessage(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("parser/chunk settings are stale") ||
+    normalized.includes("parser or chunking settings changed") ||
+    (normalized.includes("reprocess") && normalized.includes("stale documents"))
+  );
 }
 
 function documentBatchChangesRepositoryContent(result: DocumentBatchResponse) {

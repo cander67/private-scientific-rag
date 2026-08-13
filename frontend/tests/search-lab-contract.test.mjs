@@ -49,6 +49,31 @@ test("Search Lab preserves backend setup guidance in rebuild and search failures
   assert.match(source, /payload\.detail/);
 });
 
+test("Search Lab offers stale parser chunk repair through repository reprocess", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(source, /function repairSearchStaleDocuments/);
+  assert.match(source, /documents\/batch\/reprocess/);
+  assert.match(source, /all_repository_documents: true/);
+  assert.match(source, /isParserChunkStaleMessage/);
+  assert.match(source, /parser\/chunk settings are stale/);
+  assert.match(source, /parser or chunking settings changed/);
+  assert.match(source, /Reprocess repository documents/);
+  assert.match(source, /Reprocess repository/);
+  assert.match(source, /searchStaleRepairSummary/);
+  assert.match(source, /counts\.completed/);
+  assert.match(source, /counts\.skipped/);
+  assert.match(source, /counts\.failed/);
+  assert.match(source, /counts\.missing_source/);
+  assert.match(source, /await loadDocuments\(repository\.id\)/);
+  assert.match(source, /await loadDashboardSummary\(repository\.id\)/);
+  assert.match(source, /setSearchResults\(\[\]\)/);
+  assert.match(source, /setLastRebuild\(null\)/);
+  assert.match(source, /Index rebuilds remain manual after reprocess/);
+  assert.match(styles, /\.search-stale-repair/);
+  assert.match(styles, /\.search-stale-repair-summary/);
+});
+
 test("Search Lab can route a result into Source Viewer", () => {
   assert.match(source, /function openSearchResult/);
   assert.match(source, /setSelectedDocumentId\(result\.document_id\)/);
