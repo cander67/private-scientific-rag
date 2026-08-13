@@ -1,6 +1,6 @@
 # PRD 28: Document Manager Preview and Batch Actions
 
-**Status:** Backlog.
+**Status:** Complete and closed.
 
 ## Problem Statement
 
@@ -93,3 +93,7 @@ This PRD is a follow-up to closed PRD3 and review-ready PRD13. It does not reope
 
 - This PRD should coordinate with PRD13 for OCR eligibility and warnings, and with PRD24 for future storage cleanup categories.
 - If real batch OCR becomes slow enough to need progress updates, a later PRD can introduce jobs/progress without changing the selected-document and batch-result contract.
+
+## Closure Notes
+
+Closed on `doc-manager-upgrades` after Phases 1 through 4 delivered row-click document metadata preview, selected/full-repository batch reprocess, selected batch OCR/delete, partial result summaries, post-batch table/card/Source Viewer refresh, and retrieval freshness guidance. Deterministic local quality gates passed during implementation, and CI passed after the Phase 4 commit was pushed.
