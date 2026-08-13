@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from private_rag.core.settings import Settings
+from private_rag.ingestion.tokenizer_catalog import lookup_tokenizer_catalog_entry
 from private_rag.retrieval.schemas import RepositoryRetrievalSettings
 from private_rag.vector.model_registry import (
     EmbeddingModelCompatibilityError,
@@ -24,6 +25,18 @@ class ChunkingSettings(BaseModel):
     chunk_size: int = Field(default=DEFAULT_CHUNK_SIZE_TOKENS, ge=100, le=8000)
     chunk_overlap: int = Field(default=DEFAULT_CHUNK_OVERLAP_TOKENS, ge=0)
     mode: Literal["recursive", "semantic", "fixed"] = "recursive"
+    tokenizer_mode: Literal["auto", "manual"] = "auto"
+    tokenizer_id: str | None = None
+
+    @model_validator(mode="after")
+    def validate_tokenizer_selection(self) -> ChunkingSettings:
+        if self.tokenizer_mode == "auto":
+            return self
+        if not self.tokenizer_id:
+            raise ValueError("chunking.tokenizer_id is required when tokenizer_mode is manual")
+        if lookup_tokenizer_catalog_entry(self.tokenizer_id) is None:
+            raise ValueError(f"Unsupported chunk tokenizer: {self.tokenizer_id}.")
+        return self
 
 
 STRUCTURED_PARSER_CHOICES = frozenset(
@@ -300,6 +313,9 @@ class EmbeddingModelCatalogEntry(BaseModel):
     setup_hint: str
     requires_local_model: bool
     requires_live_probe: bool
+    tokenizer_id: str | None = None
+    tokenizer_implementation_library: str | None = None
+    tokenizer_offset_mapping: bool = False
     tokenizer_name: str | None = None
     tokenizer_source: str | None = None
     tokenizer_precision: Literal["exact", "fallback"] = "fallback"
@@ -344,12 +360,28 @@ class ParserCatalogEntry(BaseModel):
     readiness_required: bool = False
 
 
+class TokenizerCatalogEntryResponse(BaseModel):
+    id: str
+    label: str
+    provider: Literal["sentence_transformers", "ollama", "openai", "private_rag"]
+    implementation_library: Literal["transformers", "tiktoken", "regex"]
+    tokenizer_name: str
+    tokenizer_source: str
+    precision: Literal["exact", "fallback"]
+    offset_mapping: bool
+    requires_local_model: bool
+    is_fallback: bool
+    notes: str
+    fallback_warning: str | None = None
+
+
 class RepositoryModelCatalogResponse(BaseModel):
     repository_id: str
     embedding_models: list[EmbeddingModelCatalogEntry]
     chat_models: list[ChatModelCatalogEntry]
     reranker_models: list[RerankerModelCatalogEntry]
     parser_choices: list[ParserCatalogEntry]
+    tokenizer_catalog: list[TokenizerCatalogEntryResponse]
     runtime_detection: ModelCatalogRuntimeDetection
 
 

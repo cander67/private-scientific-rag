@@ -217,6 +217,22 @@ def test_settings_impact_reports_parser_choice_changes() -> None:
     ]
 
 
+def test_settings_impact_reports_chunk_tokenizer_changes() -> None:
+    current = RepositorySettings.from_app_settings(Settings())
+    draft_payload = current.model_dump(mode="json")
+    draft_payload["chunking"]["tokenizer_mode"] = "manual"
+    draft_payload["chunking"]["tokenizer_id"] = "tiktoken:cl100k_base"
+    draft = RepositorySettings.model_validate(draft_payload)
+
+    result = analyze_settings_impact(current, draft)
+
+    reprocessing = next(
+        impact for impact in result.impacts if impact.category == "document_reprocessing"
+    )
+    assert "chunking.tokenizer_mode" in reprocessing.fields
+    assert "chunking.tokenizer_id" in reprocessing.fields
+
+
 def test_settings_impact_reports_retrieval_chat_and_prompt_defaults() -> None:
     current = RepositorySettings.from_app_settings(Settings())
     draft_payload = current.model_dump(mode="json")
@@ -418,11 +434,46 @@ def test_model_catalog_uses_known_metadata_without_runtime_detection() -> None:
         ("sentence_transformers", "sentence-transformers/all-MiniLM-L6-v2", 384),
         ("ollama", "embeddinggemma:300m", 768),
     } <= {(entry.provider, entry.model, entry.vector_size) for entry in catalog.embedding_models}
+    assert {
+        ("tiktoken:cl100k_base", "tiktoken", "exact"),
+        ("private-rag/simple-token-fallback-v1", "regex", "fallback"),
+    } <= {
+        (entry.id, entry.implementation_library, entry.precision)
+        for entry in catalog.tokenizer_catalog
+    }
+    minilm = next(
+        entry
+        for entry in catalog.embedding_models
+        if entry.model == "sentence-transformers/all-MiniLM-L6-v2"
+    )
+    assert minilm.tokenizer_id == "hf:sentence-transformers/all-MiniLM-L6-v2"
+    assert minilm.tokenizer_implementation_library == "transformers"
+    assert minilm.tokenizer_offset_mapping is True
     assert any(entry.name == "llama3.2:3b" and entry.required for entry in catalog.chat_models)
     assert any(
         entry.strategy == "cross_encoder" and entry.model == "cross-encoder/test"
         for entry in catalog.reranker_models
     )
+
+
+def test_repository_settings_accept_manual_catalog_tokenizer() -> None:
+    payload = RepositorySettings.from_app_settings(Settings()).model_dump(mode="json")
+    payload["chunking"]["tokenizer_mode"] = "manual"
+    payload["chunking"]["tokenizer_id"] = "tiktoken:o200k_base"
+
+    settings = RepositorySettings.model_validate(payload)
+
+    assert settings.chunking.tokenizer_mode == "manual"
+    assert settings.chunking.tokenizer_id == "tiktoken:o200k_base"
+
+
+def test_repository_settings_reject_unknown_manual_tokenizer() -> None:
+    payload = RepositorySettings.from_app_settings(Settings()).model_dump(mode="json")
+    payload["chunking"]["tokenizer_mode"] = "manual"
+    payload["chunking"]["tokenizer_id"] = "made-up-tokenizer"
+
+    with pytest.raises(ValueError, match="Unsupported chunk tokenizer"):
+        RepositorySettings.model_validate(payload)
 
 
 def test_recreate_validation_reports_missing_files_and_models(tmp_path: Path) -> None:

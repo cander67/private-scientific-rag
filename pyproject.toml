@@ -17,6 +17,7 @@ dependencies = [
     "python-multipart>=0.0.20",
     "sentence-transformers>=3.0.0",
     "sqlalchemy>=2.0.35",
+    "tiktoken>=0.13.0",
     "uvicorn[standard]>=0.30.6",
 ]
 

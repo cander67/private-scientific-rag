@@ -20,11 +20,13 @@ Parser settings use catalog-backed choices plus `Auto`. `Auto` preserves a stabl
 
 ## Tokenizers
 
-Chunking tokenizers are resolved from the repository embedding settings. SentenceTransformers embedding models use the selected model tokenizer when it is available locally. Known Ollama embedding models use registry-declared tokenizer metadata; when exact tokenizer access is unavailable, the app records an explicit fallback tokenizer instead of labeling the count as exact.
+Chunking tokenizers default to `auto`, which resolves from repository embedding settings. SentenceTransformers embedding models use their HuggingFace tokenizer through `transformers` when it is available locally. Known Ollama embedding models use registry-declared tokenizer metadata; when an exact tokenizer mapping is not available, the registry names `private-rag/simple-token-fallback-v1` as an approximate fallback instead of labeling the count as exact.
 
-Every parsed version fingerprint and generated chunk records tokenizer metadata: provider, tokenizer name, tokenizer source, precision, and any fallback reason. Changing the embedding provider/model, tokenizer metadata, chunk mode, chunk size, or overlap makes existing parsed chunks stale and requires document reprocessing before indexes are fresh again.
+Settings / Models exposes manual tokenizer IDs for advanced users. Current catalog-backed IDs include `hf:sentence-transformers/all-MiniLM-L6-v2`, `hf:sentence-transformers/all-mpnet-base-v2`, `tiktoken:cl100k_base`, `tiktoken:o200k_base`, and `private-rag/simple-token-fallback-v1`. `tiktoken` entries use exact OpenAI-style encodings with source offsets; HuggingFace entries require the model tokenizer to be cached locally; the fallback regex tokenizer counts word-like runs plus individual punctuation/symbol tokens.
 
-Export/recreate bundles include these tokenizer details in document-version fingerprints and chunk payloads. Bundle validation reports the recorded tokenizer strategies, warns when fallback tokenizers were used, and warns when chunk tokenizer metadata does not match its version fingerprint.
+Every parsed version fingerprint and generated chunk records tokenizer metadata: provider, tokenizer ID, tokenizer name, implementation library, tokenizer source, precision, selection mode, offset support, fallback status, and any fallback reason. Changing the embedding provider/model, manual tokenizer mode/ID, chunk mode, chunk size, or overlap makes existing parsed chunks stale and requires document reprocessing before indexes are fresh again.
+
+Export/recreate bundles include these tokenizer details in document-version fingerprints and chunk payloads. Bundle validation reports the recorded tokenizer ID and implementation library, warns when fallback tokenizers were used, and warns when chunk tokenizer metadata does not match its version fingerprint.
 
 Full-text search has a separate SQLite FTS tokenizer setting. Current full-text tokenizer choices are `unicode61` and `porter`.
 

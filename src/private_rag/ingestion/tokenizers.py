@@ -3,13 +3,20 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
+from private_rag.ingestion.tokenizer_catalog import (
+    FALLBACK_TOKENIZER_ID,
+    TokenizerImplementationLibrary,
+    TokenizerPrecision,
+    TokenizerProvider,
+    huggingface_tokenizer_id,
+    lookup_tokenizer_catalog_entry,
+)
 from private_rag.repositories.schemas import RepositorySettings
 from private_rag.vector.model_registry import lookup_embedding_model
 
-TokenizerProvider = Literal["sentence_transformers", "ollama", "private_rag"]
-TokenizerPrecision = Literal["exact", "fallback"]
+TokenizerSelectionMode = Literal["auto", "manual"]
 
 
 @dataclass(frozen=True)
@@ -33,17 +40,27 @@ class TextTokenizer(Protocol):
 @dataclass(frozen=True)
 class TokenizerMetadata:
     provider: TokenizerProvider
+    tokenizer_id: str
     tokenizer_name: str
     tokenizer_source: str
+    implementation_library: TokenizerImplementationLibrary
     precision: TokenizerPrecision
+    selection_mode: TokenizerSelectionMode = "auto"
+    offset_mapping: bool = True
+    is_fallback: bool = False
     fallback_reason: str | None = None
 
-    def model_dump(self) -> dict[str, str]:
+    def model_dump(self) -> dict[str, object]:
         payload = {
             "provider": self.provider,
+            "tokenizer_id": self.tokenizer_id,
             "tokenizer_name": self.tokenizer_name,
             "tokenizer_source": self.tokenizer_source,
+            "implementation_library": self.implementation_library,
             "precision": self.precision,
+            "selection_mode": self.selection_mode,
+            "offset_mapping": self.offset_mapping,
+            "is_fallback": self.is_fallback,
         }
         if self.fallback_reason:
             payload["fallback_reason"] = self.fallback_reason
@@ -59,7 +76,7 @@ class ResolvedTokenizer:
 SentenceTransformersTokenizerLoader = Callable[[str], TextTokenizer]
 
 
-FALLBACK_TOKENIZER_NAME = "private-rag/simple-token-fallback-v1"
+FALLBACK_TOKENIZER_NAME = FALLBACK_TOKENIZER_ID
 _TOKEN_PATTERN = re.compile(r"\w+|[^\w\s]", re.UNICODE)
 
 
@@ -110,11 +127,43 @@ class HuggingFaceTokenizer:
         return len(self.encode(text))
 
 
+class TiktokenTokenizer:
+    def __init__(self, encoding_name: str) -> None:
+        import tiktoken
+
+        self._encoding = tiktoken.get_encoding(encoding_name)
+
+    def encode(self, text: str) -> list[str]:
+        return [str(token) for token in self._encoding.encode(text)]
+
+    def spans(self, text: str) -> list[TokenSpan]:
+        token_ids = self._encoding.encode(text)
+        decoded, offsets = self._encoding.decode_with_offsets(token_ids)
+        if decoded != text:
+            return SimpleTokenFallbackTokenizer().spans(text)
+        return [
+            TokenSpan(
+                token=str(token_id),
+                char_start=int(offset),
+                char_end=int(offsets[index + 1] if index + 1 < len(offsets) else len(text)),
+            )
+            for index, (token_id, offset) in enumerate(zip(token_ids, offsets, strict=False))
+        ]
+
+    def count(self, text: str) -> int:
+        return len(self.encode(text))
+
+
 def resolve_tokenizer(
     repository_settings: RepositorySettings,
     *,
     sentence_transformers_loader: SentenceTransformersTokenizerLoader | None = None,
 ) -> ResolvedTokenizer:
+    if repository_settings.chunking.tokenizer_mode == "manual":
+        return _resolve_manual_tokenizer(
+            repository_settings.chunking.tokenizer_id,
+            sentence_transformers_loader=sentence_transformers_loader,
+        )
     provider = repository_settings.embedding.provider
     model = repository_settings.embedding.model
     if provider == "sentence_transformers":
@@ -144,9 +193,13 @@ def _resolve_sentence_transformers_tokenizer(
         tokenizer=tokenizer,
         metadata=TokenizerMetadata(
             provider="sentence_transformers",
+            tokenizer_id=huggingface_tokenizer_id(model),
             tokenizer_name=model,
             tokenizer_source="sentence_transformers_model",
+            implementation_library="transformers",
             precision="exact",
+            selection_mode="auto",
+            offset_mapping=True,
         ),
     )
 
@@ -164,9 +217,17 @@ def _resolve_ollama_tokenizer(model: str) -> ResolvedTokenizer:
             tokenizer=SimpleTokenFallbackTokenizer(),
             metadata=TokenizerMetadata(
                 provider="ollama",
+                tokenizer_id=metadata.tokenizer_id or FALLBACK_TOKENIZER_NAME,
                 tokenizer_name=metadata.tokenizer_name,
                 tokenizer_source=metadata.tokenizer_source,
+                implementation_library=cast(
+                    TokenizerImplementationLibrary,
+                    metadata.tokenizer_implementation_library or "regex",
+                ),
                 precision=metadata.tokenizer_precision,
+                selection_mode="auto",
+                offset_mapping=metadata.tokenizer_offset_mapping,
+                is_fallback=metadata.tokenizer_precision == "fallback",
                 fallback_reason=(
                     f"Ollama model '{model}' uses the registry-declared fallback tokenizer."
                     if metadata.tokenizer_precision == "fallback"
@@ -177,14 +238,76 @@ def _resolve_ollama_tokenizer(model: str) -> ResolvedTokenizer:
     return _fallback(f"Ollama model '{model}' does not have tokenizer registry metadata.")
 
 
-def _fallback(reason: str) -> ResolvedTokenizer:
+def _resolve_manual_tokenizer(
+    tokenizer_id: str | None,
+    *,
+    sentence_transformers_loader: SentenceTransformersTokenizerLoader | None,
+) -> ResolvedTokenizer:
+    if tokenizer_id is None:
+        return _fallback(
+            "Manual tokenizer selection requires tokenizer_id.", selection_mode="manual"
+        )
+    entry = lookup_tokenizer_catalog_entry(tokenizer_id)
+    if entry is None:
+        return _fallback(
+            f"Manual tokenizer '{tokenizer_id}' is not in the tokenizer catalog.",
+            selection_mode="manual",
+        )
+    if entry.implementation_library == "regex":
+        return _fallback("Manual fallback tokenizer selected.", selection_mode="manual")
+    if entry.implementation_library == "tiktoken":
+        return ResolvedTokenizer(
+            tokenizer=TiktokenTokenizer(entry.tokenizer_name),
+            metadata=TokenizerMetadata(
+                provider=entry.provider,
+                tokenizer_id=entry.id,
+                tokenizer_name=entry.tokenizer_name,
+                tokenizer_source=entry.tokenizer_source,
+                implementation_library=entry.implementation_library,
+                precision=entry.precision,
+                selection_mode="manual",
+                offset_mapping=entry.offset_mapping,
+                is_fallback=entry.is_fallback,
+            ),
+        )
+    loader = sentence_transformers_loader or _load_huggingface_tokenizer
+    try:
+        tokenizer = loader(entry.tokenizer_name)
+    except Exception as exc:
+        return _fallback(
+            f"Manual HuggingFace tokenizer '{entry.tokenizer_name}' is not available locally "
+            f"({type(exc).__name__}).",
+            selection_mode="manual",
+        )
+    return ResolvedTokenizer(
+        tokenizer=tokenizer,
+        metadata=TokenizerMetadata(
+            provider=entry.provider,
+            tokenizer_id=entry.id,
+            tokenizer_name=entry.tokenizer_name,
+            tokenizer_source=entry.tokenizer_source,
+            implementation_library=entry.implementation_library,
+            precision=entry.precision,
+            selection_mode="manual",
+            offset_mapping=entry.offset_mapping,
+            is_fallback=entry.is_fallback,
+        ),
+    )
+
+
+def _fallback(reason: str, *, selection_mode: TokenizerSelectionMode = "auto") -> ResolvedTokenizer:
     return ResolvedTokenizer(
         tokenizer=SimpleTokenFallbackTokenizer(),
         metadata=TokenizerMetadata(
             provider="private_rag",
+            tokenizer_id=FALLBACK_TOKENIZER_NAME,
             tokenizer_name=FALLBACK_TOKENIZER_NAME,
             tokenizer_source="app_fallback",
+            implementation_library="regex",
             precision="fallback",
+            selection_mode=selection_mode,
+            offset_mapping=True,
+            is_fallback=True,
             fallback_reason=reason,
         ),
     )

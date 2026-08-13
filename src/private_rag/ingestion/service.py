@@ -637,7 +637,7 @@ def _attach_parser_fingerprint(
     parsed: ParsedDocument,
     repository_settings: RepositorySettings,
     source_hash: str,
-    tokenizer_metadata: dict[str, str] | None = None,
+    tokenizer_metadata: dict[str, object] | None = None,
 ) -> None:
     payload = _parser_fingerprint_payload(
         parsed=parsed,
@@ -654,7 +654,7 @@ def _parser_fingerprint_payload(
     parsed: ParsedDocument,
     repository_settings: RepositorySettings,
     source_hash: str,
-    tokenizer_metadata: dict[str, str] | None = None,
+    tokenizer_metadata: dict[str, object] | None = None,
 ) -> dict[str, object]:
     return {
         "parser": repository_settings.parser.model_dump(mode="json"),
@@ -678,10 +678,17 @@ def _parser_fingerprint_changed_fields(
         "chunking.chunk_unit",
         "chunking.chunk_size",
         "chunking.chunk_overlap",
+        "chunking.tokenizer_mode",
+        "chunking.tokenizer_id",
         "tokenizer.provider",
+        "tokenizer.tokenizer_id",
         "tokenizer.tokenizer_name",
         "tokenizer.tokenizer_source",
+        "tokenizer.implementation_library",
         "tokenizer.precision",
+        "tokenizer.selection_mode",
+        "tokenizer.offset_mapping",
+        "tokenizer.is_fallback",
         "tokenizer.fallback_reason",
         "source_hash",
     ):
@@ -1263,7 +1270,7 @@ def _chunk_parsed_document(
     return chunks
 
 
-def _tokenizer_metadata_for_settings(repository_settings: RepositorySettings) -> dict[str, str]:
+def _tokenizer_metadata_for_settings(repository_settings: RepositorySettings) -> dict[str, object]:
     return resolve_tokenizer(repository_settings).metadata.model_dump()
 
 

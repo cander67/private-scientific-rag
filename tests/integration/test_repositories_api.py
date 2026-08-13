@@ -233,6 +233,9 @@ def test_repository_settings_model_catalog_returns_known_defaults() -> None:
     assert minilm["source"] == "known"
     assert minilm["vector_size"] == 384
     assert minilm["supported_distances"] == ["cosine", "dot", "euclid"]
+    assert minilm["tokenizer_id"] == "hf:sentence-transformers/all-MiniLM-L6-v2"
+    assert minilm["tokenizer_implementation_library"] == "transformers"
+    assert minilm["tokenizer_offset_mapping"] is True
     assert minilm["tokenizer_precision"] == "exact"
     assert minilm["tokenizer_source"] == "sentence_transformers_model"
     ollama_embedding = embedding_by_model[("ollama", "embeddinggemma:300m")]
@@ -240,6 +243,13 @@ def test_repository_settings_model_catalog_returns_known_defaults() -> None:
     assert ollama_embedding["supported_distances"] == ["cosine"]
     assert ollama_embedding["tokenizer_precision"] == "fallback"
     assert ollama_embedding["tokenizer_source"] == "ollama_registry_fallback"
+    assert {
+        ("tiktoken:cl100k_base", "tiktoken", "exact"),
+        ("private-rag/simple-token-fallback-v1", "regex", "fallback"),
+    } <= {
+        (entry["id"], entry["implementation_library"], entry["precision"])
+        for entry in payload["tokenizer_catalog"]
+    }
     assert any(
         entry["name"] == created["settings"]["model"]["ollama_chat_model"]
         and entry["source"] == "known"

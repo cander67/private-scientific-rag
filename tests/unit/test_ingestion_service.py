@@ -114,9 +114,14 @@ def _resolved_calibration_tokenizer() -> ResolvedTokenizer:
         tokenizer=SimpleTokenFallbackTokenizer(),
         metadata=TokenizerMetadata(
             provider="private_rag",
+            tokenizer_id="private-rag/simple-token-fallback-v1",
             tokenizer_name="private-rag/simple-token-fallback-v1",
             tokenizer_source="calibration_fixture",
+            implementation_library="regex",
             precision="fallback",
+            selection_mode="auto",
+            offset_mapping=True,
+            is_fallback=True,
             fallback_reason="deterministic fixture test",
         ),
     )
@@ -825,9 +830,14 @@ def test_recursive_chunk_creation_records_token_metadata_and_source_fields() -> 
         tokenizer=tokenizer,
         metadata=TokenizerMetadata(
             provider="private_rag",
+            tokenizer_id="fake",
             tokenizer_name="fake",
             tokenizer_source="test",
+            implementation_library="regex",
             precision="fallback",
+            selection_mode="manual",
+            offset_mapping=True,
+            is_fallback=True,
             fallback_reason="unit test",
         ),
     )
@@ -867,9 +877,14 @@ def test_recursive_chunk_creation_records_token_metadata_and_source_fields() -> 
     assert all(chunk.extra_metadata["token_count"] <= 3 for chunk in chunks)
     assert chunks[0].extra_metadata["tokenizer"] == {
         "provider": "private_rag",
+        "tokenizer_id": "fake",
         "tokenizer_name": "fake",
         "tokenizer_source": "test",
+        "implementation_library": "regex",
         "precision": "fallback",
+        "selection_mode": "manual",
+        "offset_mapping": True,
+        "is_fallback": True,
         "fallback_reason": "unit test",
     }
     assert chunks[0].extra_metadata["source_hash"] == "hash"
@@ -1105,9 +1120,14 @@ def test_fixed_chunk_creation_records_token_window_metadata() -> None:
         tokenizer=tokenizer,
         metadata=TokenizerMetadata(
             provider="private_rag",
+            tokenizer_id="fake-fixed",
             tokenizer_name="fake-fixed",
             tokenizer_source="test",
+            implementation_library="regex",
             precision="fallback",
+            selection_mode="manual",
+            offset_mapping=True,
+            is_fallback=True,
         ),
     )
 

@@ -73,6 +73,9 @@ test("Source Viewer displays PRD30 chunk tokenizer metadata", () => {
   assert.match(source, /chunkTokenizerLabel/);
   assert.match(source, /chunkTokenizerPrecisionLabel/);
   assert.match(source, /tokenizerMetadata/);
+  assert.match(source, /implementation_library/);
+  assert.match(source, /selection_mode/);
+  assert.match(source, /offset_mapping/);
   assert.match(source, /<dt>tokens<\/dt>/);
   assert.match(source, /<dt>chunk tokenizer<\/dt>/);
   assert.match(source, /<dt>tokenizer precision<\/dt>/);

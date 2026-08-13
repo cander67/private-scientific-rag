@@ -1330,7 +1330,7 @@ def _report_tokenizer_metadata(
         if isinstance(version_id, str) and isinstance(tokenizer, dict):
             expected_by_version[version_id] = tokenizer
 
-    seen: set[tuple[str, str, str, str]] = set()
+    seen: set[tuple[str, str, str, str, str]] = set()
     for chunk in _payload_list(payloads, "chunks", "chunks"):
         if not isinstance(chunk, dict):
             continue
@@ -1351,10 +1351,12 @@ def _report_tokenizer_metadata(
             continue
 
         provider = str(tokenizer.get("provider") or "unknown")
+        tokenizer_id = str(tokenizer.get("tokenizer_id") or "unknown")
         name = str(tokenizer.get("tokenizer_name") or "unknown")
         source = str(tokenizer.get("tokenizer_source") or "unknown")
+        library = str(tokenizer.get("implementation_library") or "unknown")
         precision = str(tokenizer.get("precision") or "unknown")
-        key = (provider, name, source, precision)
+        key = (provider, tokenizer_id, name, library, precision)
         if key not in seen:
             seen.add(key)
             severity: Literal["warning", "info"] = "warning" if precision == "fallback" else "info"
@@ -1365,7 +1367,10 @@ def _report_tokenizer_metadata(
                     "chunk_tokenizer_fallback"
                     if precision == "fallback"
                     else "chunk_tokenizer_metadata",
-                    (f"Chunk tokenizer: {provider} / {name} ({source}, {precision} precision)."),
+                    (
+                        f"Chunk tokenizer: {provider} / {tokenizer_id} via {library} "
+                        f"({name}, {source}, {precision} precision)."
+                    ),
                     path=CHUNKS_PAYLOAD_PATH,
                 )
             )
@@ -1389,9 +1394,14 @@ def _report_tokenizer_metadata(
 def _tokenizer_compare_payload(tokenizer: Mapping[str, Any]) -> dict[str, str]:
     return {
         "provider": str(tokenizer.get("provider") or ""),
+        "tokenizer_id": str(tokenizer.get("tokenizer_id") or ""),
         "tokenizer_name": str(tokenizer.get("tokenizer_name") or ""),
         "tokenizer_source": str(tokenizer.get("tokenizer_source") or ""),
+        "implementation_library": str(tokenizer.get("implementation_library") or ""),
         "precision": str(tokenizer.get("precision") or ""),
+        "selection_mode": str(tokenizer.get("selection_mode") or ""),
+        "offset_mapping": str(tokenizer.get("offset_mapping") or ""),
+        "is_fallback": str(tokenizer.get("is_fallback") or ""),
         "fallback_reason": str(tokenizer.get("fallback_reason") or ""),
     }
 

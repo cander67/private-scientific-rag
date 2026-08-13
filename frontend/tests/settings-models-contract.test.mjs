@@ -72,10 +72,18 @@ test("Settings / Models uses the PRD23 model catalog for embedding guardrails", 
   assert.match(source, /supported_distances\.includes/);
   assert.match(source, /requires .* dimensions/);
   assert.match(source, /Custom Ollama embeddings require cosine distance and a live dimension probe/);
-  assert.match(source, /Tokenizer strategy/);
+  assert.match(source, /Resolved chunk tokenizer/);
+  assert.match(source, /settings-chunk-tokenizer-mode/);
+  assert.match(source, /settings-chunk-tokenizer-id/);
+  assert.match(source, /type TokenizerCatalogEntry =/);
+  assert.match(source, /tokenizer_catalog: TokenizerCatalogEntry\[\]/);
+  assert.match(source, /resolvedChunkTokenizer/);
   assert.match(source, /embeddingTokenizerLabel/);
+  assert.match(source, /tokenizer_id/);
+  assert.match(source, /tokenizer_implementation_library/);
   assert.match(source, /tokenizer_precision/);
-  assert.match(source, /App fallback tokenizer for custom Ollama embeddings/);
+  assert.match(source, /private-rag\/simple-token-fallback-v1 via regex/);
+  assert.match(source, /Regex fallback rule: word-like runs plus individual punctuation\/symbol tokens/);
 });
 
 test("Settings / Models uses the PRD23 model catalog for chat and reranker choices", () => {
