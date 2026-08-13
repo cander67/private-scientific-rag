@@ -26,6 +26,8 @@ from private_rag.ingestion.ocr import (
 )
 from private_rag.ingestion.parser import ParserExecutionSettings, detect_source_type, parse_source
 from private_rag.ingestion.schemas import (
+    DocumentBatchOutcome,
+    DocumentBatchResponse,
     DocumentChunkRead,
     DocumentInspection,
     DocumentRead,
@@ -533,6 +535,72 @@ def run_document_ocr(
     session.add(version)
     session.commit()
     return inspect_document(session, repository_id, document_id)
+
+
+def batch_reprocess_documents(
+    session: Session,
+    repository_id: str,
+    document_ids: list[str],
+    *,
+    all_repository_documents: bool = False,
+) -> DocumentBatchResponse | None:
+    repository = session.get(Repository, repository_id)
+    if repository is None or repository.settings is None:
+        return None
+    selected_document_ids = (
+        _repository_document_ids(session, repository_id)
+        if all_repository_documents
+        else document_ids
+    )
+    results = [
+        _batch_reprocess_one(session, repository_id, document_id)
+        for document_id in selected_document_ids
+    ]
+    return DocumentBatchResponse(
+        repository_id=repository_id,
+        action="reprocess",
+        requested_count=len(selected_document_ids),
+        attempted_count=len(results),
+        results=results,
+    )
+
+
+def batch_run_document_ocr(
+    session: Session,
+    repository_id: str,
+    document_ids: list[str],
+) -> DocumentBatchResponse | None:
+    repository = session.get(Repository, repository_id)
+    if repository is None or repository.settings is None:
+        return None
+    results = [_batch_ocr_one(session, repository_id, document_id) for document_id in document_ids]
+    return DocumentBatchResponse(
+        repository_id=repository_id,
+        action="ocr",
+        requested_count=len(document_ids),
+        attempted_count=len(results),
+        results=results,
+    )
+
+
+def batch_delete_documents(
+    session: Session,
+    repository_id: str,
+    document_ids: list[str],
+) -> DocumentBatchResponse | None:
+    repository = session.get(Repository, repository_id)
+    if repository is None:
+        return None
+    results = [
+        _batch_delete_one(session, repository_id, document_id) for document_id in document_ids
+    ]
+    return DocumentBatchResponse(
+        repository_id=repository_id,
+        action="delete",
+        requested_count=len(document_ids),
+        attempted_count=len(results),
+        results=results,
+    )
 
 
 def delete_document(session: Session, repository_id: str, document_id: str) -> bool | None:
@@ -1542,6 +1610,204 @@ def _current_version(document: Document) -> DocumentVersion | None:
         (version for version in document.versions if version.id == document.current_version_id),
         document.versions[-1] if document.versions else None,
     )
+
+
+def _repository_document_ids(session: Session, repository_id: str) -> list[str]:
+    return list(
+        session.scalars(
+            select(Document.id)
+            .where(Document.repository_id == repository_id)
+            .order_by(Document.created_at)
+        )
+    )
+
+
+def _batch_document_and_version(
+    session: Session,
+    repository_id: str,
+    document_id: str,
+) -> tuple[Document, DocumentVersion | None] | None:
+    document = session.get(Document, document_id)
+    if document is None or document.repository_id != repository_id:
+        return None
+    return document, _current_version(document)
+
+
+def _batch_reprocess_one(
+    session: Session,
+    repository_id: str,
+    document_id: str,
+) -> DocumentBatchOutcome:
+    current = _batch_document_and_version(session, repository_id, document_id)
+    if current is None:
+        return _batch_failed("reprocess", document_id, "Document not found in repository.")
+    _, current_version = current
+    if current_version is None:
+        return DocumentBatchOutcome(
+            action="reprocess",
+            document_id=document_id,
+            status="skipped",
+            error="Document has no current version to reprocess.",
+        )
+    source_missing = not Path(current_version.storage_path).exists()
+    try:
+        inspection = reprocess_document(session, repository_id, document_id)
+    except Exception as exc:
+        session.rollback()
+        return _batch_failed("reprocess", document_id, f"Reprocess failed: {type(exc).__name__}.")
+    if inspection is None:
+        return _batch_failed("reprocess", document_id, "Document not found in repository.")
+    if source_missing:
+        return _batch_outcome_from_inspection(
+            action="reprocess",
+            status="missing_source",
+            inspection=inspection,
+            error="Original source file is missing.",
+        )
+    if inspection.version.status == "failed":
+        return _batch_outcome_from_inspection(
+            action="reprocess",
+            status="failed",
+            inspection=inspection,
+            error=_first_warning(inspection.version.warnings) or "Reprocess failed.",
+        )
+    return _batch_outcome_from_inspection(
+        action="reprocess",
+        status="completed",
+        inspection=inspection,
+    )
+
+
+def _batch_ocr_one(
+    session: Session,
+    repository_id: str,
+    document_id: str,
+) -> DocumentBatchOutcome:
+    current = _batch_document_and_version(session, repository_id, document_id)
+    if current is None:
+        return _batch_failed("ocr", document_id, "Document not found in repository.")
+    _, current_version = current
+    if current_version is None:
+        return DocumentBatchOutcome(
+            action="ocr",
+            document_id=document_id,
+            status="skipped",
+            error="Document has no current version for OCR.",
+        )
+    try:
+        inspection = run_document_ocr(session, repository_id, document_id)
+    except Exception as exc:
+        session.rollback()
+        return _batch_failed("ocr", document_id, f"OCR failed: {type(exc).__name__}.")
+    if inspection is None:
+        return _batch_failed("ocr", document_id, "Document not found in repository.")
+    ocr_run = _dict_or_empty(inspection.version.metadata.get("ocr_run"))
+    run_status = str(ocr_run.get("status") or "")
+    if inspection.version.source_type != "pdf" or run_status == "not_required":
+        return _batch_outcome_from_inspection(
+            action="ocr",
+            status="ineligible",
+            inspection=inspection,
+            error=_first_warning(inspection.version.warnings) or "OCR is not required.",
+        )
+    if run_status == "missing_dependency":
+        return _batch_outcome_from_inspection(
+            action="ocr",
+            status="missing_dependency",
+            inspection=inspection,
+            error=_first_warning(inspection.version.warnings) or "OCR dependency is missing.",
+        )
+    if run_status == "skipped_existing":
+        return _batch_outcome_from_inspection(
+            action="ocr",
+            status="skipped",
+            inspection=inspection,
+            error="OCR output already exists.",
+        )
+    if run_status == "completed":
+        return _batch_outcome_from_inspection(
+            action="ocr",
+            status="completed",
+            inspection=inspection,
+        )
+    return _batch_outcome_from_inspection(
+        action="ocr",
+        status="failed",
+        inspection=inspection,
+        error=_first_warning(inspection.version.warnings) or "OCR failed.",
+    )
+
+
+def _batch_delete_one(
+    session: Session,
+    repository_id: str,
+    document_id: str,
+) -> DocumentBatchOutcome:
+    current = _batch_document_and_version(session, repository_id, document_id)
+    if current is None:
+        return _batch_failed("delete", document_id, "Document not found in repository.")
+    document, current_version = current
+    repository = session.get(Repository, repository_id)
+    repository_settings = (
+        RepositorySettings.model_validate(repository.settings.settings)
+        if repository is not None and repository.settings is not None
+        else None
+    )
+    document_read = _document_read(
+        document,
+        current_version,
+        repository_settings=repository_settings,
+    )
+    version_read = (
+        _version_read(current_version, repository_settings=repository_settings)
+        if current_version is not None
+        else None
+    )
+    try:
+        deleted = delete_document(session, repository_id, document_id)
+    except Exception as exc:
+        session.rollback()
+        return _batch_failed("delete", document_id, f"Delete failed: {type(exc).__name__}.")
+    if deleted is None:
+        return _batch_failed("delete", document_id, "Document not found in repository.")
+    return DocumentBatchOutcome(
+        action="delete",
+        document_id=document_id,
+        status="deleted",
+        document=document_read,
+        version=version_read,
+    )
+
+
+def _batch_outcome_from_inspection(
+    *,
+    action: str,
+    status: str,
+    inspection: DocumentInspection,
+    error: str | None = None,
+) -> DocumentBatchOutcome:
+    return DocumentBatchOutcome(
+        action=cast(Any, action),
+        document_id=inspection.document.id,
+        status=cast(Any, status),
+        document=inspection.document,
+        version=inspection.version,
+        warnings=inspection.version.warnings,
+        error=error,
+    )
+
+
+def _batch_failed(action: str, document_id: str, error: str) -> DocumentBatchOutcome:
+    return DocumentBatchOutcome(
+        action=cast(Any, action),
+        document_id=document_id,
+        status="failed",
+        error=error,
+    )
+
+
+def _first_warning(warnings: list[str]) -> str | None:
+    return warnings[0] if warnings else None
 
 
 def _document_read(

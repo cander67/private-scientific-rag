@@ -7,6 +7,16 @@ from pydantic import BaseModel, Field
 
 SourceType = Literal["pdf", "text", "markdown", "annotation"]
 DocumentStatus = Literal["parsed", "needs_ocr", "failed", "skipped"]
+DocumentBatchAction = Literal["reprocess", "ocr", "delete"]
+DocumentBatchStatus = Literal[
+    "completed",
+    "deleted",
+    "skipped",
+    "failed",
+    "missing_source",
+    "missing_dependency",
+    "ineligible",
+]
 
 
 class DocumentChunkRead(BaseModel):
@@ -83,6 +93,29 @@ class DocumentInspection(BaseModel):
     version: DocumentVersionRead
     chunks: list[DocumentChunkRead] = Field(default_factory=list)
     page_images: list[PageImageRead] = Field(default_factory=list)
+
+
+class DocumentBatchRequest(BaseModel):
+    document_ids: list[str] = Field(default_factory=list)
+    all_repository_documents: bool = False
+
+
+class DocumentBatchOutcome(BaseModel):
+    action: DocumentBatchAction
+    document_id: str
+    status: DocumentBatchStatus
+    document: DocumentRead | None = None
+    version: DocumentVersionRead | None = None
+    warnings: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+class DocumentBatchResponse(BaseModel):
+    repository_id: str
+    action: DocumentBatchAction
+    requested_count: int
+    attempted_count: int
+    results: list[DocumentBatchOutcome] = Field(default_factory=list)
 
 
 class ParsedSegment(BaseModel):

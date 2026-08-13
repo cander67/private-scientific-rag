@@ -6,8 +6,17 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
 from private_rag.api.routes.repositories import DbSession
-from private_rag.ingestion.schemas import DocumentInspection, DocumentRead, DocumentUploadResponse
+from private_rag.ingestion.schemas import (
+    DocumentBatchRequest,
+    DocumentBatchResponse,
+    DocumentInspection,
+    DocumentRead,
+    DocumentUploadResponse,
+)
 from private_rag.ingestion.service import (
+    batch_delete_documents,
+    batch_reprocess_documents,
+    batch_run_document_ocr,
     delete_all_documents,
     delete_document,
     document_page_image_path,
@@ -50,6 +59,47 @@ def read_repository_documents(
     if documents is None:
         raise HTTPException(status_code=404, detail="Repository not found")
     return documents
+
+
+@router.post("/batch/reprocess", response_model=DocumentBatchResponse)
+def batch_reprocess_repository_documents(
+    repository_id: str,
+    request: DocumentBatchRequest,
+    session: DbSession,
+) -> DocumentBatchResponse:
+    result = batch_reprocess_documents(
+        session,
+        repository_id,
+        request.document_ids,
+        all_repository_documents=request.all_repository_documents,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return result
+
+
+@router.post("/batch/ocr", response_model=DocumentBatchResponse)
+def batch_ocr_repository_documents(
+    repository_id: str,
+    request: DocumentBatchRequest,
+    session: DbSession,
+) -> DocumentBatchResponse:
+    result = batch_run_document_ocr(session, repository_id, request.document_ids)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return result
+
+
+@router.post("/batch/delete", response_model=DocumentBatchResponse)
+def batch_delete_repository_documents(
+    repository_id: str,
+    request: DocumentBatchRequest,
+    session: DbSession,
+) -> DocumentBatchResponse:
+    result = batch_delete_documents(session, repository_id, request.document_ids)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return result
 
 
 @router.get("/{document_id}", response_model=DocumentInspection)

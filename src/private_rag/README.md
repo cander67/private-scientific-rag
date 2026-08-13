@@ -44,6 +44,9 @@ Current API surface:
 - `GET /repositories/{repository_id}/documents/{document_id}/versions/{version_id}`: inspects an older or current document version with its chunks and provenance.
 - `GET /repositories/{repository_id}/documents/{document_id}/versions/{version_id}/page-images/{page}`: serves generated PDF page thumbnails for source inspection.
 - `POST /repositories/{repository_id}/documents/{document_id}/reprocess`: reparses the stored source file into a new current version while preserving prior versions and derived artifacts.
+- `POST /repositories/{repository_id}/documents/batch/reprocess`: reprocesses selected document IDs, or every current repository document when `all_repository_documents` is true, and returns per-document completed, skipped, failed, and missing-source outcomes.
+- `POST /repositories/{repository_id}/documents/batch/ocr`: runs OCR over selected document IDs and returns per-document completed, skipped, failed, ineligible, and missing-dependency outcomes.
+- `POST /repositories/{repository_id}/documents/batch/delete`: deletes only selected document IDs and returns per-document deleted or failed outcomes.
 - `DELETE /repositories/{repository_id}/documents/{document_id}`: deletes a document and derived chunks.
 - `DELETE /repositories/{repository_id}/documents`: deletes all documents and derived chunks for one repository.
 - `POST /repositories/{repository_id}/full-text/rebuild`: rebuilds the SQLite FTS5 sparse index for one repository.

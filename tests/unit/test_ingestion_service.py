@@ -25,6 +25,9 @@ from private_rag.ingestion.service import (
     _fixed_size_segments,
     _safe_filename,
     _write_source_file,
+    batch_delete_documents,
+    batch_reprocess_documents,
+    batch_run_document_ocr,
     delete_document,
     inspect_document,
     inspect_document_version,
@@ -713,6 +716,214 @@ def test_reprocess_missing_and_wrong_repository_return_none(tmp_path: Path) -> N
 
     assert reprocess_document(session, repository_id, "missing") is None
     assert reprocess_document(session, "other", uploaded.document.id) is None
+
+
+def test_batch_reprocess_collects_completed_missing_and_wrong_repository(
+    tmp_path: Path,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    first = upload_document(
+        session,
+        repository_id,
+        "first.txt",
+        "text/plain",
+        b"first document\n",
+        settings=Settings(data_dir=tmp_path),
+    )
+    missing_source = upload_document(
+        session,
+        repository_id,
+        "missing-source.txt",
+        "text/plain",
+        b"missing source document\n",
+        settings=Settings(data_dir=tmp_path),
+    )
+    other_document = Document(repository_id="other", display_name="other.txt")
+    session.add(other_document)
+    session.commit()
+    assert first is not None
+    assert missing_source is not None
+    Path(missing_source.version.storage_path).unlink()
+
+    result = batch_reprocess_documents(
+        session,
+        repository_id,
+        [first.document.id, missing_source.document.id, other_document.id, "missing"],
+    )
+
+    assert result is not None
+    assert result.requested_count == 4
+    assert [outcome.status for outcome in result.results] == [
+        "completed",
+        "missing_source",
+        "failed",
+        "failed",
+    ]
+    assert result.results[0].version is not None
+    assert result.results[0].version.id != first.version.id
+    assert result.results[1].error == "Original source file is missing."
+    assert result.results[2].error == "Document not found in repository."
+
+
+def test_batch_reprocess_all_repository_documents_resolves_current_repository(
+    tmp_path: Path,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    first = upload_document(
+        session,
+        repository_id,
+        "first.txt",
+        "text/plain",
+        b"first document\n",
+        settings=Settings(data_dir=tmp_path),
+    )
+    second = upload_document(
+        session,
+        repository_id,
+        "second.txt",
+        "text/plain",
+        b"second document\n",
+        settings=Settings(data_dir=tmp_path),
+    )
+    other_document = Document(repository_id="other", display_name="other.txt")
+    session.add(other_document)
+    session.commit()
+    assert first is not None
+    assert second is not None
+
+    result = batch_reprocess_documents(
+        session,
+        repository_id,
+        [],
+        all_repository_documents=True,
+    )
+
+    assert result is not None
+    assert result.requested_count == 2
+    assert result.attempted_count == 2
+    assert {outcome.document_id for outcome in result.results} == {
+        first.document.id,
+        second.document.id,
+    }
+    assert {outcome.status for outcome in result.results} == {"completed"}
+    assert other_document.id not in {outcome.document_id for outcome in result.results}
+
+
+def test_batch_ocr_classifies_ineligible_and_missing_dependency(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    text_document = upload_document(
+        session,
+        repository_id,
+        "notes.txt",
+        "text/plain",
+        b"text is not OCR eligible\n",
+        settings=Settings(data_dir=tmp_path),
+    )
+    monkeypatch.setattr(
+        ingestion_service,
+        "parse_source",
+        lambda *args, **kwargs: ParsedDocument(
+            source_type="pdf",
+            text="",
+            parser_name="pypdf",
+            parser_version="test-parser",
+            page_count=1,
+            ocr_required=True,
+            metadata={
+                "page_ocr_routes": [
+                    {
+                        "page": 1,
+                        "classification": "scanned",
+                        "text_length": 0,
+                        "word_count": 0,
+                        "image_count": 1,
+                        "quality_score": 0.1,
+                        "needs_ocr": True,
+                        "warnings": [],
+                    }
+                ]
+            },
+        ),
+    )
+    pdf_document = upload_document(
+        session,
+        repository_id,
+        "scan.pdf",
+        "application/pdf",
+        b"%PDF scan",
+        settings=Settings(data_dir=tmp_path),
+    )
+    fake_image = OcrPageImage(
+        page=1,
+        path=str(tmp_path / "ocr-page-0001.png"),
+        mime_type="image/png",
+        width=100,
+        height=120,
+        byte_size=5,
+        sha256="image-hash",
+        renderer="pymupdf",
+        source_sha256="source-hash",
+    )
+    monkeypatch.setattr(
+        ingestion_service, "render_pages_for_ocr", lambda **kwargs: ([fake_image], [])
+    )
+    monkeypatch.setattr(ingestion_service, "default_ocr_provider", lambda *args, **kwargs: None)
+    assert text_document is not None
+    assert pdf_document is not None
+
+    result = batch_run_document_ocr(
+        session,
+        repository_id,
+        [text_document.document.id, pdf_document.document.id],
+    )
+
+    assert result is not None
+    assert [outcome.status for outcome in result.results] == [
+        "ineligible",
+        "missing_dependency",
+    ]
+    assert "OCR can only run for PDF documents." in result.results[0].warnings
+    assert result.results[1].version is not None
+    assert result.results[1].version.metadata["ocr_run"]["status"] == "missing_dependency"
+
+
+def test_batch_delete_deletes_only_selected_repository_documents(tmp_path: Path) -> None:
+    session = next(_session())
+    repository_id = _repository_id(session, tmp_path)
+    selected = upload_document(
+        session,
+        repository_id,
+        "selected.txt",
+        "text/plain",
+        b"selected document\n",
+        settings=Settings(data_dir=tmp_path),
+    )
+    preserved = upload_document(
+        session,
+        repository_id,
+        "preserved.txt",
+        "text/plain",
+        b"preserved document\n",
+        settings=Settings(data_dir=tmp_path),
+    )
+    assert selected is not None
+    assert preserved is not None
+
+    result = batch_delete_documents(session, repository_id, [selected.document.id, "missing"])
+    documents = list_documents(session, repository_id)
+
+    assert result is not None
+    assert [outcome.status for outcome in result.results] == ["deleted", "failed"]
+    assert result.results[0].document is not None
+    assert inspect_document(session, repository_id, selected.document.id) is None
+    assert documents is not None
+    assert [document.id for document in documents] == [preserved.document.id]
 
 
 def test_reprocess_document_without_version_returns_none(tmp_path: Path) -> None:
