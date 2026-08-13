@@ -1049,6 +1049,8 @@ function App() {
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
   const [chatRenameBusyId, setChatRenameBusyId] = useState<string | null>(null);
+  const [chatRepairBusy, setChatRepairBusy] = useState(false);
+  const [chatStaleRepairResult, setChatStaleRepairResult] = useState<DocumentBatchResponse | null>(null);
   const [chatMessage, setChatMessage] = useState("Create a chat session or ask a question.");
   const [activeCitation, setActiveCitation] = useState<ChatCitation | null>(null);
   const [chatContextInspector, setChatContextInspector] = useState<ChatContextInspection | null>(null);
@@ -1755,7 +1757,7 @@ function App() {
     try {
       const response = await fetch(`${API_BASE}/repositories/${repositoryId}/chat/readiness`);
       if (!response.ok) {
-        throw new Error("readiness unavailable");
+        throw new Error(await apiErrorMessage(response, "readiness unavailable"));
       }
       setChatReadiness((await response.json()) as ChatReadiness);
       setChatReadinessCheckedAt(new Date().toISOString());
@@ -1763,10 +1765,10 @@ function App() {
         setChatMessage("Readiness check complete");
       }
       return true;
-    } catch {
+    } catch (error) {
       setChatReadiness(null);
       if (announce) {
-        setChatMessage("Could not check chat readiness");
+        setChatMessage(`Chat readiness failed: ${errorMessage(error)}`);
       }
       return false;
     } finally {
@@ -2060,7 +2062,7 @@ function App() {
         },
       );
       if (!response.ok) {
-        throw new Error("chat question failed");
+        throw new Error(await apiErrorMessage(response, "chat question failed"));
       }
       const payload = (await response.json()) as ChatQuestionResponse;
       setChatSessions((current) =>
@@ -2070,14 +2072,15 @@ function App() {
       setChatRetrievalSettings(payload.session.retrieval_settings);
       void loadChatReadiness(repository.id);
       void loadDashboardSummary(repository.id);
+      setChatStaleRepairResult(null);
       setChatMessage(
         `${payload.assistant_message.citations.length} citations · run ${
           payload.assistant_message.retrieval_run_id?.slice(0, 8) ?? "local"
         }`,
       );
-    } catch {
+    } catch (error) {
       setChatInput(content);
-      setChatMessage("Chat failed. Check indexes, reranker model, and Ollama setup.");
+      setChatMessage(`Chat failed: ${errorMessage(error)}`);
     } finally {
       setChatBusy(false);
     }
@@ -2104,7 +2107,7 @@ function App() {
         },
       );
       if (!response.ok) {
-        throw new Error("context preview failed");
+        throw new Error(await apiErrorMessage(response, "context preview failed"));
       }
       const payload = (await response.json()) as ChatContextInspection;
       setChatContextInspector(payload);
@@ -2114,9 +2117,10 @@ function App() {
           ? current.map((session) => (session.id === payload.session.id ? payload.session : session))
           : [payload.session, ...current],
       );
+      setChatStaleRepairResult(null);
       setChatContextInspectorMessage(payload.context_status.message);
-    } catch {
-      setChatContextInspectorMessage("Could not inspect draft context");
+    } catch (error) {
+      setChatContextInspectorMessage(`Could not inspect draft context: ${errorMessage(error)}`);
     } finally {
       setChatContextInspectorBusy(false);
     }
@@ -2244,12 +2248,45 @@ function App() {
       }
       const payload = (await response.json()) as SearchRebuildResponse;
       setChatMessage(`Indexed ${payload.indexed_chunks} ${kind} chunks`);
+      setChatStaleRepairResult(null);
       await loadChatReadiness(repository.id);
       await loadDashboardSummary(repository.id);
     } catch (error) {
       setChatMessage(`${kind} rebuild failed: ${errorMessage(error)}`);
     } finally {
       setChatRebuildBusy(null);
+    }
+  }
+
+  async function repairChatStaleDocuments() {
+    if (!repository) {
+      return;
+    }
+    setChatRepairBusy(true);
+    setChatMessage("Reprocessing repository documents for Chat Workspace");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/documents/batch/reprocess`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          document_ids: [],
+          all_repository_documents: true,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await apiErrorMessage(response, "reprocess failed"));
+      }
+      const payload = (await response.json()) as DocumentBatchResponse;
+      setChatStaleRepairResult(payload);
+      setLastRebuild(null);
+      await loadDocuments(repository.id);
+      await loadDashboardSummary(repository.id);
+      await loadChatReadiness(repository.id, false);
+      setChatMessage(chatStaleRepairSummary(payload));
+    } catch (error) {
+      setChatMessage(`Chat Workspace reprocess failed: ${errorMessage(error)}`);
+    } finally {
+      setChatRepairBusy(false);
     }
   }
 
@@ -3220,6 +3257,8 @@ function App() {
                 readinessCheckedAt={chatReadinessCheckedAt}
                 rebuildBusy={chatRebuildBusy}
                 renameBusyId={chatRenameBusyId}
+                repairBusy={chatRepairBusy}
+                staleRepairResult={chatStaleRepairResult}
                 onInputChange={setChatInput}
                 onCreateSession={() => void createChatSession()}
                 onSelectSession={setActiveChatSessionId}
@@ -3237,6 +3276,7 @@ function App() {
                 onRebuildFullText={() => void rebuildChatIndex("full-text")}
                 onRebuildVector={() => void rebuildChatIndex("vector")}
                 onCheckReadiness={() => repository && void loadChatReadiness(repository.id, true)}
+                onRepairStaleDocuments={() => void repairChatStaleDocuments()}
                 onCitationClick={setActiveCitation}
                 onCloseCitation={() => setActiveCitation(null)}
                 onOpenCitation={openChatCitation}
@@ -6854,6 +6894,8 @@ function ChatWorkspace({
   readinessCheckedAt,
   rebuildBusy,
   renameBusyId,
+  repairBusy,
+  staleRepairResult,
   onInputChange,
   onCreateSession,
   onSelectSession,
@@ -6868,6 +6910,7 @@ function ChatWorkspace({
   onRebuildFullText,
   onRebuildVector,
   onCheckReadiness,
+  onRepairStaleDocuments,
   onCitationClick,
   onCloseCitation,
   onOpenCitation,
@@ -6889,6 +6932,8 @@ function ChatWorkspace({
   readinessCheckedAt: string | null;
   rebuildBusy: "full-text" | "vector" | null;
   renameBusyId: string | null;
+  repairBusy: boolean;
+  staleRepairResult: DocumentBatchResponse | null;
   onInputChange: (value: string) => void;
   onCreateSession: () => void;
   onSelectSession: (value: string) => void;
@@ -6903,6 +6948,7 @@ function ChatWorkspace({
   onRebuildFullText: () => void;
   onRebuildVector: () => void;
   onCheckReadiness: () => void;
+  onRepairStaleDocuments: () => void;
   onCitationClick: (citation: ChatCitation) => void;
   onCloseCitation: () => void;
   onOpenCitation: (citation: ChatCitation) => void;
@@ -6912,6 +6958,10 @@ function ChatWorkspace({
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const readyForSelectedMode = chatReadyForSelectedMode(readiness, retrievalSettings);
+  const staleRepairAvailable =
+    isParserChunkStaleMessage(message) ||
+    Boolean(contextInspectorMessage && isParserChunkStaleMessage(contextInspectorMessage)) ||
+    Boolean(staleRepairResult);
   const activePrompt = settings?.prompt.library.find(
     (prompt) => prompt.id === settings.prompt.active_chat_prompt_id,
   );
@@ -7199,6 +7249,34 @@ function ChatWorkspace({
               </button>
               <span className="muted">Chat model: {activeSession?.model ?? chatDefaultModel}</span>
             </div>
+            {staleRepairAvailable && (
+              <section className="chat-stale-repair">
+                <div className="row row-between">
+                  <div>
+                    <div className="eyebrow">Stale parser/chunk settings</div>
+                    <h2>Reprocess repository documents</h2>
+                    <p className="muted">
+                      Reprocess refreshes parsed chunks only. Rebuild full-text or vector indexes after it completes.
+                    </p>
+                  </div>
+                  <button
+                    className={`btn btn-sm btn-primary ${repairBusy ? "btn-running" : ""}`}
+                    type="button"
+                    onClick={onRepairStaleDocuments}
+                    disabled={busy || repairBusy}
+                    aria-busy={repairBusy}
+                  >
+                    {repairBusy ? "Reprocessing..." : "Reprocess"}
+                  </button>
+                </div>
+                {staleRepairResult && (
+                  <div className="chat-stale-repair-summary">
+                    <strong>{chatStaleRepairSummary(staleRepairResult)}</strong>
+                    <small>Full-text and vector rebuild controls remain explicit after reprocess.</small>
+                  </div>
+                )}
+              </section>
+            )}
             <div className="chat-defaults-note">
               <strong>New chat default</strong>
               <small>
@@ -8472,6 +8550,11 @@ function documentBatchSummary(result: DocumentBatchResponse) {
 function searchStaleRepairSummary(result: DocumentBatchResponse) {
   const counts = documentBatchStatusCounts(result);
   return `Search Lab reprocess complete: ${counts.completed} completed · ${counts.skipped} skipped · ${counts.failed} failed · ${counts.missing_source} missing-source`;
+}
+
+function chatStaleRepairSummary(result: DocumentBatchResponse) {
+  const counts = documentBatchStatusCounts(result);
+  return `Chat Workspace reprocess complete: ${counts.completed} completed · ${counts.skipped} skipped · ${counts.failed} failed · ${counts.missing_source} missing-source`;
 }
 
 function isParserChunkStaleMessage(message: string) {

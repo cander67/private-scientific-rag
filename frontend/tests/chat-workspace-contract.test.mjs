@@ -87,6 +87,7 @@ test("Chat Workspace exposes retrieval readiness and explicit rebuild controls",
   assert.match(source, /data-readiness-status=\{status\}/);
   assert.match(source, /status === "partial"/);
   assert.match(source, /status === "stale"/);
+  assert.match(source, /throw new Error\(await apiErrorMessage\(response, "readiness unavailable"\)\)/);
   assert.match(source, /apiErrorMessage\(response, "rebuild failed"\)/);
   assert.match(source, /\$\{kind\} rebuild failed: \$\{errorMessage\(error\)\}/);
   assert.match(source, /Rebuild full-text/);
@@ -108,6 +109,32 @@ test("Chat Workspace exposes retrieval readiness and explicit rebuild controls",
   assert.match(source, /Latest vector index: \{latestVectorModel\}/);
   assert.match(source, /Retrieval embedding: \{configuredEmbeddingModel\}/);
   assert.doesNotMatch(source, /settings are saved on send/);
+});
+
+test("Chat Workspace offers stale parser chunk repair through repository reprocess", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(source, /function repairChatStaleDocuments/);
+  assert.match(source, /documents\/batch\/reprocess/);
+  assert.match(source, /all_repository_documents: true/);
+  assert.match(source, /isParserChunkStaleMessage\(message\)/);
+  assert.match(source, /contextInspectorMessage && isParserChunkStaleMessage\(contextInspectorMessage\)/);
+  assert.match(source, /throw new Error\(await apiErrorMessage\(response, "chat question failed"\)\)/);
+  assert.match(source, /throw new Error\(await apiErrorMessage\(response, "context preview failed"\)\)/);
+  assert.match(source, /Reprocess repository documents/);
+  assert.match(source, /Chat Workspace reprocess complete/);
+  assert.match(source, /chatStaleRepairSummary/);
+  assert.match(source, /counts\.completed/);
+  assert.match(source, /counts\.skipped/);
+  assert.match(source, /counts\.failed/);
+  assert.match(source, /counts\.missing_source/);
+  assert.match(source, /await loadDocuments\(repository\.id\)/);
+  assert.match(source, /await loadDashboardSummary\(repository\.id\)/);
+  assert.match(source, /await loadChatReadiness\(repository\.id, false\)/);
+  assert.match(source, /setLastRebuild\(null\)/);
+  assert.match(source, /Full-text and vector rebuild controls remain explicit after reprocess/);
+  assert.match(styles, /\.chat-stale-repair/);
+  assert.match(styles, /\.chat-stale-repair-summary/);
 });
 
 test("Chat Workspace supports thinking state and session deletion", () => {

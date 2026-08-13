@@ -2115,6 +2115,31 @@ textarea {
   margin-top: var(--s4);
 }
 
+.chat-stale-repair {
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  margin-top: var(--s4);
+  padding: var(--s3);
+}
+
+.chat-stale-repair h2 {
+  font-size: 0.95rem;
+}
+
+.chat-stale-repair-summary {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+}
+
+.chat-stale-repair-summary small {
+  color: var(--text-muted);
+}
+
 .chat-defaults-note {
   display: flex;
   flex-direction: column;
