@@ -112,6 +112,47 @@ test("Document Manager keeps Source Viewer inspection explicit", () => {
   assert.match(source, /disabled=\{busy \|\| version\.source_type !== "pdf" \|\| !version\.ocr_required\}/);
 });
 
+test("Document Manager supports multi-select batch toolbar controls", () => {
+  assert.match(source, /type DocumentBatchResponse =/);
+  assert.match(source, /selectedBatchDocumentIds/);
+  assert.match(source, /function toggleBatchDocument/);
+  assert.match(source, /function selectVisibleDocuments/);
+  assert.match(source, /function clearVisibleDocuments/);
+  assert.match(source, /function clearBatchSelection/);
+  assert.match(source, /className="document-selection-controls row row-between"/);
+  assert.match(source, /Select visible/);
+  assert.match(source, /Clear selection/);
+  assert.match(source, /selectedBatchDocumentIds\.length > 0 && \(/);
+  assert.match(source, /className="document-batch-toolbar"/);
+  assert.match(source, /Reprocess selected/);
+  assert.match(source, /Run OCR selected/);
+  assert.match(source, /Delete selected/);
+});
+
+test("Document Manager calls PRD28 batch endpoints with guarded confirmations", () => {
+  assert.match(source, /documents\/batch\/\$\{action\}/);
+  assert.match(source, /function batchReprocessSelected/);
+  assert.match(source, /function batchRunOcrSelected/);
+  assert.match(source, /function batchDeleteSelected/);
+  assert.match(source, /function batchReprocessAllDocuments/);
+  assert.match(source, /Delete \$\{count\} selected document/);
+  assert.match(source, /Reprocess all \$\{documents\.length\} document/);
+  assert.match(source, /all_repository_documents: options\.allRepositoryDocuments === true/);
+});
+
+test("Document Manager renders batch eligibility and partial outcomes", () => {
+  assert.match(source, /ocrEligibleCount\(selectedBatchDocuments\)/);
+  assert.match(source, /reprocessUnavailableCount\(selectedBatchDocuments\)/);
+  assert.match(source, /function DocumentBatchResultPanel/);
+  assert.match(source, /documentBatchStatusCounts/);
+  assert.match(source, /documentBatchCountsLabel/);
+  assert.match(source, /BatchStatusBadge/);
+  assert.match(source, /missing_source/);
+  assert.match(source, /missing_dependency/);
+  assert.match(source, /ineligible/);
+  assert.match(source, /No documents were selected for this batch/);
+});
+
 test("Document Manager supports direct row delete and delete all actions", () => {
   assert.match(source, /function deleteDocument/);
   assert.match(source, /function deleteAllDocuments/);

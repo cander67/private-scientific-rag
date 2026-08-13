@@ -579,6 +579,34 @@ type Inspection = {
   page_images: PageImage[];
 };
 
+type DocumentBatchAction = "reprocess" | "ocr" | "delete";
+type DocumentBatchStatus =
+  | "completed"
+  | "deleted"
+  | "skipped"
+  | "failed"
+  | "missing_source"
+  | "missing_dependency"
+  | "ineligible";
+
+type DocumentBatchOutcome = {
+  action: DocumentBatchAction;
+  document_id: string;
+  status: DocumentBatchStatus;
+  document: DocumentSummary | null;
+  version: DocumentVersion | null;
+  warnings: string[];
+  error: string | null;
+};
+
+type DocumentBatchResponse = {
+  repository_id: string;
+  action: DocumentBatchAction;
+  requested_count: number;
+  attempted_count: number;
+  results: DocumentBatchOutcome[];
+};
+
 type FullTextRebuildResponse = {
   repository_id: string;
   indexed_chunks: number;
@@ -985,6 +1013,8 @@ function App() {
   const [repositories, setRepositories] = useState<RepositoryRead[]>([]);
   const [documents, setDocuments] = useState<DocumentSummary[]>([]);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+  const [selectedBatchDocumentIds, setSelectedBatchDocumentIds] = useState<string[]>([]);
+  const [documentBatchResult, setDocumentBatchResult] = useState<DocumentBatchResponse | null>(null);
   const [inspection, setInspection] = useState<Inspection | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("Loading repository");
@@ -1198,6 +1228,17 @@ function App() {
     0,
   );
 
+  const selectedBatchDocuments = useMemo(
+    () => documents.filter((document) => selectedBatchDocumentIds.includes(document.id)),
+    [documents, selectedBatchDocumentIds],
+  );
+  const filteredDocumentIds = filteredDocuments.map((document) => document.id);
+  const selectedVisibleCount = filteredDocumentIds.filter((documentId) =>
+    selectedBatchDocumentIds.includes(documentId),
+  ).length;
+  const allVisibleSelected =
+    filteredDocumentIds.length > 0 && selectedVisibleCount === filteredDocumentIds.length;
+
   async function loadRepository() {
     try {
       const response = await fetch(`${API_BASE}/repositories`);
@@ -1272,6 +1313,8 @@ function App() {
     setRepository(nextRepository);
     setDocuments([]);
     setSelectedDocumentId(null);
+    setSelectedBatchDocumentIds([]);
+    setDocumentBatchResult(null);
     setSelectedChunkId(null);
     setInspection(null);
     setSearchDocumentId("");
@@ -1333,6 +1376,9 @@ function App() {
       const response = await fetch(`${API_BASE}/repositories/${repositoryId}/documents`);
       const payload = (await response.json()) as DocumentSummary[];
       setDocuments(payload);
+      setSelectedBatchDocumentIds((current) =>
+        current.filter((documentId) => payload.some((document) => document.id === documentId)),
+      );
       setSelectedDocumentId((current) =>
         current && payload.some((document) => document.id === current)
           ? current
@@ -2618,6 +2664,113 @@ function App() {
     navigateTo("source");
   }
 
+  function toggleBatchDocument(documentId: string) {
+    setSelectedBatchDocumentIds((current) =>
+      current.includes(documentId)
+        ? current.filter((selectedId) => selectedId !== documentId)
+        : [...current, documentId],
+    );
+  }
+
+  function selectVisibleDocuments() {
+    setSelectedBatchDocumentIds((current) => Array.from(new Set([...current, ...filteredDocumentIds])));
+  }
+
+  function clearVisibleDocuments() {
+    setSelectedBatchDocumentIds((current) =>
+      current.filter((documentId) => !filteredDocumentIds.includes(documentId)),
+    );
+  }
+
+  function clearBatchSelection() {
+    setSelectedBatchDocumentIds([]);
+  }
+
+  async function runDocumentBatch(
+    action: DocumentBatchAction,
+    options: { documentIds: string[]; allRepositoryDocuments?: boolean },
+  ) {
+    if (!repository) {
+      return;
+    }
+    setBusy(true);
+    setMessage(documentBatchBusyMessage(action, options.allRepositoryDocuments === true));
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/documents/batch/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          document_ids: options.documentIds,
+          all_repository_documents: options.allRepositoryDocuments === true,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error("batch failed");
+      }
+      const payload = (await response.json()) as DocumentBatchResponse;
+      setDocumentBatchResult(payload);
+      if (action === "delete") {
+        const deletedIds = payload.results
+          .filter((result) => result.status === "deleted")
+          .map((result) => result.document_id);
+        setSelectedBatchDocumentIds((current) =>
+          current.filter((documentId) => !deletedIds.includes(documentId)),
+        );
+        if (selectedDocumentId && deletedIds.includes(selectedDocumentId)) {
+          setSelectedDocumentId(null);
+          setInspection(null);
+        }
+      }
+      await loadDocuments(repository.id);
+      await loadChatReadiness(repository.id);
+      await loadDashboardSummary(repository.id);
+      setMessage(documentBatchSummary(payload));
+    } catch {
+      setMessage("Batch action failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function batchReprocessSelected() {
+    if (selectedBatchDocumentIds.length === 0) {
+      return;
+    }
+    await runDocumentBatch("reprocess", { documentIds: selectedBatchDocumentIds });
+  }
+
+  async function batchRunOcrSelected() {
+    if (selectedBatchDocumentIds.length === 0) {
+      return;
+    }
+    await runDocumentBatch("ocr", { documentIds: selectedBatchDocumentIds });
+  }
+
+  async function batchDeleteSelected() {
+    const count = selectedBatchDocumentIds.length;
+    if (count === 0) {
+      return;
+    }
+    const confirmed = window.confirm(`Delete ${count} selected document${count === 1 ? "" : "s"}?`);
+    if (!confirmed) {
+      return;
+    }
+    await runDocumentBatch("delete", { documentIds: selectedBatchDocumentIds });
+  }
+
+  async function batchReprocessAllDocuments() {
+    if (documents.length === 0) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `Reprocess all ${documents.length} document${documents.length === 1 ? "" : "s"} in this repository?`,
+    );
+    if (!confirmed) {
+      return;
+    }
+    await runDocumentBatch("reprocess", { documentIds: [], allRepositoryDocuments: true });
+  }
+
   const title =
     activeView === "dashboard"
       ? "Repository Dashboard"
@@ -3104,11 +3257,94 @@ function App() {
                       </span>
                     </div>
 
+                    <div className="document-selection-controls row row-between">
+                      <div className="row">
+                        <button
+                          className="btn btn-sm"
+                          type="button"
+                          onClick={allVisibleSelected ? clearVisibleDocuments : selectVisibleDocuments}
+                          disabled={busy || filteredDocuments.length === 0}
+                        >
+                          {allVisibleSelected ? "Clear visible" : "Select visible"}
+                        </button>
+                        <button
+                          className="btn btn-sm btn-ghost"
+                          type="button"
+                          onClick={clearBatchSelection}
+                          disabled={busy || selectedBatchDocumentIds.length === 0}
+                        >
+                          Clear selection
+                        </button>
+                        <span className="muted">
+                          {selectedBatchDocumentIds.length} selected · {selectedVisibleCount} visible
+                        </span>
+                      </div>
+                      <button
+                        className="btn btn-sm"
+                        type="button"
+                        onClick={() => void batchReprocessAllDocuments()}
+                        disabled={busy || documents.length === 0}
+                      >
+                        Reprocess all
+                      </button>
+                    </div>
+
+                    {selectedBatchDocumentIds.length > 0 && (
+                      <div className="document-batch-toolbar">
+                        <div>
+                          <strong>{selectedBatchDocumentIds.length} selected</strong>
+                          <span>
+                            {ocrEligibleCount(selectedBatchDocuments)} OCR eligible ·{" "}
+                            {reprocessUnavailableCount(selectedBatchDocuments)} cannot reprocess
+                          </span>
+                        </div>
+                        <div className="row">
+                          <button
+                            className="btn btn-sm"
+                            type="button"
+                            onClick={() => void batchReprocessSelected()}
+                            disabled={busy}
+                          >
+                            Reprocess selected
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            type="button"
+                            onClick={() => void batchRunOcrSelected()}
+                            disabled={busy}
+                          >
+                            Run OCR selected
+                          </button>
+                          <button
+                            className="btn btn-sm btn-ghost danger-action"
+                            type="button"
+                            onClick={() => void batchDeleteSelected()}
+                            disabled={busy}
+                          >
+                            Delete selected
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {documentBatchResult && <DocumentBatchResultPanel result={documentBatchResult} />}
+
                     <div className="grid grid-side">
                       <div className="table-wrap">
                         <table>
                           <thead>
                             <tr>
+                              <th className="selection-cell">
+                                <input
+                                  type="checkbox"
+                                  aria-label="Select visible documents"
+                                  checked={allVisibleSelected}
+                                  disabled={busy || filteredDocuments.length === 0}
+                                  onChange={() =>
+                                    allVisibleSelected ? clearVisibleDocuments() : selectVisibleDocuments()
+                                  }
+                                />
+                              </th>
                               <th>Document</th>
                               <th>Status</th>
                               <th>Pages</th>
@@ -3120,7 +3356,7 @@ function App() {
                           <tbody>
                             {filteredDocuments.length === 0 ? (
                               <tr>
-                                <td colSpan={6}>
+                                <td colSpan={7}>
                                   <div className="empty-inline">No documents match this view.</div>
                                 </td>
                               </tr>
@@ -3142,6 +3378,16 @@ function App() {
                                     }
                                   }}
                                 >
+                                  <td className="selection-cell">
+                                    <input
+                                      type="checkbox"
+                                      aria-label={`Select ${document.display_name}`}
+                                      checked={selectedBatchDocumentIds.includes(document.id)}
+                                      disabled={busy}
+                                      onClick={(event) => event.stopPropagation()}
+                                      onChange={() => toggleBatchDocument(document.id)}
+                                    />
+                                  </td>
                                   <td>
                                     <div className="name">{document.display_name}</div>
                                     <div className="muted num table-sub">
@@ -7736,6 +7982,36 @@ function OcrPageTextPanel({ version, pages }: { version: DocumentVersion; pages:
   );
 }
 
+function DocumentBatchResultPanel({ result }: { result: DocumentBatchResponse }) {
+  const counts = documentBatchStatusCounts(result);
+  return (
+    <div className="document-batch-result">
+      <div>
+        <div className="eyebrow">Batch result</div>
+        <h2>{documentBatchActionLabel(result.action)}</h2>
+        <p className="muted">
+          {result.attempted_count} attempted · {documentBatchCountsLabel(counts)}
+        </p>
+      </div>
+      <div className="document-batch-result-list">
+        {result.results.length === 0 ? (
+          <div className="empty-inline">No documents were selected for this batch.</div>
+        ) : (
+          result.results.map((outcome) => (
+            <div className="document-batch-result-row" key={`${outcome.action}-${outcome.document_id}`}>
+              <BatchStatusBadge status={outcome.status} />
+              <div>
+                <strong>{outcome.document?.display_name ?? outcome.document_id}</strong>
+                <span>{outcome.error ?? outcome.warnings[0] ?? outcomeStatusLabel(outcome.status)}</span>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SelectedDocumentCard({
   selectedDocument,
   busy,
@@ -7820,6 +8096,23 @@ function SelectedDocumentCard({
   );
 }
 
+function BatchStatusBadge({ status }: { status: DocumentBatchStatus }) {
+  const className =
+    status === "completed" || status === "deleted"
+      ? "badge badge-ok"
+      : status === "failed" || status === "missing_source" || status === "missing_dependency"
+        ? "badge badge-danger"
+        : status === "ineligible" || status === "skipped"
+          ? "badge badge-warn"
+          : "badge";
+  return (
+    <span className={className}>
+      <span className="dot" />
+      {outcomeStatusLabel(status)}
+    </span>
+  );
+}
+
 function StatusBadge({ status }: { status: DocumentVersion["status"] }) {
   const className =
     status === "parsed"
@@ -7835,6 +8128,76 @@ function StatusBadge({ status }: { status: DocumentVersion["status"] }) {
       {status.replace("_", " ")}
     </span>
   );
+}
+
+function ocrEligibleCount(documents: DocumentSummary[]) {
+  return documents.filter((document) => {
+    const version = document.current_version;
+    return version?.source_type === "pdf" && version.ocr_required;
+  }).length;
+}
+
+function reprocessUnavailableCount(documents: DocumentSummary[]) {
+  return documents.filter((document) => {
+    const version = document.current_version;
+    const status = version ? getReprocessStatus(version) : null;
+    return status?.reprocess_available === false;
+  }).length;
+}
+
+function documentBatchBusyMessage(action: DocumentBatchAction, allRepositoryDocuments: boolean) {
+  if (action === "reprocess" && allRepositoryDocuments) {
+    return "Reprocessing all documents";
+  }
+  const labels: Record<DocumentBatchAction, string> = {
+    reprocess: "Reprocessing selected documents",
+    ocr: "Running OCR on selected documents",
+    delete: "Deleting selected documents",
+  };
+  return labels[action];
+}
+
+function documentBatchSummary(result: DocumentBatchResponse) {
+  const counts = documentBatchStatusCounts(result);
+  return `${documentBatchActionLabel(result.action)} complete: ${documentBatchCountsLabel(counts)}`;
+}
+
+function documentBatchStatusCounts(result: DocumentBatchResponse) {
+  return result.results.reduce<Record<DocumentBatchStatus, number>>(
+    (counts, outcome) => ({
+      ...counts,
+      [outcome.status]: counts[outcome.status] + 1,
+    }),
+    {
+      completed: 0,
+      deleted: 0,
+      skipped: 0,
+      failed: 0,
+      missing_source: 0,
+      missing_dependency: 0,
+      ineligible: 0,
+    },
+  );
+}
+
+function documentBatchCountsLabel(counts: Record<DocumentBatchStatus, number>) {
+  const labels = (Object.entries(counts) as Array<[DocumentBatchStatus, number]>)
+    .filter(([, count]) => count > 0)
+    .map(([status, count]) => `${count} ${outcomeStatusLabel(status)}`);
+  return labels.length > 0 ? labels.join(" · ") : "0 attempted";
+}
+
+function documentBatchActionLabel(action: DocumentBatchAction) {
+  const labels: Record<DocumentBatchAction, string> = {
+    reprocess: "Reprocess",
+    ocr: "OCR",
+    delete: "Delete",
+  };
+  return labels[action];
+}
+
+function outcomeStatusLabel(status: DocumentBatchStatus) {
+  return status.replace(/_/g, " ");
 }
 
 function versionSummary(version: DocumentVersion) {
