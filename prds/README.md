@@ -33,10 +33,10 @@ Current status:
 - Complete: PRD27 retrieval defaults transparency and controls.
 - Backlog: PRD28 document manager preview and batch actions.
 - Backlog: PRD29 PRD13 manual acceptance testing.
-- Ready for review: PRD30 token-aware chunking, after removing current `tiktoken` settings, adding feature-detected Ollama runtime tokenization, and clarifying multimodal image-token budgeting as future scope.
+- Complete: PRD30 token-aware chunking.
 - Backlog: PRD31 custom domain tokenizers.
 
-PRD13 is ready for final review after parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and documentation preparation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional OCR dependency/golden-corpus checks remain explicit manual checks. PRD29 is the proposed manual acceptance-testing pass for PRD13: it should exercise installed OCR providers, realistic scanned and mixed PDFs, stale-index recovery, Source Viewer review, export/recreate metadata, and cross-host notes before PRD13 is closed. PRD25 is complete and merged after backend preview/persisted-inspection APIs, Chat Workspace inspector controls, source navigation, docs, and deterministic quality gates. PRD30 is implemented through token-count defaults, model-aware tokenizer resolution, recursive/fixed token chunking, tokenizer metadata inspection/export, recreate validation, calibrated 512-token/64-token-overlap defaults, docs, deterministic backend/frontend quality gates, and Phase 7 runtime-aligned tokenizer remediation, but remains ready for review until user acceptance. PRD23, PRD25, PRD26, PRD27, and PRD30 are complete or ready to review.
+PRD13 is ready for final review after parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and documentation preparation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional OCR dependency/golden-corpus checks remain explicit manual checks. PRD29 is the proposed manual acceptance-testing pass for PRD13: it should exercise installed OCR providers, realistic scanned and mixed PDFs, stale-index recovery, Source Viewer review, export/recreate metadata, and cross-host notes before PRD13 is closed. PRD25 is complete and merged after backend preview/persisted-inspection APIs, Chat Workspace inspector controls, source navigation, docs, and deterministic quality gates. PRD30 is complete after token-count defaults, model-aware tokenizer resolution, recursive/fixed token chunking, tokenizer metadata inspection/export, recreate validation, calibrated 512-token/64-token-overlap defaults, docs, deterministic backend/frontend quality gates, and Phase 7 runtime-aligned tokenizer remediation. PRD23, PRD25, PRD26, PRD27, and PRD30 are complete.
 
 The remaining backlog should be prioritized from hands-on use of the current app, adjusting order when a later PRD is needed to unblock an earlier one.
 
@@ -97,5 +97,5 @@ PRD files:
 27. [Retrieval defaults transparency and controls](27-retrieval-defaults-transparency-controls.md) - complete
 28. [Document manager preview and batch actions](28-document-manager-preview-batch-actions.md) - backlog
 29. [PRD13 manual acceptance testing](29-prd13-manual-acceptance-testing.md) - backlog
-30. [Token-aware chunking](30-token-aware-chunking.md) - ready for review
+30. [Token-aware chunking](30-token-aware-chunking.md) - complete
 31. [Custom domain tokenizers](31-custom-domain-tokenizers.md) - backlog

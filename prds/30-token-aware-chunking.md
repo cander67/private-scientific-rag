@@ -1,6 +1,6 @@
 # PRD 30: Token-Aware Chunking
 
-**Status:** Implemented through phase 7 and ready for review. Phase 7 removed `tiktoken` from current vector/embedding chunk-tokenizer settings, prefers HuggingFace/Transformers tokenizers for local model families, adds feature-detected Ollama runtime tokenizer support when available, and documents true multimodal image-token budgeting as follow-up scope.
+**Status:** Complete and closed. Phase 7 removed `tiktoken` from current vector/embedding chunk-tokenizer settings, prefers HuggingFace/Transformers tokenizers for local model families, adds feature-detected Ollama runtime tokenizer support when available, and documents true multimodal image-token budgeting as follow-up scope.
 
 ## Problem Statement
 
