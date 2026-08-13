@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from private_rag.chat.llm import ChatModelInfo
 from private_rag.retrieval.schemas import (
@@ -79,6 +79,18 @@ class ChatSessionCreate(BaseModel):
     title: str | None = None
     model: str | None = None
     retrieval_settings: ChatRetrievalSettings | None = None
+
+
+class ChatSessionUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=240)
+
+    @field_validator("title")
+    @classmethod
+    def title_must_not_be_blank(cls, value: str) -> str:
+        title = value.strip()
+        if not title:
+            raise ValueError("Chat title is required")
+        return title
 
 
 class ChatQuestionRequest(BaseModel):

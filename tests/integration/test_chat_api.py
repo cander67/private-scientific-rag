@@ -14,7 +14,10 @@ from private_rag.api.routes.retrieval import get_reranker_provider
 from private_rag.api.routes.vector import get_embedding_provider, get_vector_store
 from private_rag.chat.llm import ChatCompletion, ChatMessage
 from private_rag.chat.models import ChatMessageRow
+from private_rag.core.settings import Settings
 from private_rag.db.base import Base
+from private_rag.repositories.models import Repository, RepositorySettingsRow
+from private_rag.repositories.schemas import RepositorySettings
 from private_rag.retrieval.models import RetrievalRun
 from private_rag.retrieval.schemas import RetrievalSearchResult
 from private_rag.search.service import FTS_TABLE
@@ -493,6 +496,112 @@ def test_new_chat_session_inherits_repository_retrieval_defaults() -> None:
     assert retrieval_settings["reranker_strategy"] == "metadata_boost"
     assert retrieval_settings["metadata_boosts"]["section"] == "off"
     assert retrieval_settings["filters"]["document_kind"] == "patent_pdf"
+
+
+def test_chat_sessions_get_distinct_default_titles() -> None:
+    client, _ = _client_with_chat_fakes()
+    repository_id = _default_repository_id(client)
+
+    first_response = client.post(f"/repositories/{repository_id}/chat/sessions", json={})
+    second_response = client.post(f"/repositories/{repository_id}/chat/sessions", json={})
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert first_response.json()["title"] == "Repository chat 1"
+    assert second_response.json()["title"] == "Repository chat 2"
+
+
+def test_chat_session_title_can_be_renamed_without_changing_session_state() -> None:
+    client, _ = _client_with_chat_fakes()
+    repository_id = _default_repository_id(client)
+    session_response = client.post(
+        f"/repositories/{repository_id}/chat/sessions",
+        json={
+            "title": "Original title",
+            "model": "qwen-local:custom",
+            "retrieval_settings": {
+                "mode": "hybrid",
+                "top_k": 3,
+                "reranker_strategy": "none",
+            },
+        },
+    )
+    chat_session_id = session_response.json()["id"]
+    client.post(
+        f"/repositories/{repository_id}/documents",
+        files={
+            "file": (
+                "chat-rename.txt",
+                b"Abstract\nLiFePO4 rename should preserve messages.\n",
+                "text/plain",
+            )
+        },
+    )
+    client.post(f"/repositories/{repository_id}/full-text/rebuild")
+    client.post(f"/repositories/{repository_id}/vector/rebuild")
+    question_response = client.post(
+        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}/messages",
+        json={"content": "What survives rename?"},
+    )
+
+    rename_response = client.patch(
+        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}",
+        json={"title": "  Renamed synthesis review  "},
+    )
+    reload_response = client.get(
+        f"/repositories/{repository_id}/chat/sessions/{chat_session_id}",
+    )
+
+    assert session_response.status_code == 200
+    assert question_response.status_code == 200
+    assert rename_response.status_code == 200
+    renamed = rename_response.json()
+    assert renamed["title"] == "Renamed synthesis review"
+    assert renamed["model"] == "qwen-local:custom"
+    assert renamed["prompt_id"] == "rag-chat-default-v1"
+    assert renamed["retrieval_settings"]["top_k"] == 3
+    assert [message["role"] for message in renamed["messages"]] == ["user", "assistant"]
+    assert reload_response.json()["title"] == "Renamed synthesis review"
+    assert reload_response.json()["messages"] == renamed["messages"]
+
+
+def test_chat_session_rename_rejects_empty_and_wrong_repository() -> None:
+    client, _, session_factory = _client_with_chat_fakes_and_database()
+    repository_id = _default_repository_id(client)
+    session_response = client.post(
+        f"/repositories/{repository_id}/chat/sessions",
+        json={"title": "Owned session"},
+    )
+    with session_factory() as session:
+        other_repository = Repository(name="Other Repository", root_path=None)
+        session.add(other_repository)
+        session.flush()
+        session.add(
+            RepositorySettingsRow(
+                repository_id=other_repository.id,
+                settings=RepositorySettings.from_app_settings(Settings()).model_dump(mode="json"),
+            )
+        )
+        session.commit()
+        other_repository_id = other_repository.id
+
+    empty_response = client.patch(
+        f"/repositories/{repository_id}/chat/sessions/{session_response.json()['id']}",
+        json={"title": "   "},
+    )
+    missing_response = client.patch(
+        f"/repositories/{repository_id}/chat/sessions/missing-session",
+        json={"title": "Missing"},
+    )
+    wrong_repository_response = client.patch(
+        f"/repositories/{other_repository_id}/chat/sessions/{session_response.json()['id']}",
+        json={"title": "Wrong repository"},
+    )
+
+    assert empty_response.status_code == 422
+    assert "Chat title is required" in str(empty_response.json()["detail"])
+    assert missing_response.status_code == 404
+    assert wrong_repository_response.status_code == 404
 
 
 def test_chat_readiness_reports_index_and_model_state() -> None:

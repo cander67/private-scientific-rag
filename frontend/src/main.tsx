@@ -1046,6 +1046,7 @@ function App() {
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  const [chatRenameBusyId, setChatRenameBusyId] = useState<string | null>(null);
   const [chatMessage, setChatMessage] = useState("Create a chat session or ask a question.");
   const [activeCitation, setActiveCitation] = useState<ChatCitation | null>(null);
   const [chatContextInspector, setChatContextInspector] = useState<ChatContextInspection | null>(null);
@@ -2012,7 +2013,6 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: "Repository chat",
           retrieval_settings: repositorySettings?.retrieval ?? defaultChatRetrievalSettings(),
         }),
       });
@@ -2140,6 +2140,40 @@ function App() {
       setChatContextInspectorMessage("Could not load persisted context");
     } finally {
       setChatContextInspectorBusy(false);
+    }
+  }
+
+  async function renameChatSession(chatSessionId: string, title: string) {
+    if (!repository) {
+      return false;
+    }
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      setChatMessage("Chat title is required");
+      return false;
+    }
+    setChatRenameBusyId(chatSessionId);
+    setChatMessage("Renaming chat session");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/chat/sessions/${chatSessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: nextTitle }),
+      });
+      if (!response.ok) {
+        throw new Error("rename failed");
+      }
+      const payload = (await response.json()) as ChatSession;
+      setChatSessions((current) =>
+        current.map((session) => (session.id === payload.id ? payload : session)),
+      );
+      setChatMessage("Chat session renamed");
+      return true;
+    } catch {
+      setChatMessage("Could not rename chat session");
+      return false;
+    } finally {
+      setChatRenameBusyId(null);
     }
   }
 
@@ -3146,9 +3180,11 @@ function App() {
                 readinessBusy={chatReadinessBusy}
                 readinessCheckedAt={chatReadinessCheckedAt}
                 rebuildBusy={chatRebuildBusy}
+                renameBusyId={chatRenameBusyId}
                 onInputChange={setChatInput}
                 onCreateSession={() => void createChatSession()}
                 onSelectSession={setActiveChatSessionId}
+                onRenameSession={renameChatSession}
                 onDeleteSession={(chatSessionId) => void deleteChatSession(chatSessionId)}
                 onClearSessions={() => void clearChatSessions()}
                 onAsk={() => void askChatQuestion()}
@@ -6778,9 +6814,11 @@ function ChatWorkspace({
   readinessBusy,
   readinessCheckedAt,
   rebuildBusy,
+  renameBusyId,
   onInputChange,
   onCreateSession,
   onSelectSession,
+  onRenameSession,
   onDeleteSession,
   onClearSessions,
   onAsk,
@@ -6811,9 +6849,11 @@ function ChatWorkspace({
   readinessBusy: boolean;
   readinessCheckedAt: string | null;
   rebuildBusy: "full-text" | "vector" | null;
+  renameBusyId: string | null;
   onInputChange: (value: string) => void;
   onCreateSession: () => void;
   onSelectSession: (value: string) => void;
+  onRenameSession: (chatSessionId: string, title: string) => Promise<boolean>;
   onDeleteSession: (value: string) => void;
   onClearSessions: () => void;
   onAsk: () => void;
@@ -6830,6 +6870,8 @@ function ChatWorkspace({
   onOpenContextEntry: (result: RetrievalSearchResult) => void;
 }) {
   const threadRef = useRef<HTMLDivElement | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
   const readyForSelectedMode = chatReadyForSelectedMode(readiness, retrievalSettings);
   const activePrompt = settings?.prompt.library.find(
     (prompt) => prompt.id === settings.prompt.active_chat_prompt_id,
@@ -6872,26 +6914,33 @@ function ChatWorkspace({
             </div>
             {sessions.length > 0 ? (
               sessions.map((session) => (
-                <div
-                  className={session.id === activeSession?.id ? "session-item active" : "session-item"}
+                <ChatSessionListItem
+                  session={session}
+                  active={session.id === activeSession?.id}
+                  busy={busy}
+                  renameBusy={renameBusyId === session.id}
+                  editing={editingSessionId === session.id}
+                  editingTitle={editingTitle}
+                  onSelect={onSelectSession}
+                  onStartRename={(nextSession) => {
+                    setEditingSessionId(nextSession.id);
+                    setEditingTitle(nextSession.title);
+                  }}
+                  onEditingTitleChange={setEditingTitle}
+                  onCancelRename={() => {
+                    setEditingSessionId(null);
+                    setEditingTitle("");
+                  }}
+                  onSaveRename={async () => {
+                    const renamed = await onRenameSession(session.id, editingTitle);
+                    if (renamed) {
+                      setEditingSessionId(null);
+                      setEditingTitle("");
+                    }
+                  }}
+                  onDelete={onDeleteSession}
                   key={session.id}
-                >
-                  <button type="button" onClick={() => onSelectSession(session.id)}>
-                    <span>{session.title}</span>
-                    <small>
-                      {formatDate(session.updated_at)} · {session.messages.length} msgs
-                    </small>
-                  </button>
-                  <button
-                    className="session-delete"
-                    type="button"
-                    onClick={() => onDeleteSession(session.id)}
-                    disabled={busy}
-                    aria-label={`Delete ${session.title}`}
-                  >
-                    x
-                  </button>
-                </div>
+                />
               ))
             ) : (
               <p className="muted">No saved chats yet.</p>
@@ -7274,6 +7323,103 @@ function ReadinessPill({ label, item }: { label: string; item: ChatReadinessItem
       <span>{label}</span>
       <b>{statusLabel}</b>
       <small>{item?.message ?? "Not checked yet"}</small>
+    </div>
+  );
+}
+
+function ChatSessionListItem({
+  session,
+  active,
+  busy,
+  renameBusy,
+  editing,
+  editingTitle,
+  onSelect,
+  onStartRename,
+  onEditingTitleChange,
+  onCancelRename,
+  onSaveRename,
+  onDelete,
+}: {
+  session: ChatSession;
+  active: boolean;
+  busy: boolean;
+  renameBusy: boolean;
+  editing: boolean;
+  editingTitle: string;
+  onSelect: (value: string) => void;
+  onStartRename: (session: ChatSession) => void;
+  onEditingTitleChange: (value: string) => void;
+  onCancelRename: () => void;
+  onSaveRename: () => Promise<void>;
+  onDelete: (value: string) => void;
+}) {
+  if (editing) {
+    return (
+      <div className={active ? "session-item session-item-editing active" : "session-item session-item-editing"}>
+        <label className="session-rename-field" htmlFor={`chat-session-title-${session.id}`}>
+          <span>Session title</span>
+          <input
+            id={`chat-session-title-${session.id}`}
+            value={editingTitle}
+            disabled={renameBusy}
+            onChange={(event) => onEditingTitleChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void onSaveRename();
+              }
+              if (event.key === "Escape") {
+                onCancelRename();
+              }
+            }}
+          />
+        </label>
+        <div className="session-edit-actions">
+          <button
+            className="btn btn-sm btn-primary"
+            type="button"
+            onClick={() => void onSaveRename()}
+            disabled={renameBusy || !editingTitle.trim()}
+          >
+            {renameBusy ? "Saving" : "Save"}
+          </button>
+          <button className="btn btn-sm btn-ghost" type="button" onClick={onCancelRename} disabled={renameBusy}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={active ? "session-item active" : "session-item"}>
+      <button type="button" onClick={() => onSelect(session.id)}>
+        <span>{session.title}</span>
+        <small>
+          {formatDate(session.updated_at)} · {session.messages.length} msgs
+        </small>
+      </button>
+      <div className="session-row-actions">
+        <button
+          className="session-rename"
+          type="button"
+          onClick={() => onStartRename(session)}
+          disabled={busy}
+          aria-label={`Rename ${session.title}`}
+        >
+          Edit
+        </button>
+        <button
+          className="session-delete"
+          type="button"
+          onClick={() => onDelete(session.id)}
+          disabled={busy}
+          aria-label={`Delete ${session.title}`}
+        >
+          x
+        </button>
+      </div>
     </div>
   );
 }

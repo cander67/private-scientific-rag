@@ -74,11 +74,28 @@ def create_chat_session(
     )
     chat_session = ChatSession(
         repository_id=repository_id,
-        title=title or "New chat",
+        title=_chat_session_title(session, repository_id=repository_id, title=title),
         model=model or settings.model.ollama_chat_model,
         retrieval_settings=effective_retrieval.settings.model_dump(mode="json"),
         prompt_id=settings.prompt.active_chat_prompt_id,
     )
+    session.add(chat_session)
+    session.commit()
+    session.refresh(chat_session)
+    return _session_read(chat_session)
+
+
+def update_chat_session_title(
+    session: Session,
+    *,
+    repository_id: str,
+    chat_session_id: str,
+    title: str,
+) -> ChatSessionRead | None:
+    chat_session = session.get(ChatSession, chat_session_id)
+    if chat_session is None or chat_session.repository_id != repository_id:
+        return None
+    chat_session.title = title.strip()
     session.add(chat_session)
     session.commit()
     session.refresh(chat_session)
@@ -138,6 +155,21 @@ def clear_chat_sessions(session: Session, *, repository_id: str) -> int | None:
     session.execute(delete(ChatSession).where(ChatSession.repository_id == repository_id))
     session.commit()
     return len(session_ids)
+
+
+def _chat_session_title(
+    session: Session,
+    *,
+    repository_id: str,
+    title: str | None,
+) -> str:
+    normalized_title = title.strip() if title else ""
+    if normalized_title:
+        return normalized_title
+    session_count = session.scalar(
+        select(func.count(ChatSession.id)).where(ChatSession.repository_id == repository_id)
+    )
+    return f"Repository chat {int(session_count or 0) + 1}"
 
 
 def ask_chat_question(

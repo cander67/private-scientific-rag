@@ -20,6 +20,7 @@ from private_rag.chat.schemas import (
     ChatReadinessResponse,
     ChatSessionCreate,
     ChatSessionRead,
+    ChatSessionUpdate,
 )
 from private_rag.chat.service import (
     ask_chat_question,
@@ -32,6 +33,7 @@ from private_rag.chat.service import (
     list_chat_sessions,
     model_registry,
     preview_chat_context,
+    update_chat_session_title,
 )
 from private_rag.core.settings import get_settings
 from private_rag.retrieval.rerankers import CrossEncoderModelMissingError
@@ -144,6 +146,24 @@ def read_chat_session(
         session,
         repository_id=repository_id,
         chat_session_id=chat_session_id,
+    )
+    if chat_session is None:
+        raise HTTPException(status_code=404, detail="Chat session not found")
+    return chat_session
+
+
+@router.patch("/sessions/{chat_session_id}", response_model=ChatSessionRead)
+def update_repository_chat_session(
+    repository_id: str,
+    chat_session_id: str,
+    request: ChatSessionUpdate,
+    session: DbSession,
+) -> ChatSessionRead:
+    chat_session = update_chat_session_title(
+        session,
+        repository_id=repository_id,
+        chat_session_id=chat_session_id,
+        title=request.title,
     )
     if chat_session is None:
         raise HTTPException(status_code=404, detail="Chat session not found")

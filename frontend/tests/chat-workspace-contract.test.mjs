@@ -27,6 +27,26 @@ test("Chat Workspace uses persisted backend chat sessions and messages", () => {
   assert.match(source, /retrieval_settings: chatRetrievalSettings/);
 });
 
+test("Chat Workspace supports renaming sessions without reloading the list", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+
+  assert.match(source, /renameChatSession/);
+  assert.match(source, /method: "PATCH"/);
+  assert.match(source, /JSON\.stringify\(\{ title: nextTitle \}\)/);
+  assert.match(source, /setChatSessions\(\(current\) =>[\s\S]*session\.id === payload\.id \? payload : session/);
+  assert.match(source, /setChatMessage\("Chat session renamed"\)/);
+  assert.match(source, /Chat title is required/);
+  assert.match(source, /function ChatSessionListItem/);
+  assert.match(source, /onStartRename/);
+  assert.match(source, /onSaveRename/);
+  assert.match(source, /Session title/);
+  assert.match(source, /aria-label=\{`Rename \$\{session\.title\}`\}/);
+  assert.doesNotMatch(source, /title: "Repository chat"/);
+  assert.match(styles, /\.session-rename/);
+  assert.match(styles, /\.session-item-editing/);
+  assert.match(styles, /\.session-edit-actions/);
+});
+
 test("Chat Workspace renders citation cards and source navigation", () => {
   assert.match(source, /type ChatCitation =/);
   assert.match(source, /activeCitation/);

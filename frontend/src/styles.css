@@ -1951,6 +1951,12 @@ textarea {
   margin-top: 2px;
 }
 
+.session-row-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.session-rename,
 .session-delete {
   width: 28px;
   height: 28px;
@@ -1959,11 +1965,48 @@ textarea {
   background: transparent;
   color: var(--text-faint);
   cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.session-rename {
+  width: 36px;
+}
+
+.session-rename:hover {
+  background: var(--surface);
+  color: var(--text);
 }
 
 .session-delete:hover {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.session-item-editing {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.session-rename-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-rename-field span {
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.session-rename-field input {
+  min-width: 0;
+}
+
+.session-edit-actions {
+  display: flex;
+  gap: var(--s2);
 }
 
 .chat-main {
