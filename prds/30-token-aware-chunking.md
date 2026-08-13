@@ -1,6 +1,6 @@
 # PRD 30: Token-Aware Chunking
 
-**Status:** Implemented through phase 6. User-testing remediation added tokenizer catalog transparency, manual tokenizer selection, `tiktoken` support, and explicit regex fallback labeling before merge review.
+**Status:** Implemented through phase 6. Reopened for scoped tokenizer-strategy remediation: remove `tiktoken` from current vector/embedding chunk-tokenizer settings, prefer HuggingFace/Transformers tokenizers for local model families, add feature-detected Ollama runtime tokenizer support when available, and document true multimodal image-token budgeting as follow-up scope.
 
 ## Problem Statement
 
@@ -14,11 +14,15 @@ The project is still early enough that backwards compatibility with existing cha
 
 Implement token-aware chunking as the default ingestion behavior.
 
-For SentenceTransformers embedding models, chunking should use the selected model's tokenizer when it can be loaded reliably. For known Ollama embedding models, chunking should use registry-declared tokenizer metadata that points at a real tokenizer implementation when one is known, such as a HuggingFace tokenizer or a `tiktoken` encoding. OpenAI-style tokenizers should be available through explicit `tiktoken` encodings for users who need to align chunking with OpenAI-compatible context budgeting. When exact tokenizer access is unavailable, the app should use a clearly identified fallback tokenizer rather than silently pretending to be exact. Chunk metadata should record the tokenizer provider, tokenizer ID, tokenizer name, implementation library, tokenizer source, selection mode, precision, chunk size, overlap, and unit used to produce every chunk.
+For SentenceTransformers embedding models, chunking should use the selected model's HuggingFace tokenizer through `transformers` when it can be loaded reliably. For Ollama embedding models, chunking should prefer Ollama's own model-aligned tokenization endpoint when the local runtime exposes it, because that is the closest available match to the model actually serving embeddings. If the runtime endpoint is unavailable, known Ollama embedding models may use registry-declared tokenizer metadata that points at a real HuggingFace tokenizer implementation when one is known. When exact tokenizer access is unavailable, the app should use a clearly identified fallback tokenizer rather than silently pretending to be exact. Chunk metadata should record the tokenizer provider, tokenizer ID, tokenizer name, implementation library, tokenizer source, selection mode, precision, chunk size, overlap, and unit used to produce every chunk.
+
+`tiktoken` should not be exposed as a current vector/embedding chunk-tokenizer choice unless an OpenAI-compatible embedding or chat-provider PRD makes OpenAI-style budgeting first-class. Keeping it in the current settings surface would invite mismatches between the tokenizer selected for chunking and the local embedding model used for vector search.
 
 Recursive chunking should preserve parser segment boundaries where possible while measuring size and overlap in tokens. Fixed chunking should create token windows rather than character windows. Oversized parser segments should be split in a token-aware way so no single segment can bypass the configured chunk size.
 
 Settings, source inspection, export/recreate, stale-index impact analysis, and documentation should describe token-based chunking as the current default. Because backwards compatibility is not required at this stage, the implementation may update schemas, fixtures, and tests directly rather than preserving old character semantics.
+
+PRD30 is still a text-chunking PRD. It applies to parsed text, OCR-recovered text, and other text extracted from documents or images. It does not provide full multimodal prompt budgeting for vision-language models: image placeholder tokens, model-specific image-token expansion, chat templates containing image parts, and per-image context limits should be handled by a later multimodal context-packing PRD.
 
 ## User Stories
 
@@ -39,6 +43,10 @@ Settings, source inspection, export/recreate, stale-index impact analysis, and d
 15. As a researcher, I want to see the actual tokenizer library and tokenizer identifier used for chunking, so that a fallback regex splitter is not confused with a model tokenizer.
 16. As a researcher, I want to select from supported chunk tokenizers when automatic resolution is not what I need, so that advanced workflows can align chunking with a known tokenizer family deliberately.
 17. As a maintainer, I want tokenizer names to be descriptive and library-backed wherever possible, so that registry entries are auditable rather than opaque labels.
+18. As a researcher, I want Ollama embedding chunking to use Ollama's own tokenizer when the installed runtime supports it, so that token counts match the local model more closely than registry guesses or regex fallback.
+19. As a maintainer, I want unsupported tokenizer endpoints to degrade cleanly to registry/HuggingFace/fallback paths, so that default tests and older Ollama installs remain deterministic.
+20. As a researcher, I want unsupported OpenAI-style tokenizer choices hidden from current embedding settings, so that I do not accidentally chunk for a tokenizer family that is not powering my vector index.
+21. As a maintainer, I want PRD30 to state clearly that text chunking is not full image-token budgeting for multimodal chat, so that image support gets designed at the correct model interface.
 
 ## Implementation Decisions
 
@@ -46,10 +54,12 @@ Settings, source inspection, export/recreate, stale-index impact analysis, and d
 - Do not preserve backwards compatibility for existing character-based chunk settings or old persisted chunk metadata.
 - Add a tokenizer resolution boundary that accepts repository embedding settings and returns a tokenizer implementation plus metadata about tokenizer source and precision.
 - Use the selected SentenceTransformers model tokenizer for `sentence_transformers` providers when available.
-- Add a tokenizer catalog that exposes `auto`, HuggingFace/SentenceTransformers tokenizers, OpenAI-compatible `tiktoken` encodings, known Ollama registry mappings, and the explicit regex fallback.
-- Extend the embedding model registry with tokenizer metadata for known Ollama embedding models. Registry entries should map to a real tokenizer implementation where known; only use fallback metadata when no exact tokenizer is available.
+- Add a tokenizer catalog that exposes `auto`, HuggingFace/SentenceTransformers tokenizers, known Ollama runtime/registry mappings, and the explicit regex fallback.
+- Do not expose `tiktoken` as a current vector/embedding chunk-tokenizer choice. Defer OpenAI-compatible encodings until an OpenAI-compatible provider PRD makes those models part of the supported runtime surface.
+- Extend the tokenizer resolver with a feature-detected Ollama runtime tokenizer path. If `/api/tokenize` is available for the selected local model, treat it as the preferred exact Ollama tokenizer and record runtime metadata. If unavailable, fall back to registry-declared HuggingFace mappings where known, then the explicit regex fallback.
+- Extend the embedding model registry with tokenizer metadata for known Ollama embedding models. Registry entries should map to a real HuggingFace tokenizer implementation where known; only use fallback metadata when no exact tokenizer is available.
 - Use a deterministic app-level regex fallback tokenizer for unknown or unsupported tokenizer selections, and record that fallback in chunk metadata. Keep `private-rag/simple-token-fallback-v1`, but label it as an approximate regex fallback, not a model tokenizer.
-- Allow manual chunk-tokenizer selection from the supported tokenizer catalog. `auto` should remain the default and should be recommended; manual choices should be stored in repository settings, included in parser/chunk fingerprints, and surfaced as reprocessing-relevant.
+- Allow manual chunk-tokenizer selection from the supported tokenizer catalog. `auto` should remain the default and should be recommended; manual choices should be stored in repository settings, included in parser/chunk fingerprints, and surfaced as reprocessing-relevant. Manual choices should be limited to supported local model tokenizers and the explicit fallback until additional provider PRDs expand the model surface.
 - Keep `recursive` and `fixed` chunking modes, but reinterpret `chunk_size` and `chunk_overlap` as token counts.
 - Keep `semantic` reserved unless this PRD explicitly implements a separate semantic chunker; until then, it should not claim model-semantic boundary detection.
 - Preserve citation/source-navigation metadata by mapping token windows back to character spans, line ranges, page ranges, and parser sections as accurately as possible.
@@ -62,8 +72,8 @@ Settings, source inspection, export/recreate, stale-index impact analysis, and d
 - Unit tests should focus on external chunking behavior: chunk token budgets, overlap semantics, metadata, source spans, and stale-setting detection.
 - Tokenizer resolution should be tested with fake tokenizer implementations so deterministic CI does not depend on downloading model weights.
 - SentenceTransformers tokenizer integration should be covered by a mocked or locally fake model boundary in default tests, with optional live coverage only if local models are available.
-- `tiktoken` tokenizer integration should be covered by deterministic default tests for at least `cl100k_base` and `o200k_base`, including count behavior and source-span reconstruction.
-- Ollama tokenizer tests should cover known-model registry mappings to library-backed tokenizers where available, fallback behavior, custom model fallback, and metadata that distinguishes exact versus fallback tokenization.
+- Tests should verify `tiktoken` is not exposed as a current vector/embedding tokenizer choice unless a future OpenAI-compatible provider PRD reintroduces it deliberately.
+- Ollama tokenizer tests should cover feature-detected runtime tokenization where available, unsupported endpoint fallback, known-model registry mappings to HuggingFace tokenizers where available, custom model fallback, and metadata that distinguishes exact versus fallback tokenization.
 - Manual tokenizer selection tests should cover settings validation, settings impact/reprocess freshness, chunk metadata, Source Viewer display, export/recreate payloads, and warnings when a selected tokenizer does not match the embedding model.
 - Ingestion tests should verify recursive token coalescing preserves parser segment boundaries where possible and splits oversized segments when needed.
 - Ingestion tests should verify fixed token windows produce deterministic overlap and stable source spans.
@@ -82,12 +92,15 @@ Settings, source inspection, export/recreate, stale-index impact analysis, and d
 - Changing SQLite FTS5 tokenizers such as `unicode61` or `porter`.
 - Changing chat prompt context packing beyond making retrieved chunk sizes more predictable.
 - Downloading tokenizer assets during default CI. Library-backed tokenizers that need model files must use local cache by default and report unavailable state clearly.
+- Full multimodal vision-language context budgeting, including image-token accounting and image-part chat-template packing.
+- Training, registering, evaluating, or deploying custom domain tokenizers for technical vocabularies. That is deferred to PRD31.
 
 ## Further Notes
 
 - Implemented default chunking uses a 512-token chunk size and 64-token overlap.
 - Phase 6 remediation replaced opaque tokenizer labels with a visible tokenizer catalog and library-backed tokenizer choices.
-- The tokenizer stack should prefer exact library tokenizers, then known approximate library tokenizers, then the explicit regex fallback.
+- The next tokenizer remediation should remove `tiktoken` from the current settings/catalog surface, because current vector embeddings are local SentenceTransformers/Ollama rather than OpenAI-compatible providers.
+- The tokenizer stack should prefer exact local-runtime or library tokenizers, then known registry mappings to library tokenizers, then the explicit regex fallback.
 - If exact tokenizer access is unavailable for an Ollama model, the fallback tokenizer is visible in settings guidance, parser fingerprints, persisted chunk metadata, export bundles, and recreate validation.
 - Because chunking changes affect every downstream index, Settings / Models, freshness metadata, and docs make the required reprocess and full-text/vector rebuild path explicit.
 - Deterministic verification covers tokenizer resolution, recursive token coalescing, fixed token windows, oversized segment splitting, upload/reprocess metadata, export/recreate validation, frontend contract surfaces, and calibrated fixture behavior. Live SentenceTransformers cache and Ollama runtime checks remain opt-in because they depend on local host state.

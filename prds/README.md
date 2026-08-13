@@ -33,9 +33,10 @@ Current status:
 - Complete: PRD27 retrieval defaults transparency and controls.
 - Backlog: PRD28 document manager preview and batch actions.
 - Backlog: PRD29 PRD13 manual acceptance testing.
-- Complete: PRD30 token-aware chunking.
+- Reopened for scoped remediation: PRD30 token-aware chunking, to remove current `tiktoken` settings, add feature-detected Ollama runtime tokenization, and clarify multimodal image-token budgeting as future scope.
+- Backlog: PRD31 custom domain tokenizers.
 
-PRD13 is ready for final review after parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and documentation preparation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional OCR dependency/golden-corpus checks remain explicit manual checks. PRD29 is the proposed manual acceptance-testing pass for PRD13: it should exercise installed OCR providers, realistic scanned and mixed PDFs, stale-index recovery, Source Viewer review, export/recreate metadata, and cross-host notes before PRD13 is closed. PRD25 is complete and merged after backend preview/persisted-inspection APIs, Chat Workspace inspector controls, source navigation, docs, and deterministic quality gates. PRD30 is complete after token-count defaults, model-aware tokenizer resolution, recursive/fixed token chunking, tokenizer metadata inspection/export, recreate validation, calibrated 512-token/64-token-overlap defaults, docs, and deterministic backend/frontend quality gates. PRD23, PRD25, PRD26, PRD27, and PRD30 are complete and merged or ready to merge.
+PRD13 is ready for final review after parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and documentation preparation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional OCR dependency/golden-corpus checks remain explicit manual checks. PRD29 is the proposed manual acceptance-testing pass for PRD13: it should exercise installed OCR providers, realistic scanned and mixed PDFs, stale-index recovery, Source Viewer review, export/recreate metadata, and cross-host notes before PRD13 is closed. PRD25 is complete and merged after backend preview/persisted-inspection APIs, Chat Workspace inspector controls, source navigation, docs, and deterministic quality gates. PRD30 is implemented through token-count defaults, model-aware tokenizer resolution, recursive/fixed token chunking, tokenizer metadata inspection/export, recreate validation, calibrated 512-token/64-token-overlap defaults, docs, and deterministic backend/frontend quality gates, but is reopened for a scoped tokenizer-strategy remediation before final acceptance. PRD23, PRD25, PRD26, and PRD27 are complete and merged or ready to merge.
 
 The remaining backlog should be prioritized from hands-on use of the current app, adjusting order when a later PRD is needed to unblock an earlier one.
 
@@ -62,7 +63,8 @@ Shared decisions:
 - Retrieval defaults scope: PRD27 completed effective retrieval defaults across Search Lab, Chat Workspace, Prompt Sandbox, and evaluation, including explicit metadata boost `off` behavior and copy/promote paths that do not mutate defaults implicitly.
 - Document Manager batch scope: PRD28 owns row-click metadata preview and selected-document batch actions for reprocess, OCR, and delete as a follow-up to the completed PRD3 Document Manager.
 - PRD13 manual acceptance scope: PRD29 owns the real-dependency/manual-document test checklist and evidence capture needed before PRD13 can move from ready for final review to complete.
-- Token-aware chunking scope: PRD30 completed replacing character-count chunk sizing with token-aware defaults, model-specific SentenceTransformers tokenizers, explicit Ollama tokenizer registry/fallback behavior, and tokenizer metadata for inspection/export.
+- Token-aware chunking scope: PRD30 completed replacing character-count chunk sizing with token-aware defaults, model-specific SentenceTransformers tokenizers, explicit Ollama tokenizer registry/fallback behavior, and tokenizer metadata for inspection/export. Its follow-up remediation should remove current `tiktoken` choices from vector/embedding settings, prefer feature-detected Ollama runtime tokenization for Ollama models, keep HuggingFace/Transformers as the local library-backed path, and leave full multimodal image-token accounting to a later context-packing PRD.
+- Custom tokenizer scope: PRD31 owns future import/training, preview, registration, fingerprinting, export/recreate, and evaluation guardrails for custom technical-vocabulary tokenizers. PRD31 should not change PRD30's default model-aligned tokenizer behavior.
 
 PRD files:
 
@@ -95,4 +97,5 @@ PRD files:
 27. [Retrieval defaults transparency and controls](27-retrieval-defaults-transparency-controls.md) - complete
 28. [Document manager preview and batch actions](28-document-manager-preview-batch-actions.md) - backlog
 29. [PRD13 manual acceptance testing](29-prd13-manual-acceptance-testing.md) - backlog
-30. [Token-aware chunking](30-token-aware-chunking.md) - complete
+30. [Token-aware chunking](30-token-aware-chunking.md) - reopened for scoped remediation
+31. [Custom domain tokenizers](31-custom-domain-tokenizers.md) - backlog
