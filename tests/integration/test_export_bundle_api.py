@@ -27,7 +27,7 @@ from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersio
 from private_rag.prompt_sandbox.models import SandboxComparison, SandboxPromptVersion, SandboxRun
 from private_rag.repositories import models as repository_models  # noqa: F401
 from private_rag.repositories.models import Repository, RepositorySettingsRow
-from private_rag.repositories.schemas import RepositorySettingsReadinessItem
+from private_rag.repositories.schemas import RepositorySettings, RepositorySettingsReadinessItem
 from private_rag.repositories.service import ensure_default_repository
 from private_rag.retrieval.models import RetrievalResult, RetrievalRun
 from private_rag.vector.embeddings import DeterministicEmbeddingProvider
@@ -169,6 +169,10 @@ def test_export_bundle_zip_contains_default_payloads_and_sources(tmp_path: Path)
         chat_payload = json.loads(archive.read("payloads/chat.json"))
         retrieval_payload = json.loads(archive.read("payloads/retrieval.json"))
         chunks_payload = json.loads(archive.read("payloads/chunks.json"))
+        chunk_metadata = chunks_payload["chunks"][0]["metadata"]
+        assert chunk_metadata["chunking"]["chunk_unit"] == "tokens"
+        assert chunk_metadata["tokenizer"]["tokenizer_name"] == "test-deterministic"
+        assert chunk_metadata["tokenizer"]["precision"] == "exact"
         assert (
             chat_payload["messages"][1]["citations"][0]["chunk_id"]
             == chunks_payload["chunks"][0]["id"]
@@ -226,6 +230,30 @@ def test_validate_bundle_endpoint_accepts_valid_bundle_and_reports_summary(
     assert {issue["code"] for issue in payload["warnings"]} == {"missing_model"}
     assert "source_hash_verified" in {issue["code"] for issue in payload["informational"]}
     assert "parser_fingerprint" in {issue["code"] for issue in payload["informational"]}
+    assert "chunk_tokenizer_metadata" in {issue["code"] for issue in payload["informational"]}
+
+
+def test_validate_bundle_endpoint_reports_tokenizer_fallback_and_mismatch(
+    tmp_path: Path,
+) -> None:
+    client, session_factory, _ = _client_with_database()
+    repository_id, _ = _seed_repository(session_factory, tmp_path, fallback_tokenizer=True)
+    bundle = _replace_chunk_tokenizer_name(
+        client.post(f"/repositories/{repository_id}/exports/bundle").content,
+        "changed-tokenizer",
+    )
+
+    response = client.post(
+        "/repositories/recreate/bundle/validate",
+        files={"file": ("export.zip", bundle, "application/zip")},
+        data={"available_models_json": json.dumps([])},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    warning_codes = {issue["code"] for issue in payload["warnings"]}
+    assert "chunk_tokenizer_fallback" in warning_codes
+    assert "chunk_tokenizer_mismatch" in warning_codes
 
 
 def test_validate_bundle_endpoint_reports_missing_payload(
@@ -486,6 +514,8 @@ def test_recreate_bundle_endpoint_rejects_non_empty_target_repository(
 def _seed_repository(
     session_factory: sessionmaker[Session],
     tmp_path: Path,
+    *,
+    fallback_tokenizer: bool = False,
 ) -> tuple[str, str]:
     source_path = tmp_path / "paper.txt"
     source_path.write_bytes(b"alpha beta gamma")
@@ -502,9 +532,35 @@ def _seed_repository(
         settings_payload = repository_with_settings.settings.model_dump(mode="json")
         settings_payload["embedding"]["model"] = "test-deterministic"
         settings_payload["vector"]["vector_size"] = 8
+        if fallback_tokenizer:
+            settings_payload["embedding"]["provider"] = "ollama"
+            settings_payload["embedding"]["model"] = "custom-local:latest"
+            settings_payload["vector"]["vector_size"] = 768
+            settings_payload["vector"]["distance"] = "cosine"
         repository.settings.settings = settings_payload
-        repository_with_settings.settings.embedding.model = "test-deterministic"
-        repository_with_settings.settings.vector.vector_size = 8
+        repository_with_settings.settings = RepositorySettings.model_validate(settings_payload)
+        tokenizer_metadata = (
+            {
+                "provider": "private_rag",
+                "tokenizer_name": "private-rag/simple-token-fallback-v1",
+                "tokenizer_source": "app_fallback",
+                "precision": "fallback",
+                "fallback_reason": "Ollama model 'custom-local:latest' does not have tokenizer registry metadata.",
+            }
+            if fallback_tokenizer
+            else {
+                "provider": "sentence_transformers",
+                "tokenizer_name": "test-deterministic",
+                "tokenizer_source": "sentence_transformers_model",
+                "precision": "exact",
+            }
+        )
+        chunking_metadata = {
+            "chunk_unit": "tokens",
+            "chunk_size": settings_payload["chunking"]["chunk_size"],
+            "chunk_overlap": settings_payload["chunking"]["chunk_overlap"],
+            "chunking_mode": settings_payload["chunking"]["mode"],
+        }
 
         document = Document(repository_id=repository_id, display_name="paper.txt")
         session.add(document)
@@ -528,7 +584,14 @@ def _seed_repository(
             section_count=1,
             chunk_count=1,
             warnings=[],
-            extra_metadata={"document_kind": "note"},
+            extra_metadata={
+                "document_kind": "note",
+                "parser_fingerprint_payload": {
+                    "chunking": settings_payload["chunking"],
+                    "source_hash": source_digest,
+                    "tokenizer": tokenizer_metadata,
+                },
+            },
         )
         session.add(version)
         session.flush()
@@ -547,7 +610,12 @@ def _seed_repository(
             char_start=0,
             char_end=16,
             parser_version="prd3-v1",
-            extra_metadata={"source_hash": source_digest},
+            extra_metadata={
+                "source_hash": source_digest,
+                "chunking": chunking_metadata,
+                "token_count": 3,
+                "tokenizer": tokenizer_metadata,
+            },
         )
         session.add(chunk)
         session.flush()
@@ -693,3 +761,14 @@ def _replace_zip_member(data: bytes, replaced_path: str, replacement: bytes) -> 
                 replacement if name == replaced_path else source_archive.read(name),
             )
     return buffer.getvalue()
+
+
+def _replace_chunk_tokenizer_name(data: bytes, tokenizer_name: str) -> bytes:
+    with ZipFile(BytesIO(data)) as source_archive:
+        chunks_payload = json.loads(source_archive.read("payloads/chunks.json"))
+    chunks_payload["chunks"][0]["metadata"]["tokenizer"]["tokenizer_name"] = tokenizer_name
+    return _replace_zip_member(
+        data,
+        "payloads/chunks.json",
+        json.dumps(chunks_payload).encode("utf-8"),
+    )

@@ -26,7 +26,10 @@ from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersio
 from private_rag.prompt_sandbox.models import SandboxComparison, SandboxRun
 from private_rag.repositories import models as repository_models  # noqa: F401
 from private_rag.repositories.models import Repository, RepositorySnapshot
-from private_rag.repositories.schemas import RepositorySettingsReadinessItem
+from private_rag.repositories.schemas import (
+    DEFAULT_CHUNK_SIZE_TOKENS,
+    RepositorySettingsReadinessItem,
+)
 from private_rag.retrieval.models import RetrievalRun
 from private_rag.search.service import rebuild_full_text_index
 from private_rag.vector.models import EmbeddingRun
@@ -60,7 +63,7 @@ def test_default_repository_is_created_on_first_request() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["repository"]["name"] == "Default Repository"
-    assert payload["settings"]["chunking"]["chunk_size"] == 800
+    assert payload["settings"]["chunking"]["chunk_size"] == DEFAULT_CHUNK_SIZE_TOKENS
     assert payload["settings"]["embedding"]["model"]
 
 
@@ -230,9 +233,23 @@ def test_repository_settings_model_catalog_returns_known_defaults() -> None:
     assert minilm["source"] == "known"
     assert minilm["vector_size"] == 384
     assert minilm["supported_distances"] == ["cosine", "dot", "euclid"]
+    assert minilm["tokenizer_id"] == "hf:sentence-transformers/all-MiniLM-L6-v2"
+    assert minilm["tokenizer_implementation_library"] == "transformers"
+    assert minilm["tokenizer_offset_mapping"] is True
+    assert minilm["tokenizer_precision"] == "exact"
+    assert minilm["tokenizer_source"] == "sentence_transformers_model"
     ollama_embedding = embedding_by_model[("ollama", "embeddinggemma:300m")]
     assert ollama_embedding["requires_local_model"] is True
     assert ollama_embedding["supported_distances"] == ["cosine"]
+    assert ollama_embedding["tokenizer_precision"] == "fallback"
+    assert ollama_embedding["tokenizer_source"] == "ollama_registry_fallback"
+    assert {
+        ("hf:sentence-transformers/all-MiniLM-L6-v2", "transformers", "exact"),
+        ("private-rag/simple-token-fallback-v1", "regex", "fallback"),
+    } <= {
+        (entry["id"], entry["implementation_library"], entry["precision"])
+        for entry in payload["tokenizer_catalog"]
+    }
     assert any(
         entry["name"] == created["settings"]["model"]["ollama_chat_model"]
         and entry["source"] == "known"

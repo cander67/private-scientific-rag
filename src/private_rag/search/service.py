@@ -63,13 +63,20 @@ def field_weight_configuration() -> dict[str, float]:
 def rebuild_full_text_index(
     session: Session,
     repository_id: str,
+    *,
+    ollama_base_url: str | None = None,
 ) -> FullTextRebuildResponse | None:
     repository = session.get(Repository, repository_id)
     if repository is None or repository.settings is None:
         return None
     repository_settings = RepositorySettings.model_validate(repository.settings.settings)
     full_text_settings = repository_settings.full_text
-    stale_documents = stale_parser_chunk_documents(session, repository_id, repository_settings)
+    stale_documents = stale_parser_chunk_documents(
+        session,
+        repository_id,
+        repository_settings,
+        ollama_base_url=ollama_base_url,
+    )
     if stale_documents:
         raise ParserChunkStaleError(stale_documents)
     ensure_full_text_schema(session, full_text_settings)

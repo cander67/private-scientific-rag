@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from private_rag.api.routes.repositories import DbSession
+from private_rag.core.settings import get_settings
 from private_rag.ingestion.service import ParserChunkStaleError
 from private_rag.search.schemas import (
     FullTextRebuildResponse,
@@ -20,7 +21,12 @@ def rebuild_repository_full_text_index(
     session: DbSession,
 ) -> FullTextRebuildResponse:
     try:
-        rebuilt = rebuild_full_text_index(session, repository_id)
+        settings = get_settings()
+        rebuilt = rebuild_full_text_index(
+            session,
+            repository_id,
+            ollama_base_url=settings.ollama_base_url,
+        )
     except ParserChunkStaleError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if rebuilt is None:

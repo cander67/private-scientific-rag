@@ -14,6 +14,7 @@ from private_rag.chat.llm import ChatLLM, OllamaUnavailableError
 from private_rag.chat.models import ChatMessageRow, ChatSession
 from private_rag.core.settings import Settings, get_settings
 from private_rag.ingestion.models import Document, DocumentChunk, DocumentVersion
+from private_rag.ingestion.tokenizer_catalog import known_tokenizer_catalog
 from private_rag.prompt_sandbox.models import SandboxComparison, SandboxPromptVersion, SandboxRun
 from private_rag.repositories.models import Repository, RepositorySettingsRow, RepositorySnapshot
 from private_rag.repositories.schemas import (
@@ -51,6 +52,7 @@ from private_rag.repositories.schemas import (
     RepositoryVectorCleanupRetryResult,
     RepositoryWithSettings,
     RerankerModelCatalogEntry,
+    TokenizerCatalogEntryResponse,
     source_file_exists,
 )
 from private_rag.retrieval.models import RetrievalResult, RetrievalRun
@@ -493,6 +495,12 @@ def repository_model_catalog(
                 setup_hint=metadata.setup_hint,
                 requires_local_model=metadata.requires_local_model,
                 requires_live_probe=metadata.requires_live_probe,
+                tokenizer_id=metadata.tokenizer_id,
+                tokenizer_implementation_library=metadata.tokenizer_implementation_library,
+                tokenizer_offset_mapping=metadata.tokenizer_offset_mapping,
+                tokenizer_name=metadata.tokenizer_name,
+                tokenizer_source=metadata.tokenizer_source,
+                tokenizer_precision=metadata.tokenizer_precision,
             )
             for metadata in known_embedding_models()
         ],
@@ -536,6 +544,23 @@ def repository_model_catalog(
             ),
         ],
         parser_choices=list(PARSER_CATALOG),
+        tokenizer_catalog=[
+            TokenizerCatalogEntryResponse(
+                id=entry.id,
+                label=entry.label,
+                provider=entry.provider,
+                implementation_library=entry.implementation_library,
+                tokenizer_name=entry.tokenizer_name,
+                tokenizer_source=entry.tokenizer_source,
+                precision=entry.precision,
+                offset_mapping=entry.offset_mapping,
+                requires_local_model=entry.requires_local_model,
+                is_fallback=entry.is_fallback,
+                notes=entry.notes,
+                fallback_warning=entry.fallback_warning,
+            )
+            for entry in known_tokenizer_catalog()
+        ],
         runtime_detection=ModelCatalogRuntimeDetection(
             checked=False,
             provider="ollama",
@@ -1232,11 +1257,16 @@ def analyze_settings_impact(
         ]
 
     parsing_fields = changed(
+        "chunking.chunk_unit",
         "chunking.mode",
         "chunking.chunk_size",
         "chunking.chunk_overlap",
+        "chunking.tokenizer_mode",
+        "chunking.tokenizer_id",
         "parser.structured_parser",
         "parser.fallback_parser",
+        "embedding.provider",
+        "embedding.model",
     )
     if parsing_fields:
         impacts.append(

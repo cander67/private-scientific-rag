@@ -48,6 +48,7 @@ test("Export Center shows counts, settings, and manifest summary details", () =>
   assert.match(source, /Required setup/);
   assert.match(source, /requiredModelsForSettings/);
   assert.match(source, /settingsSummaryRows/);
+  assert.match(source, /tokens/);
   assert.match(source, /Manifest summary/);
   assert.match(source, /buildExportManifestSummary/);
   assert.match(source, /chat_citations/);

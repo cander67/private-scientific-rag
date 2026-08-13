@@ -9,7 +9,7 @@ Export Center creates a ZIP bundle from `POST /repositories/{repository_id}/expo
 Each bundle contains:
 
 - `manifest.json` with bundle schema version, generated timestamp, repository metadata, export options, required models, settings snapshot, payload paths, source metadata, exported counts, and warnings.
-- `payloads/settings.json` with repository parser, chunking, full-text, vector, embedding, reranking, model, prompt, and export settings.
+- `payloads/settings.json` with repository parser, token chunking, full-text, vector, embedding, reranking, model, prompt, and export settings.
 - `payloads/prompts.json` with repository prompt library data.
 - `payloads/documents.json` and `payloads/chunks.json` with portable document and parsed chunk metadata.
 - `payloads/retrieval.json` with retrieval runs and result metadata.
@@ -62,7 +62,8 @@ Recreate remaps restored chunk IDs so citations and retrieval results point at t
 - **External source path changed**: A mapped file has the right hash but a different filename or location. Recreate can continue, and the change is reported for provenance.
 - **Model availability not checked**: No available-model list was supplied. Validation does not inspect local Ollama or SentenceTransformers caches automatically.
 - **Missing model**: A required embedding, reranking, or chat model was checked against a supplied available-model list and was not found in that list.
-- **Parser/settings fingerprint**: Parser, chunking, or settings fingerprints may produce different chunks on another host or dependency version.
+- **Parser/settings fingerprint**: Parser, token chunking, tokenizer, embedding, or settings fingerprints may produce different chunks on another host or dependency version.
+- **Chunk tokenizer metadata**: Validation reports the tokenizer provider/name/source/precision recorded on chunks, warns when fallback tokenizers were used, and warns when chunk tokenizer metadata differs from the document-version parser fingerprint.
 - **Count mismatch**: Payload counts differ from manifest counts. Treat this as a bundle consistency problem.
 - **Index difference**: Recreate reports full-text and vector indexed chunk counts after rebuild. Differences usually mean parsing or source mapping changed what chunks were available.
 

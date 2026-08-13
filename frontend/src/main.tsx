@@ -18,9 +18,12 @@ type RepositoryRead = {
 
 type RepositorySettings = {
   chunking: {
+    chunk_unit?: "tokens";
     chunk_size: number;
     chunk_overlap: number;
     mode: string;
+    tokenizer_mode: "auto" | "manual";
+    tokenizer_id: string | null;
   };
   parser: {
     structured_parser: string;
@@ -142,6 +145,12 @@ type EmbeddingModelCatalogEntry = {
   setup_hint: string;
   requires_local_model: boolean;
   requires_live_probe: boolean;
+  tokenizer_id: string | null;
+  tokenizer_implementation_library: string | null;
+  tokenizer_offset_mapping: boolean;
+  tokenizer_name: string | null;
+  tokenizer_source: string | null;
+  tokenizer_precision: "exact" | "fallback";
 };
 
 type ChatModelCatalogEntry = ChatModelInfo & {
@@ -169,12 +178,28 @@ type ParserCatalogEntry = {
   readiness_required: boolean;
 };
 
+type TokenizerCatalogEntry = {
+  id: string;
+  label: string;
+  provider: "sentence_transformers" | "ollama" | "private_rag";
+  implementation_library: "transformers" | "ollama" | "regex";
+  tokenizer_name: string;
+  tokenizer_source: string;
+  precision: "exact" | "fallback";
+  offset_mapping: boolean;
+  requires_local_model: boolean;
+  is_fallback: boolean;
+  notes: string;
+  fallback_warning: string | null;
+};
+
 type RepositoryModelCatalog = {
   repository_id: string;
   embedding_models: EmbeddingModelCatalogEntry[];
   chat_models: ChatModelCatalogEntry[];
   reranker_models: RerankerModelCatalogEntry[];
   parser_choices: ParserCatalogEntry[];
+  tokenizer_catalog: TokenizerCatalogEntry[];
   runtime_detection: {
     checked: boolean;
     provider: "ollama";
@@ -3310,6 +3335,12 @@ function App() {
                         <dd>{shortHash(selectedChunk.source_hash)}</dd>
                         <dt>offsets</dt>
                         <dd>{offsetLabel(selectedChunk)}</dd>
+                        <dt>tokens</dt>
+                        <dd>{tokenWindowLabel(selectedChunk)}</dd>
+                        <dt>chunk tokenizer</dt>
+                        <dd>{chunkTokenizerLabel(selectedChunk)}</dd>
+                        <dt>tokenizer precision</dt>
+                        <dd>{chunkTokenizerPrecisionLabel(selectedChunk)}</dd>
                         <dt>source type</dt>
                         <dd>{inspection.version.source_type}</dd>
                       </dl>
@@ -4426,6 +4457,14 @@ function SettingsModels({
   const parserLabels = Object.fromEntries(
     parserCatalog.map((entry) => [entry.id, entry.label]),
   );
+  const tokenizerCatalog = modelCatalog?.tokenizer_catalog ?? [];
+  const tokenizerLabels = Object.fromEntries(
+    tokenizerCatalog.map((entry) => [entry.id, `${entry.label} · ${entry.implementation_library}`]),
+  );
+  const selectedManualTokenizer = tokenizerCatalog.find(
+    (entry) => entry.id === draft?.chunking.tokenizer_id,
+  );
+  const resolvedTokenizer = resolvedChunkTokenizer(draft, selectedEmbeddingModel, tokenizerCatalog);
   const selectedStructuredParser = parserCatalog.find(
     (entry) => entry.id === draft?.parser.structured_parser,
   );
@@ -4738,18 +4777,23 @@ function SettingsModels({
           />
           <SettingNumber
             id="settings-chunk-size"
-            label="Chunk size"
+            label="Chunk size (tokens)"
             value={draft.chunking.chunk_size}
             error={validationByField.get("chunking.chunk_size")}
             onChange={(value) => updateDraft((next) => { next.chunking.chunk_size = value; })}
           />
           <SettingNumber
             id="settings-chunk-overlap"
-            label="Chunk overlap"
+            label="Chunk overlap (tokens)"
             value={draft.chunking.chunk_overlap}
             error={validationByField.get("chunking.chunk_overlap")}
             onChange={(value) => updateDraft((next) => { next.chunking.chunk_overlap = value; })}
           />
+          <p className="settings-field-note">
+            Chunk size and overlap are token counts. The default is 512 tokens with
+            64-token overlap. Recursive mode preserves parser segments where possible;
+            fixed mode creates deterministic token windows.
+          </p>
           <SettingSelect
             id="settings-structured-parser"
             label="Structured parser"
@@ -4906,12 +4950,48 @@ function SettingsModels({
                 "Custom models remain available, but verify vector dimensions before rebuilding."}
             </small>
             <small>
+              Resolved chunk tokenizer: {resolvedTokenizer}
+            </small>
+            {selectedManualTokenizer?.fallback_warning && (
+              <small>{selectedManualTokenizer.fallback_warning}</small>
+            )}
+            {resolvedTokenizer.includes("regex") && (
+              <small>Regex fallback rule: word-like runs plus individual punctuation/symbol tokens.</small>
+            )}
+            <small>
               {selectedEmbeddingModel?.setup_hint ??
                 (draft.embedding.provider === "ollama"
                   ? "Custom Ollama embeddings require cosine distance and a live dimension probe before rebuild."
                   : "Custom SentenceTransformers models should be cached locally and dimension-checked before rebuild.")}
             </small>
           </div>
+          <SettingSelect
+            id="settings-chunk-tokenizer-mode"
+            label="Chunk tokenizer"
+            value={draft.chunking.tokenizer_mode}
+            options={["auto", "manual"]}
+            labels={{ auto: "Auto from embedding model", manual: "Manual tokenizer ID" }}
+            error={validationByField.get("chunking.tokenizer_mode")}
+            onChange={(value) => updateDraft((next) => {
+              next.chunking.tokenizer_mode = value as RepositorySettings["chunking"]["tokenizer_mode"];
+              if (next.chunking.tokenizer_mode === "auto") {
+                next.chunking.tokenizer_id = null;
+              } else if (!next.chunking.tokenizer_id && tokenizerCatalog[0]) {
+                next.chunking.tokenizer_id = tokenizerCatalog[0].id;
+              }
+            })}
+          />
+          {draft.chunking.tokenizer_mode === "manual" && (
+            <SettingSelect
+              id="settings-chunk-tokenizer-id"
+              label="Tokenizer ID"
+              value={draft.chunking.tokenizer_id ?? ""}
+              options={tokenizerCatalog.map((entry) => entry.id)}
+              labels={tokenizerLabels}
+              error={validationByField.get("chunking.tokenizer_id")}
+              onChange={(value) => updateDraft((next) => { next.chunking.tokenizer_id = value; })}
+            />
+          )}
           <SettingText
             id="settings-vector-collection"
             label="Qdrant collection"
@@ -7949,6 +8029,106 @@ function offsetLabel(chunk: Chunk) {
   return "—";
 }
 
+function tokenWindowLabel(chunk: Chunk) {
+  const tokenCount = metadataNumber(chunk.metadata.token_count);
+  const start = metadataNumber(chunk.metadata.token_window_start);
+  const end = metadataNumber(chunk.metadata.token_window_end);
+  if (start !== null && end !== null) {
+    return `${tokenCount ?? end - start} tokens · window ${start}-${end}`;
+  }
+  return tokenCount !== null ? `${tokenCount} tokens` : "—";
+}
+
+function chunkTokenizerLabel(chunk: Chunk) {
+  const tokenizer = tokenizerMetadata(chunk);
+  if (!tokenizer) {
+    return "—";
+  }
+  const provider = tokenizer.provider ?? "unknown";
+  const library = tokenizer.implementation_library ?? "unknown library";
+  const id = tokenizer.tokenizer_id ?? tokenizer.tokenizer_name ?? "unknown tokenizer";
+  const name = tokenizer.tokenizer_name ?? "unknown tokenizer";
+  return `${provider} / ${id} via ${library} (${name})`;
+}
+
+function chunkTokenizerPrecisionLabel(chunk: Chunk) {
+  const tokenizer = tokenizerMetadata(chunk);
+  if (!tokenizer) {
+    return "—";
+  }
+  const precision = tokenizer.precision === "exact" ? "exact" : "fallback";
+  const source = tokenizer.tokenizer_source ?? "unknown source";
+  const mode = tokenizer.selection_mode ?? "auto";
+  const offsets = tokenizer.offset_mapping === true ? "offsets" : "no offsets";
+  return tokenizer.fallback_reason
+    ? `${precision} (${source}, ${mode}, ${offsets}) · ${tokenizer.fallback_reason}`
+    : `${precision} (${source}, ${mode}, ${offsets})`;
+}
+
+function tokenizerMetadata(chunk: Chunk) {
+  const raw = chunk.metadata.tokenizer;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+  const metadata = raw as Record<string, unknown>;
+  return {
+    provider: metadataString(metadata.provider),
+    tokenizer_id: metadataString(metadata.tokenizer_id),
+    tokenizer_name: metadataString(metadata.tokenizer_name),
+    tokenizer_source: metadataString(metadata.tokenizer_source),
+    implementation_library: metadataString(metadata.implementation_library),
+    precision: metadataString(metadata.precision),
+    selection_mode: metadataString(metadata.selection_mode),
+    offset_mapping: typeof metadata.offset_mapping === "boolean" ? metadata.offset_mapping : null,
+    is_fallback: typeof metadata.is_fallback === "boolean" ? metadata.is_fallback : null,
+    fallback_reason: metadataString(metadata.fallback_reason),
+  };
+}
+
+function embeddingTokenizerLabel(model: EmbeddingModelCatalogEntry) {
+  const precision = model.tokenizer_precision === "exact" ? "exact" : "fallback";
+  const source = model.tokenizer_source ?? "unregistered tokenizer source";
+  const name = model.tokenizer_name ?? "unregistered tokenizer";
+  const id = model.tokenizer_id ?? name;
+  const library = model.tokenizer_implementation_library ?? "unknown library";
+  return `${id} via ${library} · ${source} · ${precision}`;
+}
+
+function resolvedChunkTokenizer(
+  settings: RepositorySettings | null,
+  embeddingModel: EmbeddingModelCatalogEntry | undefined,
+  tokenizerCatalog: TokenizerCatalogEntry[],
+) {
+  if (!settings) {
+    return "Unavailable";
+  }
+  if (settings.chunking.tokenizer_mode === "manual") {
+    const manual = tokenizerCatalog.find((entry) => entry.id === settings.chunking.tokenizer_id);
+    if (manual) {
+      return `${manual.id} via ${manual.implementation_library} · ${manual.precision}`;
+    }
+    return settings.chunking.tokenizer_id
+      ? `${settings.chunking.tokenizer_id} · unsupported manual tokenizer`
+      : "Manual tokenizer ID required";
+  }
+  if (settings.embedding.provider === "ollama") {
+    const model = settings.embedding.model || embeddingModel?.model || "selected Ollama model";
+    return `ollama:${model} via Ollama runtime when available · registry/regex fallback otherwise · auto`;
+  }
+  if (embeddingModel) {
+    return `${embeddingTokenizerLabel(embeddingModel)} · auto`;
+  }
+  return `hf:${settings.embedding.model} via transformers · auto when cached locally, regex fallback otherwise`;
+}
+
+function metadataString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function metadataNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function chunkContextWindow(chunks: Chunk[], selectedChunkId: string, radius = 1) {
   const selectedIndex = chunks.findIndex((chunk) => chunk.id === selectedChunkId);
   if (selectedIndex < 0) {
@@ -8350,7 +8530,7 @@ function settingsSummaryRows(settings: RepositorySettings | null) {
       label: "retrieval",
       value: `${settings.retrieval.mode} top-${settings.retrieval.top_k} / ${settings.retrieval.reranker_strategy}`,
     },
-    { label: "chunking", value: `${settings.chunking.mode} ${settings.chunking.chunk_size}/${settings.chunking.chunk_overlap}` },
+    { label: "chunking", value: `${settings.chunking.mode} ${settings.chunking.chunk_size}/${settings.chunking.chunk_overlap} tokens` },
     { label: "full-text", value: settings.full_text.tokenizer },
     { label: "parser", value: settings.parser.structured_parser },
   ];
@@ -8384,7 +8564,7 @@ function validateSettingsDraft(
     entry.supported_as.includes("fallback"),
   );
   if (settings.chunking.chunk_size < 100 || settings.chunking.chunk_size > 8000) {
-    issues.push({ field: "chunking.chunk_size", message: "Chunk size must be between 100 and 8000." });
+    issues.push({ field: "chunking.chunk_size", message: "Chunk size must be between 100 and 8000 tokens." });
   }
   if (settings.chunking.chunk_overlap < 0) {
     issues.push({ field: "chunking.chunk_overlap", message: "Chunk overlap cannot be negative." });
@@ -8401,6 +8581,16 @@ function validateSettingsDraft(
     issues.push({ field: "parser.fallback_parser", message: "Fallback parser is required." });
   } else if (!fallbackParserChoices.some((entry) => entry.id === settings.parser.fallback_parser)) {
     issues.push({ field: "parser.fallback_parser", message: "Choose a supported fallback parser." });
+  }
+  if (settings.chunking.tokenizer_mode === "manual") {
+    if (!settings.chunking.tokenizer_id) {
+      issues.push({ field: "chunking.tokenizer_id", message: "Choose a manual tokenizer ID." });
+    } else if (
+      modelCatalog?.tokenizer_catalog &&
+      !modelCatalog.tokenizer_catalog.some((entry) => entry.id === settings.chunking.tokenizer_id)
+    ) {
+      issues.push({ field: "chunking.tokenizer_id", message: "Choose a supported tokenizer ID." });
+    }
   }
   if (settings.ocr.fallback_enabled && settings.ocr.fallback_provider === settings.ocr.provider) {
     issues.push({ field: "ocr.fallback_provider", message: "OCR fallback must differ from primary provider." });
@@ -8569,7 +8759,7 @@ function dashboardConfigRows(summary: DashboardSummary | null, settings: Reposit
   if (summary) {
     const config = summary.active_config;
     return [
-      { label: "chunking", value: `${config.chunking.mode} ${config.chunking.chunk_size}/${config.chunking.chunk_overlap}` },
+      { label: "chunking", value: `${config.chunking.mode} ${config.chunking.chunk_size}/${config.chunking.chunk_overlap} tokens` },
       { label: "embedding", value: `${config.embedding.provider} / ${config.embedding.model}` },
       { label: "vector", value: `${config.vector.collection_name} · ${config.vector.vector_size} · ${config.vector.distance}` },
       {
@@ -8943,6 +9133,10 @@ function issueLabel(code: string) {
     unconfirmed_model: "Model not confirmed",
     model_availability_unconfirmed: "Model availability not checked",
     parser_fingerprint: "Parser/settings fingerprint",
+    chunk_tokenizer_metadata: "Chunk tokenizer metadata",
+    chunk_tokenizer_fallback: "Chunk tokenizer fallback",
+    chunk_tokenizer_mismatch: "Chunk tokenizer mismatch",
+    missing_chunk_tokenizer_metadata: "Missing chunk tokenizer metadata",
     count_mismatch: "Count mismatch",
     source_hash_verified: "Source hash verified",
     external_source_hash_verified: "External source hash verified",
