@@ -173,12 +173,19 @@ test("Settings / Models supports edit, save, cancel, and field validation", () =
   assert.match(source, /JSON\.stringify\(\{ settings: nextSettings \}\)/);
   assert.match(source, /Save settings/);
   assert.match(source, /Cancel/);
+  assert.match(source, /function SettingsSaveControls/);
+  assert.match(source, /placement: "top" \| "bottom"/);
+  assert.match(source, /placement="top"[\s\S]*?onCancel=\{cancelEdits\}[\s\S]*?onSave=\{handleSave\}/);
+  assert.match(source, /placement="bottom"[\s\S]*?onCancel=\{cancelEdits\}[\s\S]*?onSave=\{handleSave\}/);
+  assert.match(source, /settings-save-row-\$\{placement\}/);
+  assert.match(source, /disabled=\{!dirty \|\| busy \|\| validationIssueCount > 0\}/);
   assert.match(source, /validateSettingsDraft/);
   assert.match(source, /Chunk size must be between 100 and 8000 tokens/);
   assert.match(source, /Chunk overlap must be smaller than chunk size/);
   assert.match(source, /Ollama embeddings currently require cosine distance/);
   assert.match(source, /Cross-encoder reranking requires a model/);
   assert.match(styles, /\.settings-field-error/);
+  assert.match(styles, /\.settings-save-row-bottom/);
 });
 
 test("Settings / Models previews and preserves settings impact", () => {

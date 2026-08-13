@@ -1319,6 +1319,11 @@ textarea {
   align-items: center;
 }
 
+.settings-save-row-bottom {
+  border-top: 1px solid var(--border);
+  padding-top: var(--s4);
+}
+
 .settings-validation strong,
 .settings-validation span {
   display: block;

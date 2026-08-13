@@ -5038,22 +5038,15 @@ function SettingsModels({
             {validationIssues.length > 0 ? "Needs fixes" : dirty ? "Unsaved edits" : "Saved"}
           </span>
         </div>
-        <div className="row row-between settings-save-row">
-          <span className="muted">{saveMessage}</span>
-          <div className="row">
-            <button className="btn btn-ghost" type="button" onClick={cancelEdits} disabled={!dirty || saveBusy}>
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary"
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={!dirty || saveBusy || validationIssues.length > 0}
-            >
-              {saveBusy ? "Saving..." : "Save settings"}
-            </button>
-          </div>
-        </div>
+        <SettingsSaveControls
+          message={saveMessage}
+          dirty={dirty}
+          busy={saveBusy}
+          validationIssueCount={validationIssues.length}
+          placement="top"
+          onCancel={cancelEdits}
+          onSave={handleSave}
+        />
         {validationIssues.length > 0 && (
           <div className="banner banner-warn settings-validation">
             <div>
@@ -5679,6 +5672,54 @@ function SettingsModels({
           )}
         </div>
       </section>
+
+      <SettingsSaveControls
+        message={saveMessage}
+        dirty={dirty}
+        busy={saveBusy}
+        validationIssueCount={validationIssues.length}
+        placement="bottom"
+        onCancel={cancelEdits}
+        onSave={handleSave}
+      />
+    </div>
+  );
+}
+
+function SettingsSaveControls({
+  message,
+  dirty,
+  busy,
+  validationIssueCount,
+  placement,
+  onCancel,
+  onSave,
+}: {
+  message: string;
+  dirty: boolean;
+  busy: boolean;
+  validationIssueCount: number;
+  placement: "top" | "bottom";
+  onCancel: () => void;
+  onSave: () => Promise<void>;
+}) {
+  return (
+    <div className={`row row-between settings-save-row settings-save-row-${placement}`}>
+      <span className="muted">{message}</span>
+      <div className="row">
+        <button className="btn btn-ghost" type="button" onClick={onCancel} disabled={!dirty || busy}>
+          Cancel
+        </button>
+        <button
+          className="btn btn-primary"
+          type="button"
+          onClick={() => void onSave()}
+          disabled={!dirty || busy || validationIssueCount > 0}
+          aria-busy={busy}
+        >
+          {busy ? "Saving..." : "Save settings"}
+        </button>
+      </div>
     </div>
   );
 }
