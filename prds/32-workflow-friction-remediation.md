@@ -1,6 +1,6 @@
 # PRD 32: Workflow Friction Remediation
 
-**Status:** Backlog.
+**Status:** Ready for final review. Not complete until user acceptance.
 
 ## Problem Statement
 
