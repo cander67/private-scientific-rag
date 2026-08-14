@@ -69,6 +69,7 @@ class RetrievalSearchResult(BaseModel):
     line_end: int | None = None
     snippet: str | None = None
     text_preview: str | None = None
+    context_text: str | None = None
     matched_fields: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     embedding_run_id: str | None = None

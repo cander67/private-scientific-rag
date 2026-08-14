@@ -172,12 +172,19 @@ def test_chat_session_persists_messages_and_mapped_citations() -> None:
 def test_chat_context_preview_matches_normal_prompt_without_persisting_messages() -> None:
     client, llm, session_factory = _client_with_chat_fakes_and_database()
     repository_id = _default_repository_id(client)
+    full_chunk_tail = "full chunk tail sentinel should reach the assembled model message"
+    long_chunk = (
+        "Abstract\n"
+        "LiFePO4 context inspection should show retrieved chunks. "
+        + " ".join(f"calibration filler {index}" for index in range(40))
+        + f" {full_chunk_tail}.\n"
+    )
     upload_response = client.post(
         f"/repositories/{repository_id}/documents",
         files={
             "file": (
                 "chat-preview.txt",
-                b"Abstract\nLiFePO4 context inspection should show retrieved chunks.\n",
+                long_chunk.encode(),
                 "text/plain",
             )
         },
@@ -224,8 +231,13 @@ def test_chat_context_preview_matches_normal_prompt_without_persisting_messages(
         == upload_response.json()["chunks_preview"][0]["id"]
     )
     assert preview["history_messages"] == []
+    assert preview["context_entries"][0]["context_text"]
+    assert full_chunk_tail in preview["context_entries"][0]["context_text"]
+    assert full_chunk_tail not in (preview["context_entries"][0].get("snippet") or "")
+    assert full_chunk_tail not in (preview["context_entries"][0].get("text_preview") or "")
     assert preview["llm_messages"][0]["role"] == "system"
     assert "[1] chat-preview.txt" in preview["llm_messages"][0]["content"]
+    assert full_chunk_tail in preview["llm_messages"][0]["content"]
     assert preview["llm_messages"][-1] == {
         "role": "user",
         "content": "What context is available for LiFePO4?",
@@ -350,6 +362,8 @@ def test_chat_message_context_inspection_reconstructs_persisted_answer() -> None
     )
     assert payload["context_entries"][0]["document_title"] == "chat-inspection.txt"
     assert payload["context_entries"][0]["text_preview"]
+    assert payload["context_entries"][0]["context_text"]
+    assert payload["context_entries"][0]["context_text"] in payload["llm_messages"][0]["content"]
     assert payload["llm_messages"] == [
         {"role": message.role, "content": message.content} for message in llm.calls[0]
     ]

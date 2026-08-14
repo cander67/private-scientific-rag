@@ -2462,6 +2462,13 @@ textarea {
   align-items: flex-start;
 }
 
+.context-entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s2);
+}
+
 .context-entry-head strong,
 .context-entry-head span {
   display: block;
@@ -2480,6 +2487,10 @@ textarea {
 .context-entry p {
   margin: var(--s3) 0 0;
   overflow-wrap: anywhere;
+}
+
+.context-entry-full {
+  margin-top: var(--s3);
 }
 
 .context-warning-list {

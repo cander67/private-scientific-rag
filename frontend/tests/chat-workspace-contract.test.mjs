@@ -73,6 +73,12 @@ test("Chat Workspace exposes draft and persisted context inspection", () => {
   assert.match(source, /Retrieved context/);
   assert.match(source, /Assembled messages/);
   assert.match(source, /No retrieved context entries were assembled for this turn/);
+  assert.match(source, /context_text\?: string \| null/);
+  assert.match(source, /expandedContextIds/);
+  assert.match(source, /toggleContextEntry/);
+  assert.match(source, /Expand context/);
+  assert.match(source, /Collapse context/);
+  assert.match(source, /context-entry-full/);
   assert.match(source, /Open source/);
   assert.match(source, /function openChatContextEntry/);
   assert.match(source, /setPendingSourceTarget\(\{ documentId: result\.document_id, chunkId: result\.chunk_id \}\)/);

@@ -487,6 +487,11 @@ def _assemble_chat_context(
     )
     if retrieval is None:
         return None
+    context_entries = _hydrate_context_texts(
+        session,
+        repository_id=repository_id,
+        results=retrieval.results,
+    )
     retrieval_run_id: str | None = retrieval.run_id
     if not persist_retrieval_run and retrieval_run_id is not None:
         _discard_retrieval_run(session, retrieval_run_id)
@@ -501,14 +506,36 @@ def _assemble_chat_context(
         system_prompt=prompt.text,
         history=history_messages,
         question=question,
-        context_results=retrieval.results,
+        context_results=context_entries,
     )
     return _AssembledChatContext(
         retrieval_run_id=retrieval_run_id,
-        context_entries=retrieval.results,
+        context_entries=context_entries,
         history_messages=history_messages,
         llm_messages=llm_messages,
     )
+
+
+def _hydrate_context_texts(
+    session: Session,
+    *,
+    repository_id: str,
+    results: list[RetrievalSearchResult],
+) -> list[RetrievalSearchResult]:
+    if not results:
+        return []
+    chunk_ids = [result.chunk_id for result in results]
+    rows = session.execute(
+        select(DocumentChunk.id, DocumentChunk.text).where(
+            DocumentChunk.repository_id == repository_id,
+            DocumentChunk.id.in_(chunk_ids),
+        )
+    ).all()
+    text_by_chunk_id = {chunk_id: text for chunk_id, text in rows}
+    return [
+        result.model_copy(update={"context_text": text_by_chunk_id.get(result.chunk_id)})
+        for result in results
+    ]
 
 
 def _discard_retrieval_run(session: Session, retrieval_run_id: str) -> None:
@@ -728,7 +755,7 @@ def chat_readiness(
 
 
 def _context_line(*, index: int, result: RetrievalSearchResult) -> str:
-    text = result.snippet or result.text_preview or ""
+    text = result.context_text or result.snippet or result.text_preview or ""
     page = _page_label(result.page_start, result.page_end)
     section_label = f", section {result.section}" if result.section else ""
     return (

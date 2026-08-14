@@ -731,6 +731,7 @@ type RetrievalSearchResult = {
   line_end: number | null;
   snippet?: string | null;
   text_preview?: string | null;
+  context_text?: string | null;
   matched_fields: string[];
   metadata: {
     source_type?: string;
@@ -7600,6 +7601,19 @@ function ChatContextInspectorModal({
   const llmMessages = inspection.llm_messages;
   const historyMessages = inspection.history_messages;
   const warnings = inspection.warnings ?? [];
+  const [expandedContextIds, setExpandedContextIds] = useState<Set<string>>(() => new Set());
+
+  function toggleContextEntry(chunkId: string) {
+    setExpandedContextIds((current) => {
+      const next = new Set(current);
+      if (next.has(chunkId)) {
+        next.delete(chunkId);
+      } else {
+        next.add(chunkId);
+      }
+      return next;
+    });
+  }
 
   return (
     <div className="overlay open" role="dialog" aria-modal="true">
@@ -7679,30 +7693,46 @@ function ChatContextInspectorModal({
           </div>
           {contextEntries.length > 0 ? (
             <div className="context-entry-list">
-              {contextEntries.map((entry) => (
-                <article className="context-entry" key={entry.chunk_id}>
-                  <div className="context-entry-head">
-                    <div>
-                      <strong>
-                        [{entry.rank}] {entry.document_title}
-                      </strong>
-                      <span>
-                        {entry.section ?? "No section"} · chunk {entry.chunk_index + 1}
-                      </span>
+              {contextEntries.map((entry) => {
+                const isExpanded = expandedContextIds.has(entry.chunk_id);
+                const preview = entry.snippet ?? entry.text_preview ?? "No preview available.";
+                const canExpand = Boolean(entry.context_text);
+                return (
+                  <article className="context-entry" key={entry.chunk_id}>
+                    <div className="context-entry-head">
+                      <div>
+                        <strong>
+                          [{entry.rank}] {entry.document_title}
+                        </strong>
+                        <span>
+                          {entry.section ?? "No section"} · chunk {entry.chunk_index + 1}
+                        </span>
+                      </div>
+                      <div className="context-entry-actions">
+                        {canExpand && (
+                          <button className="btn btn-sm" type="button" onClick={() => toggleContextEntry(entry.chunk_id)}>
+                            {isExpanded ? "Collapse context" : "Expand context"}
+                          </button>
+                        )}
+                        <button className="btn btn-sm" type="button" onClick={() => onOpenContextEntry(entry)}>
+                          Open source
+                        </button>
+                      </div>
                     </div>
-                    <button className="btn btn-sm" type="button" onClick={() => onOpenContextEntry(entry)}>
-                      Open source
-                    </button>
-                  </div>
-                  <p dangerouslySetInnerHTML={{ __html: entry.snippet ?? entry.text_preview ?? "No preview available." }} />
-                  <div className="row result-meta">
-                    <span className="badge">score {formatScore(entry.final_score)}</span>
-                    <span className="badge">BM25 {formatScore(entry.score_breakdown.bm25)}</span>
-                    <span className="badge">Dense {formatScore(entry.score_breakdown.dense)}</span>
-                    <span className="badge">Rerank {formatScore(entry.score_breakdown.rerank)}</span>
-                  </div>
-                </article>
-              ))}
+                    {isExpanded && entry.context_text ? (
+                      <pre className="context-entry-full">{entry.context_text}</pre>
+                    ) : (
+                      <p dangerouslySetInnerHTML={{ __html: preview }} />
+                    )}
+                    <div className="row result-meta">
+                      <span className="badge">score {formatScore(entry.final_score)}</span>
+                      <span className="badge">BM25 {formatScore(entry.score_breakdown.bm25)}</span>
+                      <span className="badge">Dense {formatScore(entry.score_breakdown.dense)}</span>
+                      <span className="badge">Rerank {formatScore(entry.score_breakdown.rerank)}</span>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           ) : (
             <p className="muted">No retrieved context entries were assembled for this turn.</p>
