@@ -731,6 +731,7 @@ type RetrievalSearchResult = {
   line_end: number | null;
   snippet?: string | null;
   text_preview?: string | null;
+  context_text?: string | null;
   matched_fields: string[];
   metadata: {
     source_type?: string;
@@ -1041,11 +1042,16 @@ function App() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchBusy, setSearchBusy] = useState(false);
   const [searchMessage, setSearchMessage] = useState("Rebuild the full-text index, then run a query.");
+  const [searchRepairBusy, setSearchRepairBusy] = useState(false);
+  const [searchStaleRepairResult, setSearchStaleRepairResult] = useState<DocumentBatchResponse | null>(null);
   const [lastRebuild, setLastRebuild] = useState<SearchRebuildResponse | null>(null);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [activeChatSessionId, setActiveChatSessionId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [chatBusy, setChatBusy] = useState(false);
+  const [chatRenameBusyId, setChatRenameBusyId] = useState<string | null>(null);
+  const [chatRepairBusy, setChatRepairBusy] = useState(false);
+  const [chatStaleRepairResult, setChatStaleRepairResult] = useState<DocumentBatchResponse | null>(null);
   const [chatMessage, setChatMessage] = useState("Create a chat session or ask a question.");
   const [activeCitation, setActiveCitation] = useState<ChatCitation | null>(null);
   const [chatContextInspector, setChatContextInspector] = useState<ChatContextInspection | null>(null);
@@ -1752,7 +1758,7 @@ function App() {
     try {
       const response = await fetch(`${API_BASE}/repositories/${repositoryId}/chat/readiness`);
       if (!response.ok) {
-        throw new Error("readiness unavailable");
+        throw new Error(await apiErrorMessage(response, "readiness unavailable"));
       }
       setChatReadiness((await response.json()) as ChatReadiness);
       setChatReadinessCheckedAt(new Date().toISOString());
@@ -1760,10 +1766,10 @@ function App() {
         setChatMessage("Readiness check complete");
       }
       return true;
-    } catch {
+    } catch (error) {
       setChatReadiness(null);
       if (announce) {
-        setChatMessage("Could not check chat readiness");
+        setChatMessage(`Chat readiness failed: ${errorMessage(error)}`);
       }
       return false;
     } finally {
@@ -2012,7 +2018,6 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: "Repository chat",
           retrieval_settings: repositorySettings?.retrieval ?? defaultChatRetrievalSettings(),
         }),
       });
@@ -2058,7 +2063,7 @@ function App() {
         },
       );
       if (!response.ok) {
-        throw new Error("chat question failed");
+        throw new Error(await apiErrorMessage(response, "chat question failed"));
       }
       const payload = (await response.json()) as ChatQuestionResponse;
       setChatSessions((current) =>
@@ -2068,14 +2073,15 @@ function App() {
       setChatRetrievalSettings(payload.session.retrieval_settings);
       void loadChatReadiness(repository.id);
       void loadDashboardSummary(repository.id);
+      setChatStaleRepairResult(null);
       setChatMessage(
         `${payload.assistant_message.citations.length} citations · run ${
           payload.assistant_message.retrieval_run_id?.slice(0, 8) ?? "local"
         }`,
       );
-    } catch {
+    } catch (error) {
       setChatInput(content);
-      setChatMessage("Chat failed. Check indexes, reranker model, and Ollama setup.");
+      setChatMessage(`Chat failed: ${errorMessage(error)}`);
     } finally {
       setChatBusy(false);
     }
@@ -2102,7 +2108,7 @@ function App() {
         },
       );
       if (!response.ok) {
-        throw new Error("context preview failed");
+        throw new Error(await apiErrorMessage(response, "context preview failed"));
       }
       const payload = (await response.json()) as ChatContextInspection;
       setChatContextInspector(payload);
@@ -2112,9 +2118,10 @@ function App() {
           ? current.map((session) => (session.id === payload.session.id ? payload.session : session))
           : [payload.session, ...current],
       );
+      setChatStaleRepairResult(null);
       setChatContextInspectorMessage(payload.context_status.message);
-    } catch {
-      setChatContextInspectorMessage("Could not inspect draft context");
+    } catch (error) {
+      setChatContextInspectorMessage(`Could not inspect draft context: ${errorMessage(error)}`);
     } finally {
       setChatContextInspectorBusy(false);
     }
@@ -2140,6 +2147,40 @@ function App() {
       setChatContextInspectorMessage("Could not load persisted context");
     } finally {
       setChatContextInspectorBusy(false);
+    }
+  }
+
+  async function renameChatSession(chatSessionId: string, title: string) {
+    if (!repository) {
+      return false;
+    }
+    const nextTitle = title.trim();
+    if (!nextTitle) {
+      setChatMessage("Chat title is required");
+      return false;
+    }
+    setChatRenameBusyId(chatSessionId);
+    setChatMessage("Renaming chat session");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/chat/sessions/${chatSessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: nextTitle }),
+      });
+      if (!response.ok) {
+        throw new Error("rename failed");
+      }
+      const payload = (await response.json()) as ChatSession;
+      setChatSessions((current) =>
+        current.map((session) => (session.id === payload.id ? payload : session)),
+      );
+      setChatMessage("Chat session renamed");
+      return true;
+    } catch {
+      setChatMessage("Could not rename chat session");
+      return false;
+    } finally {
+      setChatRenameBusyId(null);
     }
   }
 
@@ -2208,12 +2249,45 @@ function App() {
       }
       const payload = (await response.json()) as SearchRebuildResponse;
       setChatMessage(`Indexed ${payload.indexed_chunks} ${kind} chunks`);
+      setChatStaleRepairResult(null);
       await loadChatReadiness(repository.id);
       await loadDashboardSummary(repository.id);
     } catch (error) {
       setChatMessage(`${kind} rebuild failed: ${errorMessage(error)}`);
     } finally {
       setChatRebuildBusy(null);
+    }
+  }
+
+  async function repairChatStaleDocuments() {
+    if (!repository) {
+      return;
+    }
+    setChatRepairBusy(true);
+    setChatMessage("Reprocessing repository documents for Chat Workspace");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/documents/batch/reprocess`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          document_ids: [],
+          all_repository_documents: true,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await apiErrorMessage(response, "reprocess failed"));
+      }
+      const payload = (await response.json()) as DocumentBatchResponse;
+      setChatStaleRepairResult(payload);
+      setLastRebuild(null);
+      await loadDocuments(repository.id);
+      await loadDashboardSummary(repository.id);
+      await loadChatReadiness(repository.id, false);
+      setChatMessage(chatStaleRepairSummary(payload));
+    } catch (error) {
+      setChatMessage(`Chat Workspace reprocess failed: ${errorMessage(error)}`);
+    } finally {
+      setChatRepairBusy(false);
     }
   }
 
@@ -2408,6 +2482,7 @@ function App() {
         setSearchMessage(`Indexed ${payload.indexed_chunks} chunks`);
       }
       await loadDashboardSummary(repository.id);
+      setSearchStaleRepairResult(null);
     } catch (error) {
       setSearchMessage(`${searchModeLabel(searchMode)} rebuild failed: ${errorMessage(error)}`);
     } finally {
@@ -2436,6 +2511,7 @@ function App() {
       const payload = (await response.json()) as RetrievalSearchResponse;
       setSearchResults(payload.results.map((result) => ({ ...result, mode: searchMode })));
       void loadDashboardSummary(repository.id);
+      setSearchStaleRepairResult(null);
       setSearchMessage(`${payload.results.length} results · run ${payload.run_id.slice(0, 8)}`);
     } catch (error) {
       setSearchMessage(
@@ -2444,6 +2520,38 @@ function App() {
       setSearchResults([]);
     } finally {
       setSearchBusy(false);
+    }
+  }
+
+  async function repairSearchStaleDocuments() {
+    if (!repository) {
+      return;
+    }
+    setSearchRepairBusy(true);
+    setSearchMessage("Reprocessing repository documents for Search Lab");
+    try {
+      const response = await fetch(`${API_BASE}/repositories/${repository.id}/documents/batch/reprocess`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          document_ids: [],
+          all_repository_documents: true,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await apiErrorMessage(response, "reprocess failed"));
+      }
+      const payload = (await response.json()) as DocumentBatchResponse;
+      setSearchStaleRepairResult(payload);
+      setLastRebuild(null);
+      setSearchResults([]);
+      await loadDocuments(repository.id);
+      await loadDashboardSummary(repository.id);
+      setSearchMessage(searchStaleRepairSummary(payload));
+    } catch (error) {
+      setSearchMessage(`Search Lab reprocess failed: ${errorMessage(error)}`);
+    } finally {
+      setSearchRepairBusy(false);
     }
   }
 
@@ -3102,7 +3210,9 @@ function App() {
                 patentSection={searchPatentSection}
                 results={searchResults}
                 busy={searchBusy}
+                repairBusy={searchRepairBusy}
                 message={searchMessage}
+                staleRepairResult={searchStaleRepairResult}
                 lastRebuild={lastRebuild}
                 onModeChange={(mode) => {
                   setSearchMode(mode);
@@ -3125,6 +3235,7 @@ function App() {
                 onPatentSectionChange={setSearchPatentSection}
                 onRebuild={() => void rebuildSearchIndex()}
                 onSearch={() => void runSearch()}
+                onRepairStaleDocuments={() => void repairSearchStaleDocuments()}
                 onCopyToChat={copySearchSettingsToChat}
                 onPromoteToDefaults={() => void promoteSearchSettingsToRepositoryDefaults()}
                 onOpenResult={openSearchResult}
@@ -3146,9 +3257,13 @@ function App() {
                 readinessBusy={chatReadinessBusy}
                 readinessCheckedAt={chatReadinessCheckedAt}
                 rebuildBusy={chatRebuildBusy}
+                renameBusyId={chatRenameBusyId}
+                repairBusy={chatRepairBusy}
+                staleRepairResult={chatStaleRepairResult}
                 onInputChange={setChatInput}
                 onCreateSession={() => void createChatSession()}
                 onSelectSession={setActiveChatSessionId}
+                onRenameSession={renameChatSession}
                 onDeleteSession={(chatSessionId) => void deleteChatSession(chatSessionId)}
                 onClearSessions={() => void clearChatSessions()}
                 onAsk={() => void askChatQuestion()}
@@ -3162,6 +3277,7 @@ function App() {
                 onRebuildFullText={() => void rebuildChatIndex("full-text")}
                 onRebuildVector={() => void rebuildChatIndex("vector")}
                 onCheckReadiness={() => repository && void loadChatReadiness(repository.id, true)}
+                onRepairStaleDocuments={() => void repairChatStaleDocuments()}
                 onCitationClick={setActiveCitation}
                 onCloseCitation={() => setActiveCitation(null)}
                 onOpenCitation={openChatCitation}
@@ -5038,22 +5154,15 @@ function SettingsModels({
             {validationIssues.length > 0 ? "Needs fixes" : dirty ? "Unsaved edits" : "Saved"}
           </span>
         </div>
-        <div className="row row-between settings-save-row">
-          <span className="muted">{saveMessage}</span>
-          <div className="row">
-            <button className="btn btn-ghost" type="button" onClick={cancelEdits} disabled={!dirty || saveBusy}>
-              Cancel
-            </button>
-            <button
-              className="btn btn-primary"
-              type="button"
-              onClick={() => void handleSave()}
-              disabled={!dirty || saveBusy || validationIssues.length > 0}
-            >
-              {saveBusy ? "Saving..." : "Save settings"}
-            </button>
-          </div>
-        </div>
+        <SettingsSaveControls
+          message={saveMessage}
+          dirty={dirty}
+          busy={saveBusy}
+          validationIssueCount={validationIssues.length}
+          placement="top"
+          onCancel={cancelEdits}
+          onSave={handleSave}
+        />
         {validationIssues.length > 0 && (
           <div className="banner banner-warn settings-validation">
             <div>
@@ -5679,6 +5788,54 @@ function SettingsModels({
           )}
         </div>
       </section>
+
+      <SettingsSaveControls
+        message={saveMessage}
+        dirty={dirty}
+        busy={saveBusy}
+        validationIssueCount={validationIssues.length}
+        placement="bottom"
+        onCancel={cancelEdits}
+        onSave={handleSave}
+      />
+    </div>
+  );
+}
+
+function SettingsSaveControls({
+  message,
+  dirty,
+  busy,
+  validationIssueCount,
+  placement,
+  onCancel,
+  onSave,
+}: {
+  message: string;
+  dirty: boolean;
+  busy: boolean;
+  validationIssueCount: number;
+  placement: "top" | "bottom";
+  onCancel: () => void;
+  onSave: () => Promise<void>;
+}) {
+  return (
+    <div className={`row row-between settings-save-row settings-save-row-${placement}`}>
+      <span className="muted">{message}</span>
+      <div className="row">
+        <button className="btn btn-ghost" type="button" onClick={onCancel} disabled={!dirty || busy}>
+          Cancel
+        </button>
+        <button
+          className="btn btn-primary"
+          type="button"
+          onClick={() => void onSave()}
+          disabled={!dirty || busy || validationIssueCount > 0}
+          aria-busy={busy}
+        >
+          {busy ? "Saving..." : "Save settings"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -6737,9 +6894,13 @@ function ChatWorkspace({
   readinessBusy,
   readinessCheckedAt,
   rebuildBusy,
+  renameBusyId,
+  repairBusy,
+  staleRepairResult,
   onInputChange,
   onCreateSession,
   onSelectSession,
+  onRenameSession,
   onDeleteSession,
   onClearSessions,
   onAsk,
@@ -6750,6 +6911,7 @@ function ChatWorkspace({
   onRebuildFullText,
   onRebuildVector,
   onCheckReadiness,
+  onRepairStaleDocuments,
   onCitationClick,
   onCloseCitation,
   onOpenCitation,
@@ -6770,9 +6932,13 @@ function ChatWorkspace({
   readinessBusy: boolean;
   readinessCheckedAt: string | null;
   rebuildBusy: "full-text" | "vector" | null;
+  renameBusyId: string | null;
+  repairBusy: boolean;
+  staleRepairResult: DocumentBatchResponse | null;
   onInputChange: (value: string) => void;
   onCreateSession: () => void;
   onSelectSession: (value: string) => void;
+  onRenameSession: (chatSessionId: string, title: string) => Promise<boolean>;
   onDeleteSession: (value: string) => void;
   onClearSessions: () => void;
   onAsk: () => void;
@@ -6783,13 +6949,20 @@ function ChatWorkspace({
   onRebuildFullText: () => void;
   onRebuildVector: () => void;
   onCheckReadiness: () => void;
+  onRepairStaleDocuments: () => void;
   onCitationClick: (citation: ChatCitation) => void;
   onCloseCitation: () => void;
   onOpenCitation: (citation: ChatCitation) => void;
   onOpenContextEntry: (result: RetrievalSearchResult) => void;
 }) {
   const threadRef = useRef<HTMLDivElement | null>(null);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
   const readyForSelectedMode = chatReadyForSelectedMode(readiness, retrievalSettings);
+  const staleRepairAvailable =
+    isParserChunkStaleMessage(message) ||
+    Boolean(contextInspectorMessage && isParserChunkStaleMessage(contextInspectorMessage)) ||
+    Boolean(staleRepairResult);
   const activePrompt = settings?.prompt.library.find(
     (prompt) => prompt.id === settings.prompt.active_chat_prompt_id,
   );
@@ -6831,26 +7004,33 @@ function ChatWorkspace({
             </div>
             {sessions.length > 0 ? (
               sessions.map((session) => (
-                <div
-                  className={session.id === activeSession?.id ? "session-item active" : "session-item"}
+                <ChatSessionListItem
+                  session={session}
+                  active={session.id === activeSession?.id}
+                  busy={busy}
+                  renameBusy={renameBusyId === session.id}
+                  editing={editingSessionId === session.id}
+                  editingTitle={editingTitle}
+                  onSelect={onSelectSession}
+                  onStartRename={(nextSession) => {
+                    setEditingSessionId(nextSession.id);
+                    setEditingTitle(nextSession.title);
+                  }}
+                  onEditingTitleChange={setEditingTitle}
+                  onCancelRename={() => {
+                    setEditingSessionId(null);
+                    setEditingTitle("");
+                  }}
+                  onSaveRename={async () => {
+                    const renamed = await onRenameSession(session.id, editingTitle);
+                    if (renamed) {
+                      setEditingSessionId(null);
+                      setEditingTitle("");
+                    }
+                  }}
+                  onDelete={onDeleteSession}
                   key={session.id}
-                >
-                  <button type="button" onClick={() => onSelectSession(session.id)}>
-                    <span>{session.title}</span>
-                    <small>
-                      {formatDate(session.updated_at)} · {session.messages.length} msgs
-                    </small>
-                  </button>
-                  <button
-                    className="session-delete"
-                    type="button"
-                    onClick={() => onDeleteSession(session.id)}
-                    disabled={busy}
-                    aria-label={`Delete ${session.title}`}
-                  >
-                    x
-                  </button>
-                </div>
+                />
               ))
             ) : (
               <p className="muted">No saved chats yet.</p>
@@ -7070,6 +7250,34 @@ function ChatWorkspace({
               </button>
               <span className="muted">Chat model: {activeSession?.model ?? chatDefaultModel}</span>
             </div>
+            {staleRepairAvailable && (
+              <section className="chat-stale-repair">
+                <div className="row row-between">
+                  <div>
+                    <div className="eyebrow">Stale parser/chunk settings</div>
+                    <h2>Reprocess repository documents</h2>
+                    <p className="muted">
+                      Reprocess refreshes parsed chunks only. Rebuild full-text or vector indexes after it completes.
+                    </p>
+                  </div>
+                  <button
+                    className={`btn btn-sm btn-primary ${repairBusy ? "btn-running" : ""}`}
+                    type="button"
+                    onClick={onRepairStaleDocuments}
+                    disabled={busy || repairBusy}
+                    aria-busy={repairBusy}
+                  >
+                    {repairBusy ? "Reprocessing..." : "Reprocess"}
+                  </button>
+                </div>
+                {staleRepairResult && (
+                  <div className="chat-stale-repair-summary">
+                    <strong>{chatStaleRepairSummary(staleRepairResult)}</strong>
+                    <small>Full-text and vector rebuild controls remain explicit after reprocess.</small>
+                  </div>
+                )}
+              </section>
+            )}
             <div className="chat-defaults-note">
               <strong>New chat default</strong>
               <small>
@@ -7237,6 +7445,103 @@ function ReadinessPill({ label, item }: { label: string; item: ChatReadinessItem
   );
 }
 
+function ChatSessionListItem({
+  session,
+  active,
+  busy,
+  renameBusy,
+  editing,
+  editingTitle,
+  onSelect,
+  onStartRename,
+  onEditingTitleChange,
+  onCancelRename,
+  onSaveRename,
+  onDelete,
+}: {
+  session: ChatSession;
+  active: boolean;
+  busy: boolean;
+  renameBusy: boolean;
+  editing: boolean;
+  editingTitle: string;
+  onSelect: (value: string) => void;
+  onStartRename: (session: ChatSession) => void;
+  onEditingTitleChange: (value: string) => void;
+  onCancelRename: () => void;
+  onSaveRename: () => Promise<void>;
+  onDelete: (value: string) => void;
+}) {
+  if (editing) {
+    return (
+      <div className={active ? "session-item session-item-editing active" : "session-item session-item-editing"}>
+        <label className="session-rename-field" htmlFor={`chat-session-title-${session.id}`}>
+          <span>Session title</span>
+          <input
+            id={`chat-session-title-${session.id}`}
+            value={editingTitle}
+            disabled={renameBusy}
+            onChange={(event) => onEditingTitleChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void onSaveRename();
+              }
+              if (event.key === "Escape") {
+                onCancelRename();
+              }
+            }}
+          />
+        </label>
+        <div className="session-edit-actions">
+          <button
+            className="btn btn-sm btn-primary"
+            type="button"
+            onClick={() => void onSaveRename()}
+            disabled={renameBusy || !editingTitle.trim()}
+          >
+            {renameBusy ? "Saving" : "Save"}
+          </button>
+          <button className="btn btn-sm btn-ghost" type="button" onClick={onCancelRename} disabled={renameBusy}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={active ? "session-item active" : "session-item"}>
+      <button type="button" onClick={() => onSelect(session.id)}>
+        <span>{session.title}</span>
+        <small>
+          {formatDate(session.updated_at)} · {session.messages.length} msgs
+        </small>
+      </button>
+      <div className="session-row-actions">
+        <button
+          className="session-rename"
+          type="button"
+          onClick={() => onStartRename(session)}
+          disabled={busy}
+          aria-label={`Rename ${session.title}`}
+        >
+          Edit
+        </button>
+        <button
+          className="session-delete"
+          type="button"
+          onClick={() => onDelete(session.id)}
+          disabled={busy}
+          aria-label={`Delete ${session.title}`}
+        >
+          x
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function ChatBubble({
   message,
   onCitationClick,
@@ -7296,6 +7601,19 @@ function ChatContextInspectorModal({
   const llmMessages = inspection.llm_messages;
   const historyMessages = inspection.history_messages;
   const warnings = inspection.warnings ?? [];
+  const [expandedContextIds, setExpandedContextIds] = useState<Set<string>>(() => new Set());
+
+  function toggleContextEntry(chunkId: string) {
+    setExpandedContextIds((current) => {
+      const next = new Set(current);
+      if (next.has(chunkId)) {
+        next.delete(chunkId);
+      } else {
+        next.add(chunkId);
+      }
+      return next;
+    });
+  }
 
   return (
     <div className="overlay open" role="dialog" aria-modal="true">
@@ -7375,30 +7693,46 @@ function ChatContextInspectorModal({
           </div>
           {contextEntries.length > 0 ? (
             <div className="context-entry-list">
-              {contextEntries.map((entry) => (
-                <article className="context-entry" key={entry.chunk_id}>
-                  <div className="context-entry-head">
-                    <div>
-                      <strong>
-                        [{entry.rank}] {entry.document_title}
-                      </strong>
-                      <span>
-                        {entry.section ?? "No section"} · chunk {entry.chunk_index + 1}
-                      </span>
+              {contextEntries.map((entry) => {
+                const isExpanded = expandedContextIds.has(entry.chunk_id);
+                const preview = entry.snippet ?? entry.text_preview ?? "No preview available.";
+                const canExpand = Boolean(entry.context_text);
+                return (
+                  <article className="context-entry" key={entry.chunk_id}>
+                    <div className="context-entry-head">
+                      <div>
+                        <strong>
+                          [{entry.rank}] {entry.document_title}
+                        </strong>
+                        <span>
+                          {entry.section ?? "No section"} · chunk {entry.chunk_index + 1}
+                        </span>
+                      </div>
+                      <div className="context-entry-actions">
+                        {canExpand && (
+                          <button className="btn btn-sm" type="button" onClick={() => toggleContextEntry(entry.chunk_id)}>
+                            {isExpanded ? "Collapse context" : "Expand context"}
+                          </button>
+                        )}
+                        <button className="btn btn-sm" type="button" onClick={() => onOpenContextEntry(entry)}>
+                          Open source
+                        </button>
+                      </div>
                     </div>
-                    <button className="btn btn-sm" type="button" onClick={() => onOpenContextEntry(entry)}>
-                      Open source
-                    </button>
-                  </div>
-                  <p dangerouslySetInnerHTML={{ __html: entry.snippet ?? entry.text_preview ?? "No preview available." }} />
-                  <div className="row result-meta">
-                    <span className="badge">score {formatScore(entry.final_score)}</span>
-                    <span className="badge">BM25 {formatScore(entry.score_breakdown.bm25)}</span>
-                    <span className="badge">Dense {formatScore(entry.score_breakdown.dense)}</span>
-                    <span className="badge">Rerank {formatScore(entry.score_breakdown.rerank)}</span>
-                  </div>
-                </article>
-              ))}
+                    {isExpanded && entry.context_text ? (
+                      <pre className="context-entry-full">{entry.context_text}</pre>
+                    ) : (
+                      <p dangerouslySetInnerHTML={{ __html: preview }} />
+                    )}
+                    <div className="row result-meta">
+                      <span className="badge">score {formatScore(entry.final_score)}</span>
+                      <span className="badge">BM25 {formatScore(entry.score_breakdown.bm25)}</span>
+                      <span className="badge">Dense {formatScore(entry.score_breakdown.dense)}</span>
+                      <span className="badge">Rerank {formatScore(entry.score_breakdown.rerank)}</span>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           ) : (
             <p className="muted">No retrieved context entries were assembled for this turn.</p>
@@ -7494,7 +7828,9 @@ function SearchLab({
   patentSection,
   results,
   busy,
+  repairBusy,
   message,
+  staleRepairResult,
   lastRebuild,
   onModeChange,
   onRerankerStrategyChange,
@@ -7512,6 +7848,7 @@ function SearchLab({
   onPatentSectionChange,
   onRebuild,
   onSearch,
+  onRepairStaleDocuments,
   onCopyToChat,
   onPromoteToDefaults,
   onOpenResult,
@@ -7534,7 +7871,9 @@ function SearchLab({
   patentSection: string;
   results: SearchResult[];
   busy: boolean;
+  repairBusy: boolean;
   message: string;
+  staleRepairResult: DocumentBatchResponse | null;
   lastRebuild: SearchRebuildResponse | null;
   onModeChange: (value: SearchMode) => void;
   onRerankerStrategyChange: (value: RerankerStrategy) => void;
@@ -7552,10 +7891,12 @@ function SearchLab({
   onPatentSectionChange: (value: string) => void;
   onRebuild: () => void;
   onSearch: () => void;
+  onRepairStaleDocuments: () => void;
   onCopyToChat: () => void;
   onPromoteToDefaults: () => void;
   onOpenResult: (result: SearchResult) => void;
 }) {
+  const staleRepairAvailable = isParserChunkStaleMessage(message) || Boolean(staleRepairResult);
   const sections = Array.from(
     new Set(
       documents
@@ -7819,6 +8160,35 @@ function SearchLab({
           Manual rebuild
         </span>
       </div>
+
+      {staleRepairAvailable && (
+        <section className="card search-stale-repair">
+          <div className="row row-between">
+            <div>
+              <div className="eyebrow">Stale parser/chunk settings</div>
+              <h2>Reprocess repository documents</h2>
+              <p className="muted">
+                Reprocess refreshes parsed chunks only. Rebuild full-text, vector, or hybrid indexes after it completes.
+              </p>
+            </div>
+            <button
+              className={`btn btn-primary ${repairBusy ? "btn-running" : ""}`}
+              type="button"
+              onClick={onRepairStaleDocuments}
+              disabled={busy || repairBusy || !repositoryReady}
+              aria-busy={repairBusy}
+            >
+              {repairBusy ? "Reprocessing..." : "Reprocess repository"}
+            </button>
+          </div>
+          {staleRepairResult && (
+            <div className="search-stale-repair-summary">
+              <strong>{searchStaleRepairSummary(staleRepairResult)}</strong>
+              <small>Index rebuilds remain manual after reprocess.</small>
+            </div>
+          )}
+        </section>
+      )}
 
       {busy ? (
         <div className="card card-pad-sm">
@@ -8205,6 +8575,25 @@ function documentBatchBusyMessage(action: DocumentBatchAction, allRepositoryDocu
 function documentBatchSummary(result: DocumentBatchResponse) {
   const counts = documentBatchStatusCounts(result);
   return `${documentBatchActionLabel(result.action)} complete: ${documentBatchCountsLabel(counts)}`;
+}
+
+function searchStaleRepairSummary(result: DocumentBatchResponse) {
+  const counts = documentBatchStatusCounts(result);
+  return `Search Lab reprocess complete: ${counts.completed} completed · ${counts.skipped} skipped · ${counts.failed} failed · ${counts.missing_source} missing-source`;
+}
+
+function chatStaleRepairSummary(result: DocumentBatchResponse) {
+  const counts = documentBatchStatusCounts(result);
+  return `Chat Workspace reprocess complete: ${counts.completed} completed · ${counts.skipped} skipped · ${counts.failed} failed · ${counts.missing_source} missing-source`;
+}
+
+function isParserChunkStaleMessage(message: string) {
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("parser/chunk settings are stale") ||
+    normalized.includes("parser or chunking settings changed") ||
+    (normalized.includes("reprocess") && normalized.includes("stale documents"))
+  );
 }
 
 function documentBatchChangesRepositoryContent(result: DocumentBatchResponse) {

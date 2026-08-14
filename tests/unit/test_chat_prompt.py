@@ -27,6 +27,7 @@ def test_build_chat_prompt_labels_context_and_keeps_recent_history() -> None:
         line_start=None,
         line_end=None,
         snippet="The measured selectivity was 58.",
+        context_text="The measured selectivity was 58. Full experimental context followed.",
     )
 
     messages = build_chat_prompt(
@@ -39,5 +40,6 @@ def test_build_chat_prompt_labels_context_and_keeps_recent_history() -> None:
     assert messages[0].role == "system"
     assert "[1] Catalyst Study, chunk 4, pages 3-4, section Methods" in messages[0].content
     assert "The measured selectivity was 58." in messages[0].content
+    assert "Full experimental context followed." in messages[0].content
     assert messages[1].content == "question 2"
     assert messages[-1] == ChatMessage(role="user", content="What was measured?")

@@ -74,11 +74,28 @@ def create_chat_session(
     )
     chat_session = ChatSession(
         repository_id=repository_id,
-        title=title or "New chat",
+        title=_chat_session_title(session, repository_id=repository_id, title=title),
         model=model or settings.model.ollama_chat_model,
         retrieval_settings=effective_retrieval.settings.model_dump(mode="json"),
         prompt_id=settings.prompt.active_chat_prompt_id,
     )
+    session.add(chat_session)
+    session.commit()
+    session.refresh(chat_session)
+    return _session_read(chat_session)
+
+
+def update_chat_session_title(
+    session: Session,
+    *,
+    repository_id: str,
+    chat_session_id: str,
+    title: str,
+) -> ChatSessionRead | None:
+    chat_session = session.get(ChatSession, chat_session_id)
+    if chat_session is None or chat_session.repository_id != repository_id:
+        return None
+    chat_session.title = title.strip()
     session.add(chat_session)
     session.commit()
     session.refresh(chat_session)
@@ -138,6 +155,21 @@ def clear_chat_sessions(session: Session, *, repository_id: str) -> int | None:
     session.execute(delete(ChatSession).where(ChatSession.repository_id == repository_id))
     session.commit()
     return len(session_ids)
+
+
+def _chat_session_title(
+    session: Session,
+    *,
+    repository_id: str,
+    title: str | None,
+) -> str:
+    normalized_title = title.strip() if title else ""
+    if normalized_title:
+        return normalized_title
+    session_count = session.scalar(
+        select(func.count(ChatSession.id)).where(ChatSession.repository_id == repository_id)
+    )
+    return f"Repository chat {int(session_count or 0) + 1}"
 
 
 def ask_chat_question(
@@ -455,6 +487,11 @@ def _assemble_chat_context(
     )
     if retrieval is None:
         return None
+    context_entries = _hydrate_context_texts(
+        session,
+        repository_id=repository_id,
+        results=retrieval.results,
+    )
     retrieval_run_id: str | None = retrieval.run_id
     if not persist_retrieval_run and retrieval_run_id is not None:
         _discard_retrieval_run(session, retrieval_run_id)
@@ -469,14 +506,36 @@ def _assemble_chat_context(
         system_prompt=prompt.text,
         history=history_messages,
         question=question,
-        context_results=retrieval.results,
+        context_results=context_entries,
     )
     return _AssembledChatContext(
         retrieval_run_id=retrieval_run_id,
-        context_entries=retrieval.results,
+        context_entries=context_entries,
         history_messages=history_messages,
         llm_messages=llm_messages,
     )
+
+
+def _hydrate_context_texts(
+    session: Session,
+    *,
+    repository_id: str,
+    results: list[RetrievalSearchResult],
+) -> list[RetrievalSearchResult]:
+    if not results:
+        return []
+    chunk_ids = [result.chunk_id for result in results]
+    rows = session.execute(
+        select(DocumentChunk.id, DocumentChunk.text).where(
+            DocumentChunk.repository_id == repository_id,
+            DocumentChunk.id.in_(chunk_ids),
+        )
+    ).all()
+    text_by_chunk_id = {chunk_id: text for chunk_id, text in rows}
+    return [
+        result.model_copy(update={"context_text": text_by_chunk_id.get(result.chunk_id)})
+        for result in results
+    ]
 
 
 def _discard_retrieval_run(session: Session, retrieval_run_id: str) -> None:
@@ -696,7 +755,7 @@ def chat_readiness(
 
 
 def _context_line(*, index: int, result: RetrievalSearchResult) -> str:
-    text = result.snippet or result.text_preview or ""
+    text = result.context_text or result.snippet or result.text_preview or ""
     page = _page_label(result.page_start, result.page_end)
     section_label = f", section {result.section}" if result.section else ""
     return (

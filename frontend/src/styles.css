@@ -708,6 +708,27 @@ textarea {
   justify-content: flex-end;
 }
 
+.search-stale-repair {
+  border-color: var(--warn);
+}
+
+.search-stale-repair h2 {
+  font-size: 1rem;
+}
+
+.search-stale-repair-summary {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--s4);
+  padding-top: var(--s3);
+}
+
+.search-stale-repair-summary small {
+  color: var(--text-faint);
+}
+
 .sandbox-layout {
   display: flex;
   flex-direction: column;
@@ -1317,6 +1338,11 @@ textarea {
 
 .settings-save-row {
   align-items: center;
+}
+
+.settings-save-row-bottom {
+  border-top: 1px solid var(--border);
+  padding-top: var(--s4);
 }
 
 .settings-validation strong,
@@ -1946,6 +1972,12 @@ textarea {
   margin-top: 2px;
 }
 
+.session-row-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.session-rename,
 .session-delete {
   width: 28px;
   height: 28px;
@@ -1954,11 +1986,48 @@ textarea {
   background: transparent;
   color: var(--text-faint);
   cursor: pointer;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.session-rename {
+  width: 36px;
+}
+
+.session-rename:hover {
+  background: var(--surface);
+  color: var(--text);
 }
 
 .session-delete:hover {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.session-item-editing {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.session-rename-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.session-rename-field span {
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.session-rename-field input {
+  min-width: 0;
+}
+
+.session-edit-actions {
+  display: flex;
+  gap: var(--s2);
 }
 
 .chat-main {
@@ -2044,6 +2113,31 @@ textarea {
 
 .chat-index-actions {
   margin-top: var(--s4);
+}
+
+.chat-stale-repair {
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  margin-top: var(--s4);
+  padding: var(--s3);
+}
+
+.chat-stale-repair h2 {
+  font-size: 0.95rem;
+}
+
+.chat-stale-repair-summary {
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+}
+
+.chat-stale-repair-summary small {
+  color: var(--text-muted);
 }
 
 .chat-defaults-note {
@@ -2368,6 +2462,13 @@ textarea {
   align-items: flex-start;
 }
 
+.context-entry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--s2);
+}
+
 .context-entry-head strong,
 .context-entry-head span {
   display: block;
@@ -2386,6 +2487,10 @@ textarea {
 .context-entry p {
   margin: var(--s3) 0 0;
   overflow-wrap: anywhere;
+}
+
+.context-entry-full {
+  margin-top: var(--s3);
 }
 
 .context-warning-list {
