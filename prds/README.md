@@ -36,6 +36,7 @@ Current status:
 - Complete: PRD30 token-aware chunking.
 - Backlog: PRD31 custom domain tokenizers.
 - Ready for final review: PRD32 workflow friction remediation, including bottom Settings / Models save/cancel controls, chat-session rename/default titles, Search Lab stale parser/chunk reprocess actions, and Chat Workspace stale parser/chunk reprocess actions. It is not marked complete until user acceptance.
+- Backlog: PRD33 Ollama context controls.
 
 PRD13 is ready for final review after parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and documentation preparation. The implementation plan is fully checked off locally, deterministic backend/frontend gates passed, and optional OCR dependency/golden-corpus checks remain explicit manual checks. PRD29 is the proposed manual acceptance-testing pass for PRD13: it should exercise installed OCR providers, realistic scanned and mixed PDFs, stale-index recovery, Source Viewer review, export/recreate metadata, and cross-host notes before PRD13 is closed. PRD25 is complete and merged after backend preview/persisted-inspection APIs, Chat Workspace inspector controls, source navigation, docs, and deterministic quality gates. PRD28 is complete after row-click document metadata preview, selected/full-repository batch reprocess, selected batch OCR/delete, partial result summaries, post-batch refresh, freshness guidance, docs, deterministic local gates, and passing CI. PRD30 is complete after token-count defaults, model-aware tokenizer resolution, recursive/fixed token chunking, tokenizer metadata inspection/export, recreate validation, calibrated 512-token/64-token-overlap defaults, docs, deterministic backend/frontend quality gates, and Phase 7 runtime-aligned tokenizer remediation. PRD32 is ready for final review after bottom settings controls, chat rename/default title remediation, cross-workflow stale parser/chunk repair CTAs, PRD28 full-repository reprocess reuse, manual rebuild boundaries, and deterministic backend/frontend quality gates. PRD23, PRD25, PRD26, PRD27, PRD28, and PRD30 are complete.
 
@@ -67,6 +68,7 @@ Shared decisions:
 - PRD13 manual acceptance scope: PRD29 owns the real-dependency/manual-document test checklist and evidence capture needed before PRD13 can move from ready for final review to complete.
 - Token-aware chunking scope: PRD30 replaced character-count chunk sizing with token-aware defaults, model-specific SentenceTransformers tokenizers, explicit Ollama tokenizer runtime/registry/fallback behavior, and tokenizer metadata for inspection/export. It removes current `tiktoken` choices from vector/embedding settings, prefers feature-detected Ollama runtime tokenization for Ollama models, keeps HuggingFace/Transformers as the local library-backed path, and leaves full multimodal image-token accounting to a later context-packing PRD.
 - Custom tokenizer scope: PRD31 owns future import/training, preview, registration, fingerprinting, export/recreate, and evaluation guardrails for custom technical-vocabulary tokenizers. PRD31 should not change PRD30's default model-aligned tokenizer behavior.
+- Ollama context controls scope: PRD33 owns repository and Chat Workspace controls for native Ollama chat context length, including `num_ctx` request options, session-level effective settings, context-inspection snapshots, validation, and guidance about memory/offload tradeoffs. It does not manage Ollama server environment variables, derived Modelfiles, automatic host-capacity detection, or full prompt token packing.
 
 PRD files:
 
@@ -102,3 +104,4 @@ PRD files:
 30. [Token-aware chunking](30-token-aware-chunking.md) - complete
 31. [Custom domain tokenizers](31-custom-domain-tokenizers.md) - backlog
 32. [Workflow friction remediation](32-workflow-friction-remediation.md) - ready for final review
+33. [Ollama context controls](33-ollama-context-controls.md) - backlog
