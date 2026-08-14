@@ -1,6 +1,6 @@
 # PRD 32: Workflow Friction Remediation
 
-**Status:** Ready for final review. Not complete until user acceptance.
+**Status:** Complete and closed.
 
 ## Problem Statement
 
@@ -108,5 +108,5 @@ Add low-risk remediation affordances across the existing workflow surfaces:
 
 - This PRD depends on PRD28's full-repository reprocess API/request mode for the cross-workflow repair action.
 - This PRD intentionally keeps index rebuilds manual because existing readiness semantics make stale state visible and explicit rebuilds avoid surprising long-running work.
-- The user-testing full-context remediation preserves preview scanability but fixes the model payload contract before PRD32 acceptance.
+- The user-testing full-context remediation preserves preview scanability and fixed the model payload contract before PRD32 closure.
 - If reprocess duration becomes disruptive for larger repositories, a later PRD can add persisted jobs and progress reporting without changing the user-facing repair entry points.
