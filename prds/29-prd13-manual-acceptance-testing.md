@@ -1,6 +1,6 @@
 # PRD 29: PRD13 Manual Acceptance Testing
 
-**Status:** Backlog.
+**Status:** Ready for final review. The tracked PRD13 manual acceptance checklist is implemented in `docs/prd13_manual_acceptance.md`, with dependency/host/document matrices, OCR/parser workflow checks, export/recreate checks, and a reusable evidence report template. PRD13 remains ready for final review until this checklist is run, accepted with documented skips, or explicitly waived.
 
 ## Problem Statement
 
@@ -88,3 +88,9 @@ PRD29 does not decide whether OCR quality is scientifically sufficient across al
 ## Further Notes
 
 If manual testing finds product defects, add focused remediation phases or follow-up PRDs instead of rewriting PRD13 history. PRD13 should move from ready for final review to complete only after the PRD29 checklist is passed, accepted with documented skips, or explicitly waived by the project owner.
+
+## Final Review Summary
+
+PRD29 is ready for final review. The delivered checklist makes PRD13 manual acceptance repeatable without adding OCR binaries, local model services, private PDFs, screenshots, export ZIPs, or golden-corpus material to default CI. It documents pass/fail/skip/waiver vocabulary, local dependency checks, host notes, representative document selection, parser/chunking upload and reprocess checks, stale parser/chunk rebuild gates, OCR recovery, missing-provider behavior, RapidOCR fallback, Source Viewer auditability, OCR-derived retrieval/chat checks, export/recreate validation, and a compact closeout evidence template.
+
+The next step is to run the checklist on a local workstation with representative documents and record the evidence needed to close, defer, or explicitly waive PRD13.
