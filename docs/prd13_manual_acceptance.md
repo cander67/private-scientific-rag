@@ -47,7 +47,7 @@ Record one status per section:
 | Section | Status | Notes |
 | --- | --- | --- |
 | Dependency, host, and document matrix | `ready` | Use the dependency, host, and document tables below before running OCR workflow checks. |
-| OCR acceptance workflow | `pending` | Filled in during PRD29 Phase 3. |
+| OCR acceptance workflow | `ready` | Run the workflow below after selecting documents and recording dependency status. |
 | Export/recreate and evidence template | `pending` | Filled in during PRD29 Phase 4. |
 | Final PRD13 closeout decision | `pending` | `pass`, `pass with skips`, `defer`, or `waived`. |
 
@@ -87,6 +87,148 @@ Choose a small local corpus. Do not commit private PDFs, OCR outputs, screenshot
 | Mixed PDF | Yes when available | Page routing distinguishes born-digital, scanned, and mixed pages without OCRing every page unnecessarily. | Local path, filename, document ID, source SHA-256 if visible, page numbers for text-heavy and scan-heavy pages. | Source Viewer or API metadata shows different page OCR classifications and OCR only where needed. | No mixed sample is available; document why and use separate born-digital plus scanned samples. |
 | Low-text PDF | Recommended | Low native text or poor extraction is visible and recoverable instead of silently producing weak retrieval. | Local path, filename, document ID, source SHA-256 if visible, expected low-text pages or expected extracted string. | Upload/reprocess surfaces low-text or OCR-needed state, and OCR/reprocess behavior is explicit. | Skip if the scanned sample already covers low-text behavior and note the overlap. |
 | Patent-like or scientific-paper PDF | Yes for final PRD13 closeout unless waived | OCR/parser behavior works on representative research material, not only toy fixtures. | Local path, filename, document ID, source SHA-256 if visible, title or non-sensitive label, document kind, redistribution status, target OCR/search strings. | At least one expected recovered string is inspectable and retrievable after OCR/index rebuild. | No suitable local document is available; project owner must accept a documented skip or waiver. |
+
+## OCR Acceptance Workflow
+
+Run this workflow through the app first. Use API probes only to capture precise metadata, stale conflicts, or failure details that are hard to preserve from the UI.
+
+Before starting, record:
+
+- Active repository ID and name.
+- Host notes from the host matrix.
+- Dependency statuses from the dependency matrix.
+- Document matrix entries and target OCR/search strings.
+- Current Settings / Models parser, chunking, OCR, full-text, vector, embedding, retrieval, chat, and reranking settings.
+
+### 1. Parser and Chunking Settings
+
+1. Open Settings / Models.
+2. Save parser settings with structured parser `Auto` and fallback parser `Auto`.
+3. Save chunking mode `recursive`, token size `512`, and overlap `64` unless the run intentionally uses different baseline settings.
+4. Upload the born-digital PDF from Document Manager.
+5. Open the document in Source Viewer.
+6. Record parser route, parser version details, chunk count, chunking mode, token size, overlap, token count, tokenizer ID, tokenizer implementation, and any warnings.
+7. Change Settings / Models to at least one explicit parser route such as PyMuPDF, pdfplumber, pypdf, or built-in fallback.
+8. Reprocess the born-digital PDF.
+9. Confirm the new current version records the explicit parser route or fallback decision.
+10. Change chunking mode to `fixed`, reprocess, and confirm fixed token-window chunk metadata is visible.
+11. Change chunking mode back to `recursive`, reprocess, and confirm recursive chunk metadata is visible.
+
+Pass when upload and reprocess visibly use saved parser/chunking settings, and Source Viewer or inspection metadata shows both explicit parser routing and fixed/recursive chunking evidence.
+
+API backstop:
+
+```bash
+curl -s "http://127.0.0.1:8000/repositories/$REPOSITORY_ID/documents/$DOCUMENT_ID"
+curl -s -X POST "http://127.0.0.1:8000/repositories/$REPOSITORY_ID/documents/$DOCUMENT_ID/reprocess"
+```
+
+Record `document_id`, current `version_id`, parser route, parser fingerprint, changed fields, chunking mode, tokenizer metadata, warnings, and status.
+
+### 2. Stale Parser/Chunk Rebuild Gate
+
+1. With at least one parsed document present, rebuild full-text and vector indexes from Search Lab or Chat Workspace.
+2. Change parser or chunking settings without reprocessing the current documents.
+3. Attempt full-text rebuild.
+4. Attempt vector rebuild when Qdrant and embeddings are available.
+5. Confirm stale parser/chunk status blocks or warns before indexing stale chunks.
+6. Reprocess stale documents through Document Manager, Search Lab, or Chat Workspace.
+7. Rebuild full-text again and confirm the rebuild succeeds.
+8. Rebuild vector again when dependencies are available and confirm the rebuild succeeds.
+
+Pass when stale parser/chunk state is visible before rebuild, stale chunks are not silently indexed, and reprocess followed by rebuild produces fresh full-text and vector status where the required services are available.
+
+API backstop:
+
+```bash
+curl -i -X POST "http://127.0.0.1:8000/repositories/$REPOSITORY_ID/full-text/rebuild"
+curl -i -X POST "http://127.0.0.1:8000/repositories/$REPOSITORY_ID/vector/rebuild"
+```
+
+Record HTTP status, stale conflict text, stale document IDs, changed fields, and clean rebuild counts after reprocess.
+
+### 3. OCR Recovery
+
+1. Confirm the dependency matrix marks Tesseract CLI as `pass`; otherwise record this section as `skip` or `waived`.
+2. In Settings / Models, set OCR provider to `ocrmypdf_tesseract`, language to the expected language such as `eng`, fallback provider to `rapidocr` when RapidOCR is available, and overwrite according to the run plan.
+3. Upload the scanned/image-only or low-text PDF.
+4. Confirm Document Manager or Source Viewer shows `needs_ocr`, low-text, image-heavy, or pending OCR state.
+5. Run OCR from Source Viewer, Document Manager, or selected-document batch OCR.
+6. Open Source Viewer after OCR completes.
+7. Confirm page thumbnails remain available.
+8. Confirm recovered OCR text is visible for the expected pages.
+9. Confirm OCR confidence, warnings, provider metadata, rendered-image provenance, and OCR-derived chunk labels are visible or inspectable.
+10. Confirm prior source files and prior parser/page artifacts remain available.
+
+Pass when a real scanned, image-only, or low-text document recovers inspectable text and OCR-derived chunks without replacing or deleting source inspection artifacts.
+
+API backstop:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8000/repositories/$REPOSITORY_ID/documents/$SCANNED_DOCUMENT_ID/ocr"
+curl -s "http://127.0.0.1:8000/repositories/$REPOSITORY_ID/documents/$SCANNED_DOCUMENT_ID"
+```
+
+Record OCR run status, provider, provider version, page numbers, warnings, confidence, OCR text snippets, OCR-derived chunk IDs, and rendered image hashes where present.
+
+### 4. Missing Provider and RapidOCR Fallback
+
+1. To verify missing-provider recovery, configure an OCR provider or fallback dependency that is unavailable on the current host, or run on a host where the selected provider is absent.
+2. Run OCR on an eligible document.
+3. Confirm the app records a recoverable missing-provider warning rather than deleting source files, prior chunks, page thumbnails, or previous OCR artifacts.
+4. If RapidOCR is installed, set fallback provider to `rapidocr` and fallback enabled.
+5. Use a low-confidence or low-text OCR case when available, or record that fallback was available but not triggered because baseline OCR quality was sufficient.
+6. If RapidOCR is not installed, record RapidOCR as `skip` with the import command result from the dependency matrix.
+
+Pass when missing-provider behavior is recoverable and RapidOCR fallback is either exercised, explicitly not triggered with reason, or explicitly skipped.
+
+Record provider settings, missing-provider warning text, fallback provider, fallback decision metadata, and whether the original source/current version remained inspectable.
+
+### 5. Source Viewer Audit
+
+For each accepted OCR document, Source Viewer should provide enough evidence for a researcher to audit recovered text before trusting retrieval.
+
+Verify and record:
+
+- Parser name/route as the primary parser label.
+- Dependency-version details as secondary metadata.
+- Page thumbnail for the OCR page.
+- OCR text for the page.
+- OCR confidence when available.
+- OCR warnings or missing-provider messages.
+- OCR-derived chunk labels.
+- Chunk page range, token count, tokenizer ID, tokenizer implementation, parser fingerprint, and OCR provider metadata.
+- Stale or reprocess status after settings changes.
+
+Pass when a reviewer can connect OCR text, page thumbnail, chunk, parser route, and provider/warning metadata without inspecting private implementation internals.
+
+### 6. Retrieval and Chat Checks
+
+1. Choose one target string visible in recovered OCR text and one natural-language query that should retrieve the OCR-derived chunk.
+2. Rebuild full-text after OCR/reprocess.
+3. Search full-text for the target string in Search Lab.
+4. Confirm an OCR-derived chunk appears with document/source provenance.
+5. When Qdrant and embeddings are available, rebuild vector and run vector or hybrid search for the natural-language query.
+6. Confirm an OCR-derived chunk appears in vector or hybrid results.
+7. When the cross-encoder cache is available, run reranked hybrid search or record reranking as skipped.
+8. When Ollama and retrieval services are available, open Chat Workspace readiness, create or select a chat session, inspect draft context for the query, and confirm OCR-derived chunks appear in retrieved context.
+9. Ask the chat question only if local model readiness is acceptable for the run; otherwise the context inspection is enough to record retrieval readiness.
+
+Pass when full-text retrieves OCR-derived chunks, vector or hybrid retrieves OCR-derived chunks when dependencies are available, and Chat Workspace context includes OCR-derived chunks when Ollama/retrieval services are available.
+
+API backstop:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8000/repositories/$REPOSITORY_ID/full-text/search" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"TARGET_OCR_STRING","limit":5}'
+
+curl -s -X POST "http://127.0.0.1:8000/repositories/$REPOSITORY_ID/retrieval/search" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"NATURAL_LANGUAGE_QUERY","mode":"hybrid","top_k":5}'
+```
+
+Record query text, result rank, document ID, chunk ID, OCR-derived metadata, retrieval mode, index status, and skipped service reasons.
 
 ## Closeout Rule
 
