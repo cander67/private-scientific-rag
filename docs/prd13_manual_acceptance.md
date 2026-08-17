@@ -48,7 +48,7 @@ Record one status per section:
 | --- | --- | --- |
 | Dependency, host, and document matrix | `ready` | Use the dependency, host, and document tables below before running OCR workflow checks. |
 | OCR acceptance workflow | `ready` | Run the workflow below after selecting documents and recording dependency status. |
-| Export/recreate and evidence template | `pending` | Filled in during PRD29 Phase 4. |
+| Export/recreate and evidence template | `ready` | Use the export/recreate checks and report template below for closeout evidence. |
 | Final PRD13 closeout decision | `pending` | `pass`, `pass with skips`, `defer`, or `waived`. |
 
 ## Dependency Matrix
@@ -229,6 +229,160 @@ curl -s -X POST "http://127.0.0.1:8000/repositories/$REPOSITORY_ID/retrieval/sea
 ```
 
 Record query text, result rank, document ID, chunk ID, OCR-derived metadata, retrieval mode, index status, and skipped service reasons.
+
+## Export/Recreate Acceptance
+
+Run this section after the OCR acceptance workflow has at least one current document with parser/chunk metadata and, when OCR dependencies are available, at least one OCR-derived chunk.
+
+### 1. Export
+
+1. Open Export Center for the accepted repository.
+2. Review the repository counts, required models, settings snapshot, source-file options, and export warnings.
+3. Export with source files included unless the source documents are private and the closeout run intentionally validates source-excluded behavior.
+4. Store the ZIP outside Git and outside generated runtime directories that might be cleaned automatically.
+5. Record the export filename, timestamp, repository ID, source-inclusion setting, document count, chunk count, retrieval/chat inclusion state, and any warnings.
+
+Pass when the export completes and the exported summary reflects the accepted parser/OCR repository state.
+
+Do not commit the export ZIP.
+
+### 2. Recreate Validation
+
+1. Open Recreate Repository.
+2. Select the exported ZIP.
+3. Provide available-model names if the run is checking model availability warnings.
+4. Provide source mappings only when the export excluded source files.
+5. Run validation before recreate.
+6. Confirm validation reports settings, source hashes, parser fingerprints, tokenizer metadata, required models, and blocking source issues accurately.
+7. Resolve blocking validation errors or record them as `fail` or `defer` with enough detail to reproduce.
+
+Pass when validation either succeeds or reports expected non-blocking warnings with clear source/model/parser metadata.
+
+### 3. Recreate Execution
+
+1. Recreate into a new repository unless the run explicitly uses an empty target repository.
+2. Confirm the recreated repository becomes selectable in the app.
+3. Inspect the recreated document list and Source Viewer for the accepted OCR document.
+4. Confirm parser route, parser fingerprint metadata, chunk tokenizer metadata, OCR page metadata, OCR warnings, OCR-derived chunk labels, and source hashes survive recreate where expected.
+5. Review full-text rebuild results from the recreate report or rebuild full-text manually after recreate.
+6. Rebuild vector search when Qdrant and embeddings are available, then run the OCR target query from the workflow.
+7. Record any expected host-specific differences, such as dependency-version differences or skipped vector/chat rebuilds.
+
+Pass when recreated repository state preserves enough parser/OCR/chunk/source metadata to audit the OCR-derived content, and index rebuild reports are clean or have documented optional-service skips.
+
+API backstop:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8000/repositories/$REPOSITORY_ID/exports/bundle?include_sources=true" \
+  --output /tmp/prd13-manual-acceptance.zip
+
+curl -s -X POST "http://127.0.0.1:8000/repositories/recreate/bundle/validate" \
+  -F "file=@/tmp/prd13-manual-acceptance.zip"
+
+curl -s -X POST "http://127.0.0.1:8000/repositories/recreate/bundle" \
+  -F "file=@/tmp/prd13-manual-acceptance.zip" \
+  -F "repository_name=PRD13 manual acceptance recreate"
+```
+
+Record validation status, recreated repository ID, recreated document IDs, recreated version IDs, index counts, warning text, and skipped service reasons.
+
+## Evidence Report Template
+
+Create the report as a local note, PR comment, or PRD closeout comment. Do not commit private PDFs, OCR outputs, screenshots, export ZIPs, local indexes, model files, or unrestricted absolute paths if the report will become public.
+
+```markdown
+# PRD13 Manual Acceptance Report
+
+Date:
+Tester:
+Branch/commit:
+Host OS:
+Python / uv / Node:
+Backend URL:
+Frontend URL:
+Repository ID:
+Repository name:
+
+## Closeout Decision
+
+Decision: pass | pass with skips | defer | waived
+Rationale:
+Follow-up issue(s) or remediation plan:
+
+## Dependency Status
+
+| Dependency | Status | Version / command output | Notes |
+| --- | --- | --- | --- |
+| Python app dependencies |  |  |  |
+| Frontend dependencies |  |  |  |
+| Tesseract CLI |  |  |  |
+| RapidOCR |  |  |  |
+| Qdrant |  |  |  |
+| SentenceTransformers embedding model |  |  |  |
+| Ollama runtime and chat model |  |  |  |
+| Cross-encoder cache |  |  |  |
+
+## Document Matrix
+
+| Document type | Status | Local label / filename | Document ID | Version ID | Source hash | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Born-digital PDF |  |  |  |  |  |  |
+| Image-only or scanned PDF |  |  |  |  |  |  |
+| Mixed PDF |  |  |  |  |  |  |
+| Low-text PDF |  |  |  |  |  |  |
+| Patent-like or scientific-paper PDF |  |  |  |  |  |  |
+
+## Settings Snapshot
+
+Parser:
+Chunking:
+OCR:
+Full-text:
+Vector / embedding:
+Retrieval / reranking:
+Chat:
+
+## OCR Acceptance Workflow Evidence
+
+Parser/chunking result:
+Stale rebuild gate result:
+OCR recovery result:
+Missing-provider result:
+RapidOCR fallback result:
+Source Viewer audit result:
+Full-text retrieval result:
+Vector/hybrid retrieval result:
+Chat context result:
+
+Target OCR string(s):
+Natural-language query:
+Observed result ranks / chunk IDs:
+Screenshots or local notes:
+
+## Export/Recreate Evidence
+
+Export filename/location:
+Source inclusion:
+Validation result:
+Recreated repository ID:
+Recreated document/version IDs:
+Parser/OCR metadata preserved:
+Full-text/vector rebuild report:
+Warnings/skips:
+
+## Final Notes
+
+Host-specific caveats:
+Deferred work:
+Owner acceptance or waiver:
+```
+
+Closeout outcomes:
+
+- `pass`: Required manual OCR acceptance areas passed, with optional checks either passing or not applicable.
+- `pass with skips`: Required behavior passed and optional dependency/service/document gaps are documented with reasons.
+- `defer`: A product defect, acceptance gap, or missing representative run should be fixed before PRD13 is closed.
+- `waived`: The project owner explicitly accepts closing PRD13 without running one or more checks.
 
 ## Closeout Rule
 
