@@ -66,6 +66,13 @@ class NormalizedOcrPageResult:
         return asdict(self)
 
 
+@dataclass(frozen=True)
+class OcrProviderUnavailable:
+    provider_name: str
+    dependency_name: str
+    message: str
+
+
 class OcrProvider(Protocol):
     provider_name: str
     provider_version: str
@@ -138,26 +145,79 @@ def default_ocr_provider(
     provider_name: str = "ocrmypdf_tesseract",
     language: str = "eng",
 ) -> OcrProvider | None:
+    provider, _unavailable = resolve_default_ocr_provider(provider_name, language=language)
+    return provider
+
+
+def resolve_default_ocr_provider(
+    provider_name: str = "ocrmypdf_tesseract",
+    language: str = "eng",
+) -> tuple[OcrProvider | None, OcrProviderUnavailable | None]:
     if provider_name == "rapidocr":
-        return rapidocr_provider()
+        return resolve_rapidocr_provider()
     executable = shutil.which("tesseract")
     if executable is None:
-        return None
-    return TesseractCliOcrProvider(executable=executable, language=language)
+        return None, OcrProviderUnavailable(
+            provider_name=provider_name,
+            dependency_name="tesseract",
+            message="Tesseract CLI is not installed or is not on PATH.",
+        )
+    return TesseractCliOcrProvider(executable=executable, language=language), None
 
 
 def rapidocr_provider() -> OcrProvider | None:
+    provider, _unavailable = resolve_rapidocr_provider()
+    return provider
+
+
+def resolve_rapidocr_provider() -> tuple[OcrProvider | None, OcrProviderUnavailable | None]:
     try:
         from rapidocr_onnxruntime import RapidOCR
-    except Exception:
+    except Exception as legacy_exc:
         try:
             from rapidocr import RapidOCR
         except Exception:
-            return None
+            return None, OcrProviderUnavailable(
+                provider_name="rapidocr",
+                dependency_name="rapidocr",
+                message=(
+                    "RapidOCR is not installed. Install project extras with "
+                    "`uv sync --all-extras --dev`."
+                ),
+            )
+        legacy_error: Exception | None = legacy_exc
+    else:
+        legacy_error = None
     try:
-        return RapidOcrProvider(engine=RapidOCR())
-    except Exception:
-        return None
+        return RapidOcrProvider(engine=RapidOCR()), None
+    except ImportError as exc:
+        dependency_name = _missing_dependency_from_import_error(exc) or "rapidocr runtime"
+        return None, OcrProviderUnavailable(
+            provider_name="rapidocr",
+            dependency_name=dependency_name,
+            message=(
+                f"RapidOCR runtime dependency is missing: {exc}. "
+                "Run `uv sync --all-extras --dev` so OCR runtime extras are installed."
+            ),
+        )
+    except Exception as exc:
+        legacy_detail = (
+            f" Legacy rapidocr_onnxruntime import also failed: {legacy_error}."
+            if legacy_error is not None
+            else ""
+        )
+        return None, OcrProviderUnavailable(
+            provider_name="rapidocr",
+            dependency_name="rapidocr runtime",
+            message=f"RapidOCR could not initialize: {type(exc).__name__}: {exc}.{legacy_detail}",
+        )
+
+
+def _missing_dependency_from_import_error(exc: ImportError) -> str | None:
+    message = str(exc)
+    if " is not installed" in message:
+        return message.split(" is not installed", 1)[0].strip() or None
+    return exc.name
 
 
 def _rapidocr_output_to_text_confidence(output: object) -> tuple[str, float | None]:

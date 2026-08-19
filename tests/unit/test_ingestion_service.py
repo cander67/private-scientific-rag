@@ -15,6 +15,7 @@ from private_rag.ingestion.models import Document
 from private_rag.ingestion.ocr import (
     NormalizedOcrPageResult,
     OcrPageImage,
+    OcrProviderUnavailable,
     normalize_ocr_page_result,
 )
 from private_rag.ingestion.parser import ParserExecutionSettings, parse_source
@@ -370,7 +371,18 @@ def test_run_document_ocr_missing_provider_preserves_prior_state(
         "render_pages_for_ocr",
         lambda **kwargs: ([fake_image], []),
     )
-    monkeypatch.setattr(ingestion_service, "default_ocr_provider", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        ingestion_service,
+        "resolve_default_ocr_provider",
+        lambda *args, **kwargs: (
+            None,
+            OcrProviderUnavailable(
+                provider_name="ocrmypdf_tesseract",
+                dependency_name="tesseract",
+                message="Tesseract CLI is not installed or is not on PATH.",
+            ),
+        ),
+    )
     uploaded = upload_document(
         session,
         repository_id,
@@ -394,10 +406,7 @@ def test_run_document_ocr_missing_provider_preserves_prior_state(
     assert inspection.version.chunk_count == 0
     assert inspection.version.metadata["ocr_run"]["status"] == "missing_dependency"
     assert inspection.version.metadata["ocr_pages"][0]["provider"]["version"] == "not-installed"
-    assert (
-        "ocrmypdf_tesseract is not installed; OCR is pending for page 1."
-        in inspection.version.warnings
-    )
+    assert "tesseract is not installed; OCR is pending for page 1." in inspection.version.warnings
 
 
 def test_run_document_ocr_uses_fallback_when_quality_is_low(
@@ -609,7 +618,21 @@ def test_run_document_ocr_records_missing_fallback_warning(
         "render_pages_for_ocr",
         lambda **kwargs: ([fake_image], []),
     )
-    monkeypatch.setattr(ingestion_service, "default_ocr_provider", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        ingestion_service,
+        "resolve_default_ocr_provider",
+        lambda *args, **kwargs: (
+            None,
+            OcrProviderUnavailable(
+                provider_name="rapidocr",
+                dependency_name="onnxruntime",
+                message=(
+                    "RapidOCR runtime dependency is missing: onnxruntime is not installed. "
+                    "Run `uv sync --all-extras --dev` so OCR runtime extras are installed."
+                ),
+            ),
+        ),
+    )
     uploaded = upload_document(
         session,
         repository_id,
@@ -632,8 +655,12 @@ def test_run_document_ocr_records_missing_fallback_warning(
     assert inspection.chunks[0].text == "low"
     decision = inspection.version.metadata["ocr_run"]["fallback_decisions"][0]
     assert decision["status"] == "missing_dependency"
-    assert (
-        "rapidocr is not installed; OCR fallback skipped for page 1." in inspection.version.warnings
+    assert decision["missing_dependency"] == "onnxruntime"
+    assert any(
+        "RapidOCR runtime dependency is missing" in warning
+        and "uv sync --all-extras --dev" in warning
+        and "onnxruntime is not installed; OCR fallback skipped for page 1." in warning
+        for warning in inspection.version.warnings
     )
 
 
@@ -873,7 +900,18 @@ def test_batch_ocr_classifies_ineligible_and_missing_dependency(
     monkeypatch.setattr(
         ingestion_service, "render_pages_for_ocr", lambda **kwargs: ([fake_image], [])
     )
-    monkeypatch.setattr(ingestion_service, "default_ocr_provider", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        ingestion_service,
+        "resolve_default_ocr_provider",
+        lambda *args, **kwargs: (
+            None,
+            OcrProviderUnavailable(
+                provider_name="ocrmypdf_tesseract",
+                dependency_name="tesseract",
+                message="Tesseract CLI is not installed or is not on PATH.",
+            ),
+        ),
+    )
     assert text_document is not None
     assert pdf_document is not None
 

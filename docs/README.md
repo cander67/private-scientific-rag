@@ -12,6 +12,7 @@ Current documents:
 - `chunking_modes.md`: repository chunking modes, current tokenizer choices, and how chunking changes affect reprocessing and rebuilds.
 - `ollama_chat_models.md`: supported Ollama chat registry guidance, completed PRD23 catalog additions, custom local chat model readiness, generic-provider contract, and model-specific follow-up thresholds.
 - `export_recreate.md`: PRD9 portable ZIP export/recreate transfer guide and cross-platform checklist.
+- `prd13_manual_acceptance.md`: PRD29 manual acceptance gate for PRD13 OCR/parser closeout, including the CI boundary, pass/fail/skip vocabulary, and local evidence posture.
 - `public_repo_checklist.md`: first commit and public GitHub readiness.
 
 As modules mature, add focused docs close to the code:

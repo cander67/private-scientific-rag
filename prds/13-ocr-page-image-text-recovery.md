@@ -1,6 +1,6 @@
 # PRD 13: Parser Selection, OCR, and Page-Image Text Recovery
 
-**Status:** Ready for final review. Parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and documentation preparation are implemented with deterministic checks passing; optional OCR dependency and golden-corpus checks remain opt-in. PRD13 is not marked complete until user acceptance and the PRD29 manual acceptance pass.
+**Status:** Complete and closed. Parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, chunking remediation, parser-label clarity, and documentation preparation are implemented with deterministic checks passing. The PRD29 manual acceptance checklist was completed and accepted by the project owner; optional OCR dependency and golden-corpus checks remain opt-in host-specific evidence.
 
 ## Problem Statement
 
@@ -147,6 +147,6 @@ Then add page routing, `pypdfium2` rendering, OCRmyPDF/Tesseract baseline OCR, a
 
 ## Final Review Summary
 
-PRD13 is ready for final review with the implementation plan fully checked off. The delivered scope includes repository parser and chunking settings applied during upload/reprocess, fixed and recursive chunk output with chunk metadata, versioned reprocess from stored sources, parser/chunk fingerprint stale detection before full-text/vector rebuilds, page OCR routing, explicit local OCR recovery, OCR-derived page artifacts/chunks, optional RapidOCR fallback, repository OCR quality controls, Source Viewer parser/OCR labels, and deterministic test coverage.
+PRD13 is complete and closed with the implementation plan and PRD29 manual acceptance checklist accepted. The delivered scope includes repository parser and chunking settings applied during upload/reprocess, fixed and recursive chunk output with chunk metadata, versioned reprocess from stored sources, parser/chunk fingerprint stale detection before full-text/vector rebuilds, page OCR routing, explicit local OCR recovery, OCR-derived page artifacts/chunks, optional RapidOCR fallback, repository OCR quality controls, Source Viewer parser/OCR labels, deterministic test coverage, and accepted local manual OCR/parser evidence.
 
-Optional OCR dependency and golden-corpus smoke checks remain manual because they depend on local host binaries and corpus availability. PRD29 defines the manual acceptance pass for those checks. PRD13 remains ready for review, not complete, until accepted by the user.
+Optional OCR dependency and golden-corpus smoke checks remain manual because they depend on local host binaries and corpus availability. PRD29 remains the reusable checklist for future local OCR/parser regression passes.
