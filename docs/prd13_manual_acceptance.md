@@ -1,6 +1,6 @@
 # PRD13 Manual Acceptance Checklist
 
-PRD29 defines the manual acceptance gate for PRD13 parser selection, OCR, and page-image text recovery. Use this checklist after deterministic tests pass and before moving PRD13 from ready for final review to complete.
+PRD29 defines the manual acceptance gate for PRD13 parser selection, OCR, and page-image text recovery. The checklist was completed and accepted by the project owner for PRD13 closeout; keep using it after deterministic tests pass when future local OCR/parser regression evidence is needed.
 
 This checklist is intentionally manual. It exercises local OCR binaries, optional RapidOCR fallback, realistic scanned or mixed PDFs, local model/service readiness, Source Viewer inspection, retrieval, chat context, and export/recreate behavior that should not become ordinary CI requirements.
 
@@ -386,6 +386,6 @@ Closeout outcomes:
 
 ## Closeout Rule
 
-PRD13 remains ready for final review until this checklist is completed, accepted with documented skips, or explicitly waived by the project owner. Do not mark PRD13 complete solely because deterministic tests pass or because optional OCR checks are unavailable on one workstation.
+PRD13 is complete and closed after project-owner acceptance of this checklist. Do not use deterministic tests alone to close future OCR/parser regressions when optional local OCR behavior is part of the acceptance risk.
 
 If manual testing finds product defects, preserve PRD13 history and add a focused remediation phase or follow-up PRD. The local report should name the failed step, host details, dependency status, document ID or source hash, expected behavior, observed behavior, and the follow-up issue or plan item.

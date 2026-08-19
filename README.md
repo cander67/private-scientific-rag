@@ -8,13 +8,11 @@ The project is being built for local operation on macOS, Windows-native Python/O
 
 ## Current Status
 
-- Complete and closed: PRD1 through PRD9, PRD15, PRD19 through PRD28, PRD30, and PRD32.
-- Ready for final review: PRD13 parser selection, OCR, and page-image text recovery. It remains open until the [PRD29 manual acceptance checklist](docs/prd13_manual_acceptance.md) is completed, accepted with documented skips, or explicitly waived.
-- Ready for final review: PRD29 PRD13 manual acceptance testing. The tracked checklist is implemented; the next step is running it to close, defer, or waive PRD13.
+- Complete and closed: PRD1 through PRD9, PRD13, PRD15, PRD19 through PRD30, and PRD32.
 - Backlog / next-work candidates: PRD10, PRD11, PRD12, PRD14, PRD16, PRD17, PRD18, PRD24, PRD31, and PRD33.
-- Most recent shipped work: PRD32 workflow friction remediation added bottom Settings / Models save controls, chat rename/default-title remediation, Search Lab and Chat Workspace stale parser/chunk repair actions, explicit post-reprocess rebuild boundaries, and full-chunk Chat Workspace context assembly with expandable retrieved-context previews.
+- Most recent shipped work: PRD29 closed the PRD13 manual OCR/parser acceptance gate after project-owner checklist acceptance; PRD13 is complete after parser routing, reprocess, stale-index freshness gates, local OCR recovery, RapidOCR fallback, Source Viewer auditability, retrieval checks, and export/recreate acceptance.
 
-The app now has the local repository foundation, document ingestion/source inspection, full-text/vector/hybrid/reranked retrieval, retrieval evaluation, local Ollama-backed cited chat, Chat Workspace context inspection, Prompt Sandbox comparisons, portable export/recreate, guarded repository administration, Settings / Models guardrails, and a dashboard home surface. See [PRD backlog](prds/README.md) for the detailed project roadmap and status. See the [PRD13 manual acceptance checklist](docs/prd13_manual_acceptance.md) for the local OCR/parser evidence gate before PRD13 closeout.
+The app now has the local repository foundation, document ingestion/source inspection, full-text/vector/hybrid/reranked retrieval, retrieval evaluation, local Ollama-backed cited chat, Chat Workspace context inspection, Prompt Sandbox comparisons, portable export/recreate, guarded repository administration, Settings / Models guardrails, a dashboard home surface, and accepted local OCR/parser recovery workflows. See [PRD backlog](prds/README.md) for the detailed project roadmap and status. See the [PRD13 manual acceptance checklist](docs/prd13_manual_acceptance.md) for the repeatable local OCR/parser evidence gate used to close PRD13.
 
 The app currently provides:
 
