@@ -15,6 +15,7 @@ from private_rag.ingestion.ocr import (
     normalize_ocr_page_result,
     ocr_status_from_routes,
     render_pages_for_ocr,
+    resolve_rapidocr_provider,
 )
 
 
@@ -139,6 +140,34 @@ def test_missing_ocr_dependency_result_is_recoverable_warning() -> None:
     assert result.confidence is None
     assert result.provider == {"name": "ocrmypdf_tesseract", "version": "not-installed"}
     assert result.warnings == ["ocrmypdf is not installed; OCR is pending for page 2."]
+
+
+def test_resolve_rapidocr_provider_reports_missing_runtime_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_import = builtins.__import__
+
+    class FakeRapidOcrModule:
+        class RapidOCR:
+            def __init__(self) -> None:
+                raise ImportError("onnxruntime is not installed.")
+
+    def fake_import(name: str, *args: Any, **kwargs: Any) -> object:
+        if name == "rapidocr_onnxruntime":
+            raise ModuleNotFoundError("No module named 'rapidocr_onnxruntime'")
+        if name == "rapidocr":
+            return FakeRapidOcrModule
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+
+    provider, unavailable = resolve_rapidocr_provider()
+
+    assert provider is None
+    assert unavailable is not None
+    assert unavailable.provider_name == "rapidocr"
+    assert unavailable.dependency_name == "onnxruntime"
+    assert "uv sync --all-extras --dev" in unavailable.message
 
 
 def test_classify_pdf_pages_reports_missing_local_renderer_dependency(

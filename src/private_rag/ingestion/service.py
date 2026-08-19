@@ -17,12 +17,13 @@ from private_rag.ingestion.ocr import (
     NormalizedOcrPageResult,
     OcrPageImage,
     OcrProvider,
+    OcrProviderUnavailable,
     PageOcrClassification,
     PageOcrRoute,
     classify_pdf_pages,
-    default_ocr_provider,
     missing_ocr_dependency_result,
     render_pages_for_ocr,
+    resolve_default_ocr_provider,
 )
 from private_rag.ingestion.parser import ParserExecutionSettings, detect_source_type, parse_source
 from private_rag.ingestion.schemas import (
@@ -472,21 +473,32 @@ def run_document_ocr(
         session.commit()
         return inspect_document(session, repository_id, document_id)
 
-    ocr_provider = provider or default_ocr_provider(
-        ocr_settings.provider,
-        language=ocr_settings.language,
-    )
+    provider_unavailable: OcrProviderUnavailable | None = None
+    if provider is None:
+        ocr_provider, provider_unavailable = resolve_default_ocr_provider(
+            ocr_settings.provider,
+            language=ocr_settings.language,
+        )
+    else:
+        ocr_provider = provider
     if ocr_provider is None:
+        dependency_name = (
+            provider_unavailable.dependency_name
+            if provider_unavailable is not None
+            else ocr_settings.provider
+        )
         results = [
             missing_ocr_dependency_result(
                 page=image.page,
                 provider_name=ocr_settings.provider,
-                dependency_name=ocr_settings.provider,
+                dependency_name=dependency_name,
                 image=image,
             )
             for image in rendered
         ]
         warnings = [warning for result in results for warning in result.warnings]
+        if provider_unavailable is not None:
+            warnings = [provider_unavailable.message, *warnings]
         _record_ocr_run(
             version=version,
             status="missing_dependency",
@@ -1191,16 +1203,25 @@ def _apply_ocr_fallbacks(
             next_results.append(result)
             continue
         if selected_fallback is None:
-            selected_fallback = default_ocr_provider(
+            selected_fallback, fallback_unavailable = resolve_default_ocr_provider(
                 ocr_settings.fallback_provider,
                 language=ocr_settings.language,
             )
+        else:
+            fallback_unavailable = None
         if selected_fallback is None:
-            warning = (
-                f"{ocr_settings.fallback_provider} is not installed; "
-                f"OCR fallback skipped for page {result.page}."
+            dependency_name = (
+                fallback_unavailable.dependency_name
+                if fallback_unavailable is not None
+                else ocr_settings.fallback_provider
             )
+            warning = (
+                f"{dependency_name} is not installed; OCR fallback skipped for page {result.page}."
+            )
+            if fallback_unavailable is not None:
+                warning = f"{fallback_unavailable.message} {warning}"
             decision["status"] = "missing_dependency"
+            decision["missing_dependency"] = dependency_name
             decisions.append(decision)
             warnings.append(warning)
             next_results.append(

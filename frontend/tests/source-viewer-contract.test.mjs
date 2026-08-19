@@ -42,7 +42,9 @@ test("Source Viewer displays PRD13 page OCR routing state", () => {
   assert.match(source, /metadata\.page_ocr_routes/);
   assert.match(source, /function getPageOcrRoutes/);
   assert.match(source, /function ocrPageLabel/);
+  assert.match(source, /function ocrPendingPages/);
   assert.match(source, /OCR pending/);
+  assert.match(source, /recoveredPages\.has\(route\.page\)/);
   assert.match(source, /Mixed · native text/);
   assert.match(source, /className=\{ocrPageClassName\(version, image\.page\)\}/);
 });
@@ -55,6 +57,8 @@ test("Source Viewer supports PRD13 local OCR recovery", () => {
   assert.match(source, /function OcrPageTextPanel/);
   assert.match(source, /metadata\.ocr_pages/);
   assert.match(source, /OCR text/);
+  assert.match(source, /OCR recovered/);
+  assert.match(source, /page-ocr-recovered/);
   assert.match(source, /function isOcrChunk/);
 });
 

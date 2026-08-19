@@ -8748,12 +8748,21 @@ function getPageOcrRoute(version: DocumentVersion, page: number) {
 }
 
 function ocrPendingPages(version: DocumentVersion) {
+  const recoveredPages = new Set(
+    getOcrPageResults(version)
+      .filter((result) => result.text.trim())
+      .map((result) => result.page),
+  );
   return getPageOcrRoutes(version)
-    .filter((route) => route.needs_ocr)
+    .filter((route) => route.needs_ocr && !recoveredPages.has(route.page))
     .map((route) => route.page);
 }
 
 function ocrPageLabel(version: DocumentVersion, page: number) {
+  const result = getOcrPageResult(version, page);
+  if (result?.text.trim()) {
+    return "OCR recovered";
+  }
   const route = getPageOcrRoute(version, page);
   if (!route) {
     return version.ocr_required ? "OCR state missing" : "Native text";
@@ -8768,6 +8777,10 @@ function ocrPageLabel(version: DocumentVersion, page: number) {
 }
 
 function ocrPageClassName(version: DocumentVersion, page: number) {
+  const result = getOcrPageResult(version, page);
+  if (result?.text.trim()) {
+    return "page-ocr page-ocr-recovered";
+  }
   const route = getPageOcrRoute(version, page);
   if (route?.needs_ocr || (!route && version.ocr_required)) {
     return "page-ocr page-ocr-pending";

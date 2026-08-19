@@ -2703,6 +2703,10 @@ textarea {
   color: var(--warn);
 }
 
+.page-ocr-recovered {
+  color: var(--success);
+}
+
 .page-image-empty {
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);

@@ -18,6 +18,7 @@ from private_rag.ingestion import service as ingestion_service
 from private_rag.ingestion.ocr import (
     NormalizedOcrPageResult,
     OcrPageImage,
+    OcrProviderUnavailable,
     normalize_ocr_page_result,
 )
 from private_rag.ingestion.schemas import ParsedDocument
@@ -210,8 +211,8 @@ def test_run_ocr_action_adds_ocr_text_chunks(
     )
     monkeypatch.setattr(
         ingestion_service,
-        "default_ocr_provider",
-        lambda *args, **kwargs: FakeOcrProvider(),
+        "resolve_default_ocr_provider",
+        lambda *args, **kwargs: (FakeOcrProvider(), None),
     )
     client = _client_with_database()
     repository_id = client.get("/repositories/default").json()["repository"]["id"]
@@ -530,7 +531,18 @@ def test_batch_ocr_reports_ineligible_missing_dependency_and_completed(
         f"/repositories/{repository_id}/documents",
         files={"file": ("missing-provider.pdf", b"%PDF scan", "application/pdf")},
     )
-    monkeypatch.setattr(ingestion_service, "default_ocr_provider", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        ingestion_service,
+        "resolve_default_ocr_provider",
+        lambda *args, **kwargs: (
+            None,
+            OcrProviderUnavailable(
+                provider_name="ocrmypdf_tesseract",
+                dependency_name="tesseract",
+                message="Tesseract CLI is not installed or is not on PATH.",
+            ),
+        ),
+    )
     mixed_response = client.post(
         f"/repositories/{repository_id}/documents/batch/ocr",
         json={
@@ -542,8 +554,8 @@ def test_batch_ocr_reports_ineligible_missing_dependency_and_completed(
     )
     monkeypatch.setattr(
         ingestion_service,
-        "default_ocr_provider",
-        lambda *args, **kwargs: FakeOcrProvider(),
+        "resolve_default_ocr_provider",
+        lambda *args, **kwargs: (FakeOcrProvider(), None),
     )
     pdf_completed_response = client.post(
         f"/repositories/{repository_id}/documents",
